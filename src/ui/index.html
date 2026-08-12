@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>TaskBoard</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark">T</div><div><strong>TaskBoard</strong><span>Local AI Workspace</span></div></div>
+      <nav class="status-nav" aria-label="任务状态">
+        <button class="status-item is-active" data-status="READY"><span class="status-icon ready"></span><span>需执行</span><b id="count-ready">0</b></button>
+        <button class="status-item" data-status="RUNNING"><span class="status-icon run"></span><span>进行中</span><b id="count-running">0</b></button>
+        <button class="status-item" data-status="WAITING_HUMAN"><span class="status-icon wait"></span><span>等待你</span><b id="count-waiting">0</b></button>
+        <button class="status-item" data-status="COMPLETED"><span class="status-icon done"></span><span>已完成</span><b id="count-completed">0</b></button>
+      </nav>
+      <div class="sidebar-section"><div class="section-label"><span>项目列表</span><button id="add-project-link" class="text-button">管理</button></div><div id="project-mini-list" class="project-mini-list"></div></div>
+      <button id="simple-config-link" class="sidebar-config" type="button">简易配置</button>
+      <div class="executor-strip" id="executor-strip"><span class="executor-dot"></span><div class="executor-copy"><b>Executor</b><span id="executor-text">检测中…</span><span id="executor-model-text" class="executor-model-text">AI 模型 · 获取中…</span></div><button id="executor-model-refresh" class="executor-refresh" type="button" data-refresh-state="refreshing" aria-busy="true" disabled title="正在获取 AI 模型信息…" aria-label="正在获取 AI 模型信息…">↻</button></div>
+      <button id="exit-taskboard" class="sidebar-exit" type="button">退出 TaskBoard</button>
+    </aside>
+
+    <main class="main">
+      <header class="topbar"><div><h1 id="page-title">需执行</h1><p>系统自动推进，只在真正需要你时打扰。</p></div><button class="primary-button" id="new-task-button"><span>＋</span> 新建任务</button></header>
+      <section class="filters" aria-label="任务筛选">
+        <label class="search-field"><span class="search-glyph">⌕</span><input id="title-search" type="search" placeholder="按 Title 模糊搜索"></label>
+        <label class="select-field"><span>项目</span><select id="project-filter"><option value="all">全部项目</option><option value="unregistered">未登记项目</option></select></label>
+        <div class="result-count" id="result-count">0 个结果</div>
+      </section>
+
+      <section class="workspace">
+        <div class="task-column"><div id="task-list" class="task-list"></div><div id="empty-state" class="empty-state hidden"><div class="empty-symbol">⌕</div><b>没有符合条件的任务</b><span>调整 Title 或项目筛选条件即可。</span></div></div>
+        <aside class="detail-panel" id="detail-panel">
+          <div class="detail-empty" id="detail-empty"><div>选择一个任务查看详情</div><span>这里只呈现目标、必要决策和结果。</span></div>
+          <div class="detail-content hidden" id="detail-content">
+            <div class="detail-head">
+              <div><span class="eyebrow" id="detail-id"></span><h2 id="detail-title"></h2></div>
+              <div class="detail-head-actions"><button id="task-lock-button" class="icon-button task-lock hidden" type="button" title="锁定任务">🔓</button><div class="phase-badge" id="detail-status"></div><button id="task-action-button" class="secondary-button compact hidden" type="button"></button></div>
+            </div>
+            <div class="phase-time" id="detail-phase-time"></div>
+
+            <div class="detail-section"><div class="section-title">任务目标</div><p id="detail-instruction"></p></div>
+
+            <div class="detail-section" id="detail-runtime-section">
+              <div class="section-title-row"><div><div class="section-title">当前进展</div><div class="section-subtitle" id="runtime-overview"></div></div><time id="runtime-time"></time></div>
+              <div id="resource-notice" class="runtime-notice hidden"></div>
+              <div id="runtime-work-list" class="runtime-work-list"></div>
+            </div>
+
+            <div class="detail-section history-section">
+              <button type="button" id="history-toggle" class="history-toggle"><div><div class="section-title">已确认进展</div><div class="section-subtitle">已经进入当前认知的结论，默认折叠</div></div><span id="history-toggle-text">展开 ▾</span></button>
+              <div id="history-progress" class="history-progress hidden"></div>
+            </div>
+
+            <div class="detail-section" id="detail-attachment-section"><div class="section-title">附件</div><div id="detail-attachments" class="detail-attachments"></div></div>
+            <div class="detail-section compact-grid"><div><div class="section-title">Project Scope</div><div id="detail-project" class="meta-value"></div></div><div><div class="section-title">引用来源</div><div id="detail-reference" class="meta-value"></div></div></div>
+
+            <div id="gateway-card" class="gateway-card hidden"><div class="gateway-kicker">HUMAN GATEWAY</div><h3 id="gateway-question"></h3><p id="gateway-context"></p><div id="gateway-options" class="gateway-options"></div><textarea id="gateway-answer" placeholder="补充你的决定或必要信息"></textarea><button class="primary-button full" id="gateway-submit">确认并继续</button></div>
+            <div id="result-card" class="result-card hidden"><div class="section-title" id="result-title">最终结果</div><div id="final-result" class="result-body"></div><button class="secondary-button" id="reference-task-button">引用结果发起新任务</button></div>
+          </div>
+        </aside>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="task-dialog" class="dialog">
+    <form class="dialog-card" id="task-form" novalidate>
+      <div class="dialog-head"><div><span class="eyebrow">NEW TASK</span><h2>新建任务</h2></div><button id="task-dialog-close" type="button" class="icon-button" aria-label="关闭">×</button></div>
+      <label><span>Title</span><input id="task-title" placeholder="例如：整理 OA 系统完整需求"></label>
+      <label><span>任务内容</span><textarea id="task-instruction" rows="6" placeholder="直接描述希望完成的目标。任务创建后会自动进入需执行队列。"></textarea></label>
+      <div class="attachment-field"><div class="attachment-head"><span>附件</span><button type="button" id="attachment-pick-button" class="secondary-button compact">＋ 添加附件</button></div><input id="task-attachments" class="hidden" type="file" multiple><div id="attachment-selection" class="attachment-selection"><span class="hint-inline">可添加文档、表格、PDF、图片、代码等；也可直接 Ctrl+V 粘贴截图或复制的文件。最多 8 个，单个 25MB，总计 80MB。</span></div></div>
+      <div class="form-grid"><label><span>关联已有项目</span><select id="task-project"><option value="">不关联</option></select></label><label><span>或临时项目范围</span><input id="task-temp-path" placeholder="D:\\projects\\temp-project"></label></div>
+      <div class="hint">临时项目范围只属于当前任务，不会自动加入项目列表。</div><input type="hidden" id="reference-task-id"><div id="reference-chip" class="reference-chip hidden"></div>
+      <div class="dialog-actions"><button type="button" id="task-dialog-cancel" class="secondary-button">取消</button><button type="button" id="create-task-submit" class="primary-button">创建任务</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="project-dialog" class="dialog"><div class="dialog-card narrow"><div class="dialog-head"><div><span class="eyebrow">PROJECT REGISTRY</span><h2>项目列表</h2></div><button class="icon-button" id="project-dialog-close" aria-label="关闭">×</button></div><div id="project-list" class="project-list"></div><div class="divider"></div><label><span>项目名称</span><input id="project-name" placeholder="销售系统"></label><label><span>项目路径</span><input id="project-path" placeholder="D:\\projects\\sales"></label><button class="primary-button full" id="project-add">明确加入项目列表</button></div></dialog>
+
+
+  <dialog id="settings-dialog" class="dialog"><div class="dialog-card narrow"><div class="dialog-head"><div><span class="eyebrow">SIMPLE SETTINGS</span><h2>简易配置</h2></div><button id="settings-dialog-close" type="button" class="icon-button" aria-label="关闭">×</button></div><div class="form-grid"><label><span>任务并发数</span><select id="setting-task-concurrency"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select><small id="setting-task-limit-warning" class="setting-limit-warning hidden"></small></label><label><span>每任务 Subagent 上限</span><select id="setting-task-max-subagents"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select><small id="setting-subagent-limit-warning" class="setting-limit-warning hidden"></small></label></div><div class="hint">每任务 Subagent 上限表示每个 Root Agent 最多同时拥有的 Subagent 数。两项都是上限：有真实工作且有执行资源时才按需使用，不预留资源，也不会因降低配置强行中断已运行工作。</div><div id="setting-capability-note" class="hint">AI 并发能力：未报告明确上限，当前按配置尽可能执行。</div><div class="dialog-actions"><button type="button" id="settings-dialog-cancel" class="secondary-button">取消</button><button type="button" id="settings-save" class="primary-button">保存</button></div></div></dialog>
+
+  <dialog id="task-action-dialog" class="dialog"><div class="dialog-card narrow"><div class="dialog-head"><div><span class="eyebrow">TASK ACTION</span><h2 id="task-action-title"></h2></div><button id="task-action-close" type="button" class="icon-button">×</button></div><p id="task-action-description" class="action-description"></p><div class="dialog-actions"><button type="button" id="task-action-back" class="secondary-button">返回</button><button type="button" id="task-action-confirm" class="danger-button"></button></div></div></dialog>
+
+  <div class="toast" id="toast"></div><script type="module" src="/app.js"></script>
+</body>
+</html>

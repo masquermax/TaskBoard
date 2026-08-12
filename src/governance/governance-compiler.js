@@ -1,0 +1,83 @@
+import { createHash } from 'node:crypto';
+import { loadRuntimeConstitution } from './governance-loader.js';
+import { loadCapabilityContracts, renderCapabilityContract } from './capability-contract-loader.js';
+import { normalizeSkillLibrary } from '../skills/skill-library-port.js';
+
+function deepFreeze(value) {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  Object.freeze(value);
+  for (const item of Object.values(value)) deepFreeze(item);
+  return value;
+}
+
+function compactRule(rule) { return `[${rule.id}] ${rule.title}: ${rule.text}`; }
+function hashPolicy(parts) { return createHash('sha256').update(parts.join('\n')).digest('hex').slice(0,16); }
+
+const ROLE_CONTRACT = Object.freeze({ root:'ROOT', subagent:'SUBAGENT', validator:'VALIDATOR' });
+
+export function inferTaskMode(task) {
+  const value = `${task?.title || ''}\n${task?.instruction || ''}`.trim();
+  const mutationText = value.replace(/(?:不|不要|无需|不需要|禁止)\s*(?:进行)?\s*(?:修改|修复|开发|实现|部署|安装|删除|重构|提交|打包|发布|升级|改造|写代码)[^，。；;\n]*/gi, '');
+  const explicitExecution = /(?:请|帮我|直接|现在|开始|需要|把|给我)?\s*(?:开发|实现|修复(?:这个|该|当前|问题|bug|代码|功能|项目)|修改(?:代码|文件|功能|项目)|新增功能|生成(?:新版|代码|版本|文件|项目)|部署(?:到|这个|该)?|安装(?:依赖|组件|软件|包)?|删除(?:代码|文件|资源|任务|项目)?|重构(?:代码|项目)?|提交(?:代码|变更)?|打包(?:发布|项目)?|发布(?:版本|项目)?|升级(?:版本|依赖|项目)?|改造代码|写代码)|(?:implement|fix|modify|deploy|install|refactor|release|build)\b/i.test(mutationText);
+  const explicitAnalysis = /分析|评估|审查|核对|判断|梳理|需求分析|根据附件|根据项目|告知.*步骤|告诉我.*步骤|是否有误|是否合理|对比|研究|总结|看一下|检查.*方案|review|analy[sz]e|evaluate|assess|requirement/i.test(value);
+  if (explicitExecution) return 'execution';
+  if (explicitAnalysis) return 'analysis';
+  return 'auto';
+}
+
+export class GovernanceCompiler {
+  constructor({ rootDir, skillLibrary = null }) {
+    this.rootDir = rootDir;
+    this.documents = loadRuntimeConstitution(rootDir); // Runtime authority only. ADR stays engineering memory outside Agent execution.
+    this.contracts = loadCapabilityContracts(rootDir);
+    this.skills = normalizeSkillLibrary(skillLibrary);
+    const runtimeAuthority = [
+      ...this.documents.constitution.map(compactRule),
+      ...Object.values(this.contracts).map(contract=>renderCapabilityContract(contract)),
+      ...this.skills.list().map(skill=>`${skill.id}:${skill.purpose}`),
+    ];
+    this.fingerprint = hashPolicy(runtimeAuthority);
+  }
+
+  compileForTask(task) {
+    const taskMode=inferTaskMode(task);
+    return deepFreeze({
+      fingerprint:this.fingerprint,
+      taskMode,
+      skillCatalog:this.skills.list(),
+      prompt:this.compilePrompt({taskMode,role:'root'}),
+    });
+  }
+
+  compilePrompt({taskMode,role,skillId=null}) {
+    const contractId=ROLE_CONTRACT[role] || String(role||'').toUpperCase();
+    const contract=this.contracts[contractId] || null;
+    const skill=skillId ? this.skills.get(skillId) : null;
+    const parts=[
+      'TASKBOARD ROLE CONTEXT',
+      `Task mode: ${taskMode}.`,
+    ];
+    if(contract)parts.push('',renderCapabilityContract(contract));
+    if(skill)parts.push('',`SELECTED METHOD\n${skill.raw}`);
+    return parts.join('\n');
+  }
+
+  compileForRole(task, role, {skillId=null}={}) {
+    const taskMode=inferTaskMode(task);
+    const contractId=ROLE_CONTRACT[role] || String(role||'').toUpperCase();
+    const contract=this.contracts[contractId] || null;
+    const skill=skillId ? this.skills.get(skillId) : null;
+    return deepFreeze({
+      fingerprint:this.fingerprint,
+      taskMode,
+      role,
+      contract:contract ? {...contract} : null,
+      selectedSkill:skill ? {id:skill.id,purpose:[...skill.purpose]} : null,
+      skillCatalog: role==='root' ? this.skills.list() : [],
+      prompt:this.compilePrompt({taskMode,role,skillId:skill?.id||null}),
+    });
+  }
+
+  hasSkill(id){return this.skills.has(id);}
+  skillCatalog(){return this.skills.list();}
+}
