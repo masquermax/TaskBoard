@@ -7,13 +7,13 @@ function nowIso() { return new Date().toISOString(); }
 function actorLabel(owner) {
   if (owner === 'validator') return 'Validator';
   if (owner === 'subagent') return 'Subagent';
-  return 'Root Agent';
+  return 'Root';
 }
 
 function snapshotProgressDetail(snapshot) {
   const owner=snapshot?.actor?.owner;
   if(owner==='validator')return 'Validator 正在认证当前候选结果。';
-  if(owner==='root')return 'Root Agent 正在进行 Task 级判断。';
+  if(owner==='root')return 'Root 正在进行 Task 级判断。';
   const running=(snapshot?.stage?.workUnits||[]).filter(unit=>unit?.status===WorkUnitStatus.RUNNING&&unit?.owner==='subagent');
   if(running.length)return `Subagent 正在执行 ${running.length} 项 Work Unit。`;
   return '当前阶段正在推进。';
@@ -181,8 +181,8 @@ export class Scheduler {
         humanGatewayHistory:this.repository.listGatewayHistory(taskId),
         onProgress:snapshot=>this.setActivity(taskId,admitted?{state:'running',summary:'当前阶段正在推进',detail:snapshotProgressDetail(snapshot),current:snapshot}:{state:'queued',summary:'等待执行资源',detail:'正在等待本轮所需的执行资源；获得真实执行资源前任务仍保持「需执行」。',current:snapshot}),
         onStageResult:value=>{if(!this.shuttingDown)this.repository.updateStageResult(taskId,value);},
-        onCertifiedTurn:commit=>{if(this.shuttingDown)return;if(this.repository.commitCertifiedTurn)this.repository.commitCertifiedTurn(taskId,commit);else{this.repository.setAnalysisState?.(taskId,commit.analysisState);if(commit.historyCommit){this.repository.addProgressHistory(taskId,commit.historyCommit);this.repository.updateStageResult(taskId,commit.historyCommit.detail);}}},
-        onProgressCommit:commit=>{if(this.shuttingDown)return;const history=this.repository.getProgressHistory(taskId);if(history.some(item=>item.title===commit.title&&item.detail===commit.detail))return;if(this.repository.commitProgressHistory)this.repository.commitProgressHistory(taskId,commit);else{this.repository.addProgressHistory(taskId,commit);this.repository.updateStageResult(taskId,commit.detail);}},
+        onCertifiedTurn:commit=>{if(!this.shuttingDown)this.repository.commitCertifiedTurn(taskId,commit);},
+        onProgressCommit:commit=>{if(this.shuttingDown)return;const history=this.repository.getProgressHistory(taskId);if(history.some(item=>item.title===commit.title&&item.detail===commit.detail))return;this.repository.commitProgressHistory(taskId,commit);},
         onStageCompleted:()=>{},
       });
 
@@ -195,7 +195,7 @@ export class Scheduler {
         this.rootRuntime.discardSession(taskId);
         this.repository.cancelPendingGateway(taskId);
         const done=this.repository.transitionTask(taskId,TaskStatus.COMPLETED,{completionReason:CompletionReason.CANCELLED,finalResult:current.final_result||'任务已由用户取消，后续执行已停止。',clearCancel:true,executionState:null});
-        this.setActivity(taskId,{state:'completed',summary:'任务已取消',detail:'Root Agent 已完成收尾，后续执行已停止。',current:null});
+        this.setActivity(taskId,{state:'completed',summary:'任务已取消',detail:'Root 已完成收尾，后续执行已停止。',current:null});
         return done;
       }
 
@@ -214,7 +214,7 @@ export class Scheduler {
         const createdGateway=withGateway?.pendingGateway||null;
         recordTaskDiagnostic('human-gateway-created',{taskId,gatewayId:createdGateway?.id||null,targetGapId:createdGateway?.targetGapId??createdGateway?.target_gap_id??outcome.gateway?.targetGapId??outcome.gateway?.gapId??null,optionCount:Array.isArray(createdGateway?.options)?createdGateway.options.length:Array.isArray(outcome.gateway?.options)?outcome.gateway.options.length:0});
         const waiting=this.repository.transitionTask(taskId,TaskStatus.WAITING_HUMAN,{lastStageResult:outcome.stageResult,executionState:{snapshot:outcome.snapshot||null}});
-        this.setActivity(taskId,{state:'waiting',summary:'等待你的必要信息',detail:'Root Agent 已将执行收敛到静止，收到回复前不会继续执行。',current:outcome.snapshot||null});
+        this.setActivity(taskId,{state:'waiting',summary:'等待你的必要信息',detail:'Root 已将执行收敛到静止，收到回复前不会继续执行。',current:outcome.snapshot||null});
         return waiting;
       }
       if(outcome.kind==='waiting_resource'){
@@ -257,14 +257,14 @@ export class Scheduler {
         this.rootRuntime.discardSession(taskId);
         this.repository.cancelPendingGateway(taskId);
         this.repository.transitionTask(taskId,TaskStatus.COMPLETED,{completionReason:CompletionReason.CANCELLED,finalResult:current.final_result||'任务已由用户取消，后续执行已停止。',clearCancel:true,executionState:null});
-        this.setActivity(taskId,{state:'completed',summary:'任务已取消',detail:'Root Agent 已完成收尾。',current:null});
+        this.setActivity(taskId,{state:'completed',summary:'任务已取消',detail:'Root 已完成收尾。',current:null});
         this.rootRuntime.cleanupTaskWorkspace?.(taskId);
         return;
       }
       if(current?.status===TaskStatus.READY&&!admitted&&isCapacityUnavailable(error)){
         const delay=capacityRetryDelayMs(this.retryDelaysMs);const nextAt=new Date(Date.now()+delay).toISOString();
         const snapshot=this.rootRuntime.snapshot(taskId)||{taskId,root:null,stage:null,updatedAt:nowIso()};
-        const state={snapshot,retry:{scope:'root-capacity',failureCount:0,paused:false,nextAt,reason:'等待可用 Root Agent',error:null}};
+        const state={snapshot,retry:{scope:'root-capacity',failureCount:0,paused:false,nextAt,reason:'等待可用 Root',error:null}};
         this.repository.touchTask(taskId,{readyReason:ReadyReason.WAITING_RESOURCE,executionState:state});
         this.setActivity(taskId,{state:'queued',summary:'等待执行资源',detail:capacityWaitingInstruction(error?.message||''),current:snapshot});
         return;
@@ -312,7 +312,7 @@ export class Scheduler {
       return {accepted:true,pending:false,task:done};
     }
     this.rootRuntime.requestQuiesce(taskId);
-    this.setActivity(taskId,{state:'cancelling',summary:'正在取消任务',detail:'Root Agent 正在停止新的工作分配并收尾当前执行。完成后会自动进入「已完成」。\n无需操作。',current:this.rootRuntime.snapshot(taskId)});
+    this.setActivity(taskId,{state:'cancelling',summary:'正在取消任务',detail:'Root 正在停止新的工作分配并收尾当前执行。完成后会自动进入「已完成」。\n无需操作。',current:this.rootRuntime.snapshot(taskId)});
     return {accepted:true,pending:true,task:this.repository.getTask(taskId)};
   }
 

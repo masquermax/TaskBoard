@@ -108,17 +108,17 @@ test('WAITING_HUMAN is quiescent, so Scheduler can cancel it directly into COMPL
 test('internal non-convergence never fabricates Human Gateway',async()=>{let rounds=0;const executor={async runRoot(){rounds++;return{kind:'delegate',summary:'more',stageResult:null,finalResult:null,confirmed:[],recommendations:[],openQuestions:[],gateway:null,delegations:[{id:`d${rounds}`,title:'inspect',instruction:'read',goal:'read',expectedOutput:'返回当前工作单的可验证局部结果',stopCondition:'当前目标完成或形成明确 Gap 后停止',skillId:null,dependsOn:[]}]};},async runSubagent({delegation}){return{delegationId:delegation.id,result:'finding',findings:[],recommendations:[],openQuestions:[],blocker:null,uncertainty:null};}};const x=rig(executor);try{const task=x.scheduler.createTask({title:'内部收敛',instruction:'自行分析'});await x.scheduler.tick();const current=x.service.getTask(task.id);assert.equal(rounds,6,'the first bounded Work Unit runs once; repeated semantic re-issuance is then rejected through the normal planning-repair cycle');assert.equal(current.status,TaskStatus.READY);assert.equal(current.pendingGateway,null);assert.equal(current.ready_reason,ReadyReason.SUSPENDED);assert.equal(current.executionState.retry.failureCount,1,'deterministic first failure must remain 1/5, not be inflated to the retry cap');}finally{x.close();}});
 
 test('manual retry of a suspended work unit starts a fresh 1/5 failure cycle',async()=>{
-  let rootCalls=0,workerCalls=0;
+  let rootCalls=0,subagentCalls=0;
   const executor={
     async runRoot(){rootCalls++;return{kind:'delegate',summary:'work',stageResult:null,finalResult:null,confirmed:[],recommendations:[],openQuestions:[],gateway:null,delegations:[{id:'evidence',title:'项目证据',instruction:'inspect',goal:'inspect',expectedOutput:'返回当前工作单的可验证局部结果',stopCondition:'当前目标完成或形成明确 Gap 后停止',skillId:null,dependsOn:[]}]};},
-    async runSubagent(){workerCalls++;throw new Error('temporary network connection failure');},
+    async runSubagent(){subagentCalls++;throw new Error('temporary network connection failure');},
   };
   const x=rig(executor,{retryDelaysMs:[0,0,0,0]});
   try{
     const task=x.scheduler.createTask({title:'手动重试',instruction:'测试'});
     await x.scheduler.tick();
     const suspended=x.service.getTask(task.id);
-    assert.equal(workerCalls,5);assert.equal(suspended.ready_reason,ReadyReason.SUSPENDED);
+    assert.equal(subagentCalls,5);assert.equal(suspended.ready_reason,ReadyReason.SUSPENDED);
     const before=x.root.snapshot(task.id);assert.equal(before.stage.workUnits[0].failureCount,5);assert.equal(before.stage.workUnits[0].status,'SUSPENDED');
     // Keep this test focused on resetting the retry cycle; do not let the
     // scheduler immediately claim the task again in the background.

@@ -107,12 +107,12 @@ test('Subagent result does not wait for semantic Validator; Root receives it whi
 });
 
 test('Subagent execution is one bounded turn; semantic proof is deferred to Root candidate certification',async()=>{
-  let workerCalls=0,semanticCalls=0;
-  const executor={async runSubagent({onExecutionStarted}){workerCalls+=1;onExecutionStarted?.();return{delegationId:'w',result:'local',evidence:[],findings:[{id:'F-1',statement:'local finding',evidenceIds:[]}],discoveries:[],blocker:null,uncertainty:null};}};
+  let subagentCalls=0,semanticCalls=0;
+  const executor={async runSubagent({onExecutionStarted}){subagentCalls+=1;onExecutionStarted?.();return{delegationId:'w',result:'local',evidence:[],findings:[{id:'F-1',statement:'local finding',evidenceIds:[]}],discoveries:[],blocker:null,uncertainty:null};}};
   const semanticVerifier={async review(){semanticCalls+=1;return{checked:true,reviews:[],actions:[]};}};
   const structural=new AnalysisResultValidator();const runtime=new ValidatorRuntime({analysisValidator:structural,sourceTraceVerifier:policySourceVerifier,semanticVerifier});
   const subagent=new SubagentRuntime({executor,modelRouter:new ModelRouter()});
   const task={id:'T',title:'Subagent boundary',instruction:'分析',projectScopes:[],attachments:[]};
   const result=await subagent.run(task,{id:'w',title:'W',instruction:'W',goal:'W',expectedOutput:'返回局部证据',stopCondition:'局部证据完成后停止',skillId:null,dependsOn:[]},{policyContext:{taskMode:'analysis'}});
-  assert.equal(result.delegationId,'w');assert.equal(workerCalls,1);assert.equal(semanticCalls,0);assert.equal(result.findings[0].statement,'local finding');
+  assert.equal(result.delegationId,'w');assert.equal(subagentCalls,1);assert.equal(semanticCalls,0);assert.equal(result.findings[0].statement,'local finding');
 });

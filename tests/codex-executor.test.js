@@ -76,10 +76,10 @@ test('Project access belongs only to explicit Subagent Work Units; Root has none
     assert.equal(analysisRoot.writableRoots.includes(project),false);
     assert.equal(analysisRoot.projectAccess,'none');
 
-    const readWorker=executor.executionScope(task,{taskMode:'analysis'},{role:'subagent',projectAccess:'read',workUnitId:'inspect'});
-    assert.notEqual(readWorker.cwd,project);
-    assert.deepEqual(readWorker.writableRoots,[readWorker.scratch]);
-    assert.equal(readWorker.writableRoots.includes(project),false);
+    const readSubagent=executor.executionScope(task,{taskMode:'analysis'},{role:'subagent',projectAccess:'read',workUnitId:'inspect'});
+    assert.notEqual(readSubagent.cwd,project);
+    assert.deepEqual(readSubagent.writableRoots,[readSubagent.scratch]);
+    assert.equal(readSubagent.writableRoots.includes(project),false);
 
     const executionRoot=executor.executionScope(task,{taskMode:'execution'},{role:'root'});
     assert.notEqual(executionRoot.cwd,project,'Root execution control turn must not become an implicit project writer');

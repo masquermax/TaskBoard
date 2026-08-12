@@ -61,8 +61,8 @@ test('Root/Subagent prompts consume role-scoped Capability Context instead of re
     assert.match(rootPrompt,/Available Skills/);
     assert.doesNotMatch(rootPrompt,/reuse before expansion|non-functional recommendations default|progressCommits=\[\]|P1 ACTIVE ADR|AR-00/i);
 
-    const workerPolicy=compiler.compileForRole(task,'subagent',{skillId:'source-investigation'});
-    const subagentPrompt=executor.subagentPrompt({task,delegation:{id:'w',title:'查证',goal:'定位一个事实',expectedOutput:'证据',stopCondition:'事实闭合',dependsOn:[],skillId:'source-investigation'},policyContext:workerPolicy});
+    const subagentPolicy=compiler.compileForRole(task,'subagent',{skillId:'source-investigation'});
+    const subagentPrompt=executor.subagentPrompt({task,delegation:{id:'w',title:'查证',goal:'定位一个事实',expectedOutput:'证据',stopCondition:'事实闭合',dependsOn:[],skillId:'source-investigation'},policyContext:subagentPolicy});
     assert.match(subagentPrompt,/CAPABILITY CONTRACT — SUBAGENT/);
     assert.match(subagentPrompt,/SELECTED METHOD/);
     assert.match(subagentPrompt,/discoveries\[\]/);

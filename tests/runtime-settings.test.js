@@ -66,7 +66,7 @@ test('applying simple settings changes live Scheduler and per-Root Subagent caps
   const { bootstrap } = await import('../src/server/bootstrap.js');
   const dir=mkdtempSync(join(tmpdir(),'taskboard-settings-live-'));
   try{
-    const runtime=bootstrap({rootDir:dir,storage:'json',executorName:'mock',startScheduler:false});
+    const runtime=bootstrap({rootDir:dir,executorName:'mock',startScheduler:false});
     assert.equal(runtime.scheduler.maxConcurrentTasks,2);
     assert.equal(runtime.rootRuntime.maxConcurrentSubagents,3);
     const state=runtime.applyRuntimeSettings({taskConcurrency:1,taskMaxSubagents:5});

@@ -25,9 +25,9 @@ Produces:
 - Scheduler activity state。
 
 Handoff:
-- Task 如何分析、拆分或继续 → Root Agent。
+- Task 如何分析、拆分或继续 → Root。
 - 业务结果是否成立 → Validator。
-- 具体持久化 → Task Core / Repository。
+- 具体持久化实现 → Task Core 的 JSON Repository。
 
 ## ROOT
 
@@ -79,7 +79,7 @@ Produces:
 - 一个 delegated execution 的工作边界；当前 first-class executor 为 Subagent。
 
 Handoff:
-- 新发现但超出当前 Work Unit 的问题 → Root Agent。
+- 新发现但超出当前 Work Unit 的问题 → Root。
 - 当前问题无法在现有证据/能力下闭合 → Result 中返回 Blocker / Discovery 给 Root，由 Root 判断是否形成 Task Gap 或新 Work Unit。
 
 ## SUBAGENT
@@ -105,9 +105,9 @@ Produces:
 - Discovery / Blocker。
 
 Handoff:
-- Task 级事实判断、Gap、Recommendation、下一步与完成判断 → Root Agent。
-- 新工作、扩大 Scope、下一阶段或更多 Agent → Root Agent。
-- 用户信息 → Root Agent；Subagent 不直接进入 Human Gateway。
+- Task 级事实判断、Gap、Recommendation、下一步与完成判断 → Root。
+- 新工作、扩大 Scope、下一阶段或更多 Agent → Root。
+- 用户信息 → Root；Subagent 不直接进入 Human Gateway。
 
 ## VALIDATOR
 
@@ -130,7 +130,7 @@ Produces:
 - History commit decision。
 
 Handoff:
-- 需要重新调查、重新规划或创建 Work Unit → Root Agent。
+- 需要重新调查、重新规划或创建 Work Unit → Root。
 - 原子持久化 → Task Core。
 - Task 生命周期 → Scheduler。
 
@@ -141,12 +141,12 @@ Identity: Business-state source of truth and persistence executor.
 Purpose: 以原子方式保存 TaskBoard 已授权的业务事实。
 
 Owns:
-- Task、Project Registry、附件引用、Human Gateway、正式结果、History、引用关系等 durable facts 的一致性。
+- Task、Project List、附件引用、Human Gateway、正式结果、History、引用关系等 durable facts 的一致性。
 - 已完成数据在固定 retention policy 下的持久化清理一致性；清理策略本身由 Constitution/ADR/Specification 决定，不由 Task Core 临时发明。
 
 Capabilities:
 - 校验写入前置条件与不可变边界。
-- 创建/读取 Task、Project Registry、附件元数据与引用等 durable facts。
+- 创建/读取 Task、Project List、附件元数据与引用等 durable facts。
 - 原子写入/读取 Repository。
 - 按固定 retention predicate 清理 eligible COMPLETED 数据，并保持数据库/附件的一致性与失败回滚。
 - 在写入成功后暴露新的 durable state。
@@ -156,7 +156,7 @@ Produces:
 
 Handoff:
 - 生命周期决定 → Scheduler。
-- 业务分析与规划 → Root Agent。
+- 业务分析与规划 → Root。
 - 结果是否正确 → Validator。
 
 ## HUMAN_GATEWAY
@@ -177,7 +177,7 @@ Produces:
 
 Handoff:
 - 是否需要询问用户 → Root candidate + Scheduler lifecycle decision。
-- 回答如何影响 Task → Root Agent。
+- 回答如何影响 Task → Root。
 
 ## SKILL
 
@@ -196,11 +196,11 @@ Produces:
 - Method context。
 
 Handoff:
-- 何时使用哪个 Skill → Root Agent。
+- 何时使用哪个 Skill → Root。
 - 具体 Work Unit 执行 → Subagent / assigned executor。
 - 结果认证 → Validator。
 
-## TOOL_EXECUTOR
+## EXECUTOR
 
 Identity: Operational capability surface.
 
@@ -214,10 +214,10 @@ Capabilities:
 - 在授权 Scope 内执行请求并返回结果。
 
 Produces:
-- Tool / Executor operation result。
+- Executor operation result。
 
 Handoff:
-- 为什么做、是否继续做 → 调用它的 Root/Subagent。
+- 为什么做、是否继续做 → 调用 Executor 的当前 Owner（Root / Subagent / Validator）。
 - 结果是否构成正式事实 → Validator。
 - Task 生命周期 → Scheduler。
 

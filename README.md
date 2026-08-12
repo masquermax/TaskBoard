@@ -1,16 +1,16 @@
-# TaskBoard Codex v0.9.0
+# TaskBoard Codex v0.9.1
 
 Local-first AI Task Board. TaskBoard manages **work and durable Task facts**; Codex is the first Executor extension.
 
-v0.8 realigns the system around explicit capabilities instead of growing Prompt rules:
+The current system is organized around explicit capabilities instead of growing Prompt rules:
 
 ```text
 Constitution → Capability Map / Contracts → Task/Work Unit → Runtime
 ```
 
-Ordinary Agent turns receive the current role Capability Contract plus the current Task/Work Unit context; an external selected method may be added for the Work Unit. Constitution and ADR stay outside ordinary role prompts: Constitution defines the system, ADR records why the architecture exists, and Runtime enforces their consequences.
+Ordinary role turns receive the current role Capability Contract plus the current Task/Work Unit context; an external selected method may be added for the Work Unit. Constitution and ADR stay outside ordinary role prompts: Constitution defines the system, ADR records why the architecture exists, and Runtime enforces their consequences.
 
-v0.9.0 is a system-simplification release built on the verified v0.8.8 Human-Gateway fix. It removes duplicate current terminology, role aliases, hidden capability defaults and duplicate runtime ownership surfaces. Current runtime vocabulary is Project / Root / Subagent / Validator; Work Units explicitly declare project and network capability; old names survive only at migration or external-error compatibility boundaries. The release adds no new governance layer.
+Current runtime vocabulary is Project / Root / Subagent / Validator. Work Units explicitly declare project and network capability. Historical names are accepted only at explicit migration or external-error compatibility boundaries; they are not current product/runtime terminology.
 
 ## Windows use
 
@@ -29,24 +29,24 @@ Daily use:
 
 `Start-TaskBoard-Debug.cmd` shows startup diagnostics. `Create-Desktop-Shortcut.vbs` creates an optional desktop shortcut.
 
-On Windows, if no usable Codex CLI runtime can be resolved, the Codex Execution Adapter may prepare the official standalone runtime in the background. This is an Executor concern and never becomes Task Core authentication/provider management. Set `TASKBOARD_CODEX_AUTO_INSTALL=0` to disable this repair path.
+On Windows, if no usable Codex CLI runtime can be resolved, the Codex Executor may prepare the official standalone runtime in the background. This is an Executor concern and never becomes Task Core authentication/provider management. Set `TASKBOARD_CODEX_AUTO_INSTALL=0` to disable this repair path.
 
 ## What owns what
 
 - **Scheduler** — Task lifecycle, admission, Task concurrency, cancellation lifecycle.
-- **Root Agent** — Task reasoning, planning, bounded Work Unit creation/dependencies, delegated Skill selection, synthesis and convergence.
+- **Root** — Task reasoning, planning, bounded Work Unit creation/dependencies, delegated Skill selection, synthesis and convergence.
 - **Work Unit** — a finite work order: `goal + expectedOutput + stopCondition + projectAccess + networkAccess + inputRefs + dependsOn + optional skillId`.
 - **Subagent** — executes one delegated Work Unit and returns source-traced Evidence plus local Findings/discoveries.
 - **Validator** — certifies Root Candidate Deltas, narrows overreach to evidence, produces explicit Gaps, and decides whether certified Root knowledge is worth History. Subagent output gets deterministic source-trace normalization only.
-- **Task Core / Repository** — durable state and atomic persistence only.
+- **Task Core** — owns durable Task facts and atomic state changes. The JSON Repository is its persistence implementation, not another authority.
 - **Skill** — reusable method only; no Task authority.
-- **Tool / Executor** — concrete operations only.
+- **Executor** — concrete operations only.
 - **Human Gateway** — human-information transport only.
 - **UI / Surface** — display and user intent only.
 
 A critical capability with two owners is an Authority Conflict; no owner is an Authority Vacuum; code exposing an undeclared business capability is an Authority Leak.
 
-See `docs/CAPABILITY_MAP.md`, `docs/CAPABILITY_CONTRACTS.md`, and `docs/CAPABILITY_IMPLEMENTATION_MAP.md`. Maintainer diagnosis uses `docs/ARCHITECTURE_REVIEW.md`; it is a review method, not another runtime Rule layer.
+See `docs/CAPABILITY_MAP.md` and `docs/CAPABILITY_CONTRACTS.md`. Maintainer diagnosis uses `docs/ARCHITECTURE_REVIEW.md`; it is a review method, not another runtime Rule layer.
 
 ## Task lifecycle
 
@@ -133,7 +133,7 @@ A formal Project Knowledge subsystem is **not** implemented yet. Project Scope, 
 
 Task detail exposes semantic work topics and the actual current owner label:
 
-- `Root Agent`
+- `Root`
 - `Subagent`
 - `Validator`
 - `未分配`
@@ -170,7 +170,7 @@ Delete is not silently converted into Cancel after a race into RUNNING.
 
 ## Attachments, cleanup and time
 
-Attachments are durable Task inputs under `data/attachments/`; they do not enter Project Registry or expand Project Scope. Root receives logical Task-input references and TaskBoard-managed scratch, but no Project Scope filesystem path, attachment local path or network capability. Project read/write access exists only inside a delegated Work Unit that explicitly selects the Project input and declares `projectAccess=read|write`; write is accepted only for execution-mode Tasks.
+Attachments are durable Task inputs under `data/attachments/`; they do not enter the Project List or expand Project Scope. Root receives logical Task-input references and TaskBoard-managed scratch, but no Project Scope filesystem path, attachment local path or network capability. Project read/write access exists only inside a delegated Work Unit that explicitly selects the Project input and declares `projectAccess=read|write`; write is accepted only for execution-mode Tasks.
 
 Automatic cleanup physically removes only eligible COMPLETED data on local day 91. Locked Tasks and completed Results referenced by later Tasks are protected. Daily cleanup targets local 01:00 and has a shared hard five-attempt daily retry ceiling.
 
@@ -186,7 +186,7 @@ Completed-list cards show both creation and completed-phase time.
 
 External integrations remain independent axes:
 
-- **Execution Adapter** — performs Root/Subagent/Validator model work.
+- **Executor** — performs Root/Subagent/Validator model work.
 - **Capability Provider** — read-only Executor capability discovery.
 - **Surface Host** — optional desktop/IDE embedding.
 
@@ -194,7 +194,7 @@ Codex is the first implementation, not a Task Core dependency. Startup reads the
 
 ### TaskBoard inside Codex Desktop
 
-`TaskBoard-in-Codex.vbs` can start/reuse TaskBoard and attach an optional loopback CDP Surface to Codex Desktop. CDP affects only presentation. The TaskBoard service, Task Core, Scheduler and Codex Execution Adapter remain independent.
+`TaskBoard-in-Codex.vbs` can start/reuse TaskBoard and attach an optional loopback CDP Surface to Codex Desktop. CDP affects only presentation. The TaskBoard service, Task Core, Scheduler and Codex Executor remain independent.
 
 If Codex is already running without the required CDP endpoint, the launcher asks before restarting it. CDP is bound to `127.0.0.1`; the embedded surface uses a narrow local host-RPC bridge for normalized `/api/*` calls.
 
@@ -212,7 +212,5 @@ Architecture sources of truth:
 - `docs/ADR.md`
 - `docs/CAPABILITY_MAP.md`
 - `docs/CAPABILITY_CONTRACTS.md`
-- `docs/CAPABILITY_IMPLEMENTATION_MAP.md`
-- `docs/RULE_REALIGNMENT.md`
 - `docs/SPECIFICATION.md`
 - `docs/ARCHITECTURE.md`

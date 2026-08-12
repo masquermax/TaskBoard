@@ -188,7 +188,7 @@ export class CodexAppServerClient {
 
     if (msg.id != null && msg.method) {
       // Codex approval requests are executor events, not Human Gateway. Deny at
-      // this boundary; Root Agent may later report a task-level blocker to Scheduler.
+      // this boundary; Root may later report a task-level blocker to Scheduler.
       // Permission requests have a different response shape, so handle them
       // before the generic requestApproval branch.
       if (msg.method === 'item/permissions/requestApproval') {
@@ -364,10 +364,12 @@ export class CodexAppServerClient {
 
   async runTurn({ cwd, writableRoots, prompt, inputItems = [], outputSchema, model = null, reasoningEffort = null, networkAccess = false, onProgress = null, onExecutionStarted = null, signal = null, diagnosticContext = null, stopCondition = null }) {
     const role=diagnosticContext?.role||'root';
-    const roleLabel=role==='validator'?'Validator':role==='subagent'?'Subagent':'Root Agent';
+    const roleLabel=role==='validator'?'Validator':role==='subagent'?'Subagent':'Root';
     const runningDetail=role==='validator'?'模型正在认证当前证明关系。':role==='subagent'?'模型正在执行当前 Work Unit。':'模型正在进行 Task 级判断。';
-    const formedDetail=role==='validator'?'正在等待本轮 Validator 认证完成。':role==='subagent'?'正在等待当前 Work Unit 完成并交回 Root Agent。':'正在等待本轮 Root 判断完成。';
-    const completedDetail=role==='validator'?'Validator 本轮认证已完成。':role==='subagent'?'Work Unit 结果已交回 Root Agent。':'Root Agent 本轮判断已完成。';
+    const formedDetail=role==='validator'?'正在等待本轮 Validator 认证完成。':role==='subagent'?'正在等待当前 Work Unit 完成并交回 Root。':'正在等待本轮 Root 判断完成。';
+    const completedDetail=role==='validator'?'Validator 本轮认证已完成。':role==='subagent'?'Work Unit 结果已交回 Root。':'Root 本轮判断已完成。';
+    const commandDetail=role==='validator'?'正在检查当前证明材料。':role==='subagent'?'正在检查当前 Work Unit 授权输入中的证据。':'正在处理 TaskBoard 临时工作区中的本轮判断材料。';
+    const fileChangeDetail=role==='subagent'?'正在修改当前 Work Unit 明确授权的文件范围。':'正在处理 TaskBoard 临时工作区文件。';
     if (signal?.aborted) { const error = new Error('Execution interrupted'); error.interrupted = true; throw error; }
     const executionStartedAt=Date.now();
     const routeMeta={
@@ -490,8 +492,8 @@ export class CodexAppServerClient {
 
         if (event.method === 'item/started') {
           const item = event.params?.item;
-          if (item?.type === 'commandExecution') { toolCallCount+=1; onProgress?.({ summary:'正在核对证据', detail:'正在检查或验证当前 Project Scope 中与任务目标直接相关的证据。' }); }
-          else if (item?.type === 'fileChange') onProgress?.({ summary:'Codex 正在处理文件变更', detail:'正在根据 Task Goal 修改 Project Scope 内的文件。' });
+          if (item?.type === 'commandExecution') { toolCallCount+=1; onProgress?.({ summary:'正在核对证据', detail:commandDetail }); }
+          else if (item?.type === 'fileChange') onProgress?.({ summary:'Codex 正在处理文件变更', detail:fileChangeDetail });
           continue;
         }
 

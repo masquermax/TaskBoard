@@ -1,4 +1,4 @@
-# TaskBoard Architecture v0.9.0
+# TaskBoard Architecture v0.9.1
 
 Status: ACTIVE
 
@@ -69,7 +69,7 @@ current role Capability Contract
 + selected external Skill method only when applicable
 ```
 
-Constitution, ADR and superseded `ANALYSIS_RULES.md` are not re-injected into ordinary Agent turns for each role to reinterpret. Their consequences are expressed by owned Runtime surfaces, schemas and certification boundaries.
+Constitution and ADR are not re-injected into ordinary Agent turns for each role to reinterpret. Their consequences are expressed by owned Runtime surfaces, schemas and certification boundaries.
 
 ## 2. Capability topology
 
@@ -83,7 +83,7 @@ Task Core ◄──────── certified durable write ──────
 Scheduler                                            │
    │ Task lifecycle                                  │
    ▼                                                 │
-Root Agent ◄──────── Evidence / Findings ─────── Subagent
+Root ◄──────── Evidence / Findings ─────── Subagent
    │                                             ▲
    │ creates bounded Work Units                 │ delegated execution
    ▼                                             │
@@ -99,7 +99,7 @@ Critical ownership:
 - Root: Task reasoning, planning, Work Unit creation/dependency, Skill selection, synthesis and convergence.
 - Subagent: execution of one delegated Work Unit.
 - Validator: certification, narrowing, Gap conversion and History-value decision for certified Root knowledge.
-- Task Core / Repository: durable facts, atomic persistence and deterministic completed-data retention cleanup.
+- Task Core: durable facts and atomic state changes. JSON Repository is the persistence implementation; deterministic completed-data retention cleanup is owned by Scheduler/cleanup Runtime rather than a second state authority.
 - Skill: method only.
 - Tool / Executor: operation only.
 - Human Gateway: human-information transport only.
@@ -202,7 +202,7 @@ Unknown remains unknown. A component-level fact cannot become system truth, an e
 User-visible configuration remains only:
 
 - Task concurrency: maximum active Tasks.
-- Task maximum threads: maximum simultaneous Subagents for each Root; Root and Validator are not counted.
+- Per-Task Subagent limit: maximum simultaneous Subagents for each Root; Root and Validator are not counted.
 
 The ceilings are maxima, not targets. Work is created only when Root needs it and is allocated only when a real execution resource starts. `WAITING_RESOURCE` means no execution capacity was obtained; `RETRY_WAIT` means execution already failed and is waiting for a jittered retry. Capacity shortage does not consume the normal failure retry budget. Lowering a ceiling never preempts active work; the system converges naturally by stopping replenishment. No global safe Codex Turn ceiling is guessed until runtime `activeTurnCount` evidence supports one.
 
@@ -231,7 +231,7 @@ Per-Task/Work routing consumes the cached snapshot. It does not own model catalo
 
 External integration remains split into three independent axes:
 
-- Execution Adapter
+- Executor
 - Capability Provider
 - Surface Host
 
@@ -245,6 +245,6 @@ Codex is the first implementation, not a Task Core dependency. CDP is an optiona
 - Generic execution side-effect proof/certification. All candidates route through Validator, but first-class source-grounded proof is currently analysis-oriented; write authorization and task-specific test/tool evidence remain the execution safety mechanisms.
 
 
-## Runtime ownership clarification (v0.8.6)
+## Runtime ownership
 
 Scheduler owns Task/work admission, lifecycle and resource-wait transitions. Executor performs Codex calls and reports execution facts such as `activeTurnCount`; those facts do not create a separate resource-management Owner. Capability Provider owns model/capability discovery state, including refresh outcome. UI only renders and triggers those owned capabilities.

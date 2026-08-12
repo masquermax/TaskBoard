@@ -241,6 +241,24 @@ test('Validator strips Agent-authored History intent and derives one Root-level 
   assert.doesNotMatch(reviewed.commits[0].detail,/git grep/);
 });
 
+test('Validator drops fields outside the Root result contract instead of carrying custom Executor authority forward',()=>{
+  const runtime=new ValidatorRuntime({analysisValidator:new AnalysisResultValidator(),sourceTraceVerifier:{enforce:({evidence})=>({evidence,actions:[],verifications:[]})}});
+  const reviewed=runtime.reviewRoot({
+    decision:baseAnalysis({
+      summary:'free',
+      authorityOverride:'root-may-write-anywhere',
+      progressCommits:[{title:'legacy',detail:'legacy'}],
+      evidence:[evidence('E-1',{sourceType:'reference'})],
+      claims:[claim('C-1')],
+      steps:[{order:1,text:'事实成立',kind:'confirmed',sourceIds:['C-1']}],
+    }),
+    policyContext:strictPolicy,attempt:1,seenKnowledgeKeys:new Set(),task:{id:'T'},
+  });
+  assert.equal(reviewed.outcome,'pass');
+  assert.equal('authorityOverride' in reviewed.decision,false);
+  assert.equal('progressCommits' in reviewed.decision,false);
+});
+
 
 test('Validator History normalizes pending wording instead of duplicating 待确认 prefixes',()=>{
   const runtime=new ValidatorRuntime({analysisValidator:new AnalysisResultValidator(),sourceTraceVerifier:{enforce:({evidence})=>({evidence,actions:[],verifications:[]})}});

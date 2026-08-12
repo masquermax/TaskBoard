@@ -43,10 +43,13 @@ function workSemanticSignature(item) {
 }
 
 function normalizeDecision(decision) {
-  const { progressCommits:_unauthorizedProgress, ...base } = decision || {};
+  const analysis = normalizeAnalysisFields(decision);
   return {
-    ...base,
-    ...normalizeAnalysisFields(decision),
+    kind: decision?.kind || null,
+    summary: String(decision?.summary || ''),
+    stageResult: decision?.stageResult == null ? null : String(decision.stageResult),
+    finalResult: decision?.finalResult == null ? null : String(decision.finalResult),
+    ...analysis,
     delegations: Array.isArray(decision?.delegations) ? decision.delegations : [],
     gateway: decision?.gateway || null,
     gapResolutions: Array.isArray(decision?.gapResolutions) ? decision.gapResolutions : [],
@@ -310,7 +313,7 @@ export class RootRuntime {
       pendingValidation: null,
       rootTurnCount: 0,
       controlHandoffCount: 0,
-      actor: { title: '综合分析', status: WorkUnitStatus.WAITING_RESOURCE, detail: '等待可用 Root Agent 执行资源。', updatedAt: nowIso(), owner:'root' },
+      actor: { title: '综合分析', status: WorkUnitStatus.WAITING_RESOURCE, detail: '等待可用 Root 执行资源。', updatedAt: nowIso(), owner:'root' },
       updatedAt: nowIso(),
     };
     this.sessions.set(task.id, session);
@@ -319,7 +322,7 @@ export class RootRuntime {
 
   async runRootTurn(task, session, callbacks, { humanGatewayHistory = [], validationFeedback = null, previousDecision = null, rootInputs = null, authorityHandoff = false } = {}) {
     if (session.cancelRequested) return { kind: 'cancelled' };
-    session.actor = { title:'综合分析', status:WorkUnitStatus.WAITING_RESOURCE, detail:'正在获取可用 Root Agent 执行资源。', updatedAt:nowIso(), owner:'root' };
+    session.actor = { title:'综合分析', status:WorkUnitStatus.WAITING_RESOURCE, detail:'正在获取可用 Root 执行资源。', updatedAt:nowIso(), owner:'root' };
     this.emit(session, callbacks);
     const controller = new AbortController();
     const deliveredResults = Array.isArray(rootInputs) ? rootInputs : session.subagentResults.slice();
@@ -343,7 +346,7 @@ export class RootRuntime {
         signal: controller.signal,
         onExecutionStarted: () => {
           session.actor.status = WorkUnitStatus.RUNNING;
-          session.actor.detail = deliveredResults.length ? '正在消费刚通过认证的局部结果并判断下一步。' : '正在结合任务目标、附件、Project Scope 与已有上下文进行判断。';
+          session.actor.detail = deliveredResults.length ? '正在消费刚通过认证的局部结果并判断下一步。' : '正在结合任务目标、当前已认证状态与本轮触发信息进行判断。';
           session.actor.updatedAt = nowIso();
           callbacks.onExecutionStarted?.({ role:'root' });
           this.emit(session, callbacks);

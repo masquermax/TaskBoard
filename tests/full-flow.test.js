@@ -17,8 +17,10 @@ async function requestJson(url, options = {}) {
 test('full task flow: project -> attachment task -> Human Gateway -> completion -> search -> reference', async () => {
   const rootDir = mkdtempSync(join(tmpdir(), 'taskboard-full-flow-'));
   const projectDir = join(rootDir, 'oa-project');
+  const otherProjectDir = join(rootDir, 'other-project');
   mkdirSync(projectDir, { recursive:true });
-  const runtime = bootstrap({ rootDir, storage:'json', executorName:'mock', startScheduler:false });
+  mkdirSync(otherProjectDir, { recursive:true });
+  const runtime = bootstrap({ rootDir, executorName:'mock', startScheduler:false });
   const server = createServer(createApp({
     taskService: runtime.taskService,
     executor: runtime.executor,
@@ -36,6 +38,10 @@ test('full task flow: project -> attachment task -> Human Gateway -> completion 
     const { project } = await requestJson(`${base}/api/projects`, {
       method:'POST', headers:{ 'content-type':'application/json', 'x-taskboard-action':'ui' },
       body:JSON.stringify({ name:'OA', path:projectDir }),
+    });
+    const { project:otherProject } = await requestJson(`${base}/api/projects`, {
+      method:'POST', headers:{ 'content-type':'application/json', 'x-taskboard-action':'ui' },
+      body:JSON.stringify({ name:'Other', path:otherProjectDir }),
     });
 
     const form = new FormData();
@@ -57,9 +63,11 @@ test('full task flow: project -> attachment task -> Human Gateway -> completion 
     const phasesBefore = (await requestJson(`${base}/api/tasks/${created.id}/phases`)).phases;
     assert.deepEqual(phasesBefore.map(x => x.phase), ['READY', 'RUNNING', 'WAITING_HUMAN']);
 
-    const waitingSearch = await requestJson(`${base}/api/tasks?status=WAITING_HUMAN&title=OA&system=${project.id}`);
+    const waitingSearch = await requestJson(`${base}/api/tasks?status=WAITING_HUMAN&title=OA&project=${project.id}`);
     assert.equal(waitingSearch.tasks.length, 1);
     assert.equal(waitingSearch.tasks[0].id, created.id);
+    const wrongProjectSearch = await requestJson(`${base}/api/tasks?status=WAITING_HUMAN&title=OA&project=${otherProject.id}`);
+    assert.equal(wrongProjectSearch.tasks.length, 0,'project filter must use the canonical project parameter instead of silently ignoring an old system alias');
 
     const attachmentResponse = await fetch(`${base}/api/tasks/${created.id}/attachments/${created.attachments[0].id}`);
     assert.equal(attachmentResponse.status, 200);
@@ -76,7 +84,7 @@ test('full task flow: project -> attachment task -> Human Gateway -> completion 
     assert.equal(completed.status, 'COMPLETED');
     assert.match(completed.final_result, /已完成/);
 
-    const completedSearch = await requestJson(`${base}/api/tasks?status=COMPLETED&title=OA&system=${project.id}`);
+    const completedSearch = await requestJson(`${base}/api/tasks?status=COMPLETED&title=OA&project=${project.id}`);
     assert.equal(completedSearch.tasks.length, 1);
 
     const { task: followup } = await requestJson(`${base}/api/tasks`, {

@@ -9,8 +9,6 @@ import { ValidatorRuntime } from '../src/governance/validator-runtime.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { ModelRouter } from '../src/core/model-router.js';
-import { TaskDatabase } from '../src/core/database.js';
-import { TaskRepository } from '../src/core/repository.js';
 import { JsonTaskDatabase, JsonTaskRepository } from '../src/core/json-repository.js';
 import { TaskService } from '../src/core/task-service.js';
 
@@ -66,7 +64,7 @@ test('Recommendations and Steps are current presentation, not durable learned st
   assert.equal(presentation.steps.length,1);
 
   const migrated=normalizeCertifiedState({version:1,current:{...first.current,recommendations:[recommendation],steps:[step]},turns:[]});
-  assert.equal(migrated.current.recommendations.length,0,'pre-v0.8.4 accumulated advice is discarded on load');
+  assert.equal(migrated.current.recommendations.length,0,'legacy accumulated advice is discarded on load');
   assert.equal(migrated.current.steps.length,0);
 });
 
@@ -146,25 +144,23 @@ test('Gap space only shrinks through an evidence-backed certified resolution',()
   assert.equal(resolved.turnNode.delta.gapResolutions[0].gapId,'G-1');
 });
 
-for (const storage of ['sqlite','json']) {
-  test(`${storage}: certified Turn state is durable while TaskService keeps internal cognition private`,()=>{
-    const dir=mkdtempSync(join(tmpdir(),`taskboard-turn-${storage}-`));
-    const file=join(dir,storage==='sqlite'?'taskboard.db':'taskboard.json');
-    const database=storage==='sqlite'?new TaskDatabase(file):new JsonTaskDatabase(file);
-    const repository=storage==='sqlite'?new TaskRepository(database):new JsonTaskRepository(database);
-    const task=repository.createTask({title:'学习测试',instruction:'分析',attachments:[]});
-    const learned=applyCertifiedDelta(emptyCertifiedState(),rootDecision({evidence:[evidence('E-1')],claims:[claim('C-1')]}));
-    repository.commitCertifiedTurn(task.id,{analysisState:learned.state,historyCommit:{title:'阶段事实已确认',detail:'外部备注不可修改',completedAt:'2026-08-11T00:00:00.000Z'}});
-    assert.equal(repository.getTask(task.id).analysisState.version,1);
-    assert.equal(repository.getProgressHistory(task.id).length,1);
-    const service=new TaskService(repository);
-    assert.equal('analysisState' in service.getTask(task.id),false,'internal cognition is not UI context');
-    database.close();
+test('certified Turn state is durable while TaskService keeps internal cognition private',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'taskboard-turn-json-'));
+  const file=join(dir,'taskboard.json');
+  const database=new JsonTaskDatabase(file);
+  const repository=new JsonTaskRepository(database);
+  const task=repository.createTask({title:'学习测试',instruction:'分析',attachments:[]});
+  const learned=applyCertifiedDelta(emptyCertifiedState(),rootDecision({evidence:[evidence('E-1')],claims:[claim('C-1')]}));
+  repository.commitCertifiedTurn(task.id,{analysisState:learned.state,historyCommit:{title:'阶段事实已确认',detail:'外部备注不可修改',completedAt:'2026-08-11T00:00:00.000Z'}});
+  assert.equal(repository.getTask(task.id).analysisState.version,1);
+  assert.equal(repository.getProgressHistory(task.id).length,1);
+  const service=new TaskService(repository);
+  assert.equal('analysisState' in service.getTask(task.id),false,'internal cognition is not UI context');
+  database.close();
 
-    const reopened=storage==='sqlite'?new TaskDatabase(file):new JsonTaskDatabase(file);
-    const repo2=storage==='sqlite'?new TaskRepository(reopened):new JsonTaskRepository(reopened);
-    assert.equal(repo2.getTask(task.id).analysisState.current.claims[0].statement,'外部备注不可修改');
-    reopened.close();
-    rmSync(dir,{recursive:true,force:true});
-  });
-}
+  const reopened=new JsonTaskDatabase(file);
+  const repo2=new JsonTaskRepository(reopened);
+  assert.equal(repo2.getTask(task.id).analysisState.current.claims[0].statement,'外部备注不可修改');
+  reopened.close();
+  rmSync(dir,{recursive:true,force:true});
+});

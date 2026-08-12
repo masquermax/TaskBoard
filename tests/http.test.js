@@ -36,7 +36,7 @@ test('HTTP API serves dashboard, creates task, and applies title/project filters
     });
     assert.equal(taskResponse.status, 201);
 
-    const listResponse = await fetch(`${x.base}/api/tasks?status=READY&title=${encodeURIComponent('订单')}&system=${project.id}`);
+    const listResponse = await fetch(`${x.base}/api/tasks?status=READY&title=${encodeURIComponent('订单')}&project=${project.id}`);
     const list = await listResponse.json();
     assert.equal(list.tasks.length, 1);
     assert.equal(list.tasks[0].title, '排查订单重复创建');
@@ -178,7 +178,7 @@ test('runtime endpoint exposes coarse current execution progress without persist
   const service = new TaskService(repo);
   const scheduler = {
     getTaskActivity(taskId) {
-      return { taskId, state:'running', summary:'Root Agent 正在理解任务', detail:'正在结合附件与 Project Scope。', updatedAt:'2026-08-07T12:00:00.000Z' };
+      return { taskId, state:'running', summary:'Root 正在理解任务', detail:'正在结合附件与 Project Scope。', updatedAt:'2026-08-07T12:00:00.000Z' };
     },
   };
   const server = createServer(createApp({ taskService:service, executor:new MockExecutor(), scheduler, uiRoot:resolve('src/ui') }));
@@ -191,7 +191,7 @@ test('runtime endpoint exposes coarse current execution progress without persist
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.runtime.state, 'running');
-    assert.match(body.runtime.summary, /Root Agent/);
+    assert.match(body.runtime.summary, /Root/);
   } finally {
     await new Promise(resolveClose => server.close(resolveClose));
     db.close();

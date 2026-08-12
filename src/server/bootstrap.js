@@ -18,17 +18,14 @@ import { RuntimeSettingsStore, executionLimitsFromCapability, resolveEffectiveRu
 
 const packageRoot=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
 
-let sqliteModules=null;
-try{const[{TaskDatabase},{TaskRepository}]=await Promise.all([import('../core/database.js'),import('../core/repository.js')]);sqliteModules={TaskDatabase,TaskRepository};}catch(error){if(process.env.TASKBOARD_STORAGE==='sqlite')throw error;}
-
-function choosePersistence({rootDir,dbFile,storage=process.env.TASKBOARD_STORAGE||'auto'}){
-  const wantsSqlite=storage==='sqlite'||(storage==='auto'&&sqliteModules);
-  if(wantsSqlite&&sqliteModules){const filename=dbFile||resolve(rootDir,'data/taskboard.db');const database=new sqliteModules.TaskDatabase(filename);return{database,repository:new sqliteModules.TaskRepository(database),storage:'sqlite',filename};}
-  const filename=dbFile?dbFile.replace(/\.(sqlite|db)$/i,'.json'):resolve(rootDir,'data/taskboard.json');const database=new JsonTaskDatabase(filename);return{database,repository:new JsonTaskRepository(database),storage:'json',filename};
+function createPersistence({rootDir,dbFile=null}){
+  const filename=dbFile||resolve(rootDir,'data/taskboard.json');
+  const database=new JsonTaskDatabase(filename);
+  return{database,repository:new JsonTaskRepository(database),storage:'json',filename};
 }
 
-export function bootstrap({rootDir,dbFile=null,storage=process.env.TASKBOARD_STORAGE||'auto',executorName=process.env.TASKBOARD_EXECUTOR||'codex',startScheduler=true,taskboardUrl=process.env.TASKBOARD_URL||'http://127.0.0.1:4317'}={}){
-  const persistence=choosePersistence({rootDir,dbFile,storage});const{database,repository}=persistence;
+export function bootstrap({rootDir,dbFile=null,executorName=process.env.TASKBOARD_EXECUTOR||'codex',startScheduler=true,taskboardUrl=process.env.TASKBOARD_URL||'http://127.0.0.1:4317'}={}){
+  const persistence=createPersistence({rootDir,dbFile});const{database,repository}=persistence;
   const extensionRegistry=createBuiltinExtensionRegistry();
   const extension=extensionRegistry.create(executorName,{rootDir,taskboardUrl});
   const attachmentStore=new AttachmentStore({rootDir:resolve(rootDir,'data/attachments')});

@@ -32,7 +32,7 @@ export function normalizeCertifiedState(value) {
     ...normalized,
     resultMode:'analysis',
     // Recommendation/Steps are a current presentation decision, not learned truth.
-    // Old persisted values are intentionally ignored when loading pre-v0.8.4 state.
+    // Legacy persisted presentation values are intentionally ignored on load.
     recommendations:[],
     steps:[],
   };

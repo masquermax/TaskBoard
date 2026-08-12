@@ -273,7 +273,7 @@ test('waiting Subagent retries capacity while sibling work is still running so a
   }finally{x.close();}
 });
 
-test('executor adapter must report a real start before a terminal outcome can allocate a Task',async()=>{
+test('Executor must report a real start before a terminal outcome can allocate a Task',async()=>{
   const executor={
     async runRoot(){return executionComplete('should not publish');},
     async runSubagent(){throw new Error('unused');},

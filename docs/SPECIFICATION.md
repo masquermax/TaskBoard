@@ -1,4 +1,4 @@
-# TaskBoard Specification v0.9.0
+# TaskBoard Specification v0.9.1
 
 Status: ACTIVE
 
@@ -110,7 +110,7 @@ Experience mining, Skill distillation, Skill package ownership/versioning and pe
 
 ## Execution certification boundary
 
-Subagent Work Unit output is local execution material: deterministic source-trace normalization may constrain its Evidence/Findings, then Root decides the Task-level Candidate Delta. Root Candidate Deltas pass through Validator before they can change Current Certified State or final publication. v0.8 does **not** claim a generic proof system that independently verifies arbitrary external side effects. Strong source-grounded certification is first-class for analysis knowledge; execution Tasks rely on explicit `projectAccess=write`, bounded Work Units, task-specific tests/tool results and side-effect safety. A future generic execution-proof contract must be added explicitly rather than treating pass-through as semantic certification.
+Subagent Work Unit output is local execution material: deterministic source-trace normalization may constrain its Evidence/Findings, then Root decides the Task-level Candidate Delta. Root Candidate Deltas pass through Validator before they can change Current Certified State or final publication. TaskBoard does **not** claim a generic proof system that independently verifies arbitrary external side effects. Strong source-grounded certification is first-class for analysis knowledge; execution Tasks rely on explicit `projectAccess=write`, bounded Work Units, task-specific tests/tool results and side-effect safety. A future generic execution-proof contract must be added explicitly rather than treating pass-through as semantic certification.
 
 ## Project inputs and truth
 
@@ -129,7 +129,7 @@ Normal execution-capacity shortage is not a failure attempt and is represented a
 Exactly two user-facing fields, each 1–5:
 
 - Task concurrency
-- Task maximum threads (per Root Subagent ceiling; Root/Validator not counted)
+- Per-Task Subagent limit (per Root Subagent ceiling; Root/Validator not counted)
 
 No global Subagent pool, pre-reservation or preemption is introduced. Explicit compatible Executor limits may reduce the effective ceiling; unknown limits are not guessed.
 
@@ -141,7 +141,7 @@ Passing an explicit model does not give TaskBoard control over Codex's own inter
 
 ## Current Progress
 
-Current Progress exposes semantic work topics with execution owner labels (`Root Agent`, `Subagent`, `Validator`, `未分配`) and states such as running/completed/dependency wait/resource wait/retry wait/suspended. While a Task remains open, completed Work Units stay visible even after their Stage is cleared. Current Root/Validator activity is rendered alongside Work Units rather than being hidden by them. A WAITING_HUMAN Task preserves its last runtime snapshot until the user replies.
+Current Progress exposes semantic work topics with execution owner labels (`Root`, `Subagent`, `Validator`, `未分配`) and states such as running/completed/dependency wait/resource wait/retry wait/suspended. While a Task remains open, completed Work Units stay visible even after their Stage is cleared. Current Root/Validator activity is rendered alongside Work Units rather than being hidden by them. A WAITING_HUMAN Task preserves its last runtime snapshot until the user replies.
 
 This runtime view is not durable History and never becomes certified knowledge merely because work completed. User-facing durable knowledge is labeled `已确认进展`; it is still backed by Validator-certified History boundaries.
 
@@ -158,4 +158,4 @@ Human Gateway carries only information the system cannot obtain and that genuine
 
 ## Integration
 
-Codex remains the first Execution Adapter. Task Core does not manage login, provider or API keys. On first connection, current model identity is read through lightweight config; full model catalog discovery is enhancement work and may run in the background or via the AI-info refresh action. Refresh failure never replaces the previous model snapshot. Without any known model record, execution explicitly uses Executor Default fallback. The optional Windows Codex Desktop surface uses loopback CDP and does not change Task authority.
+Codex remains the first Executor. Task Core does not manage login, provider or API keys. On first connection, current model identity is read through lightweight config; full model catalog discovery is enhancement work and may run in the background or via the AI-info refresh action. Refresh failure never replaces the previous model snapshot. Without any known model record, execution explicitly uses Executor Default fallback. The optional Windows Codex Desktop surface uses loopback CDP and does not change Task authority.

@@ -14,7 +14,6 @@ test('release identity is consistent across executable/package/current release d
   const architecture=read('docs/ARCHITECTURE.md');
   const codex=read('docs/CODEX_INTEGRATION.md');
   const verification=read('docs/VERIFICATION.md');
-  const releaseVerification=read(`docs/VERIFICATION-${version}.md`);
 
   assert.match(app,new RegExp(`APP_VERSION = ['\"]${version.replaceAll('.','\\.')}['\"]`));
   assert.match(readme,new RegExp(`^# TaskBoard Codex v${version.replaceAll('.','\\.')}`,'m'));
@@ -22,6 +21,5 @@ test('release identity is consistent across executable/package/current release d
   assert.match(spec,new RegExp(`^# TaskBoard Specification v${version.replaceAll('.','\\.')}`,'m'));
   assert.match(architecture,new RegExp(`^# TaskBoard Architecture v${version.replaceAll('.','\\.')}`,'m'));
   assert.match(codex,new RegExp(`^# Codex Integration v${version.replaceAll('.','\\.')}`,'m'));
-  assert.match(verification,new RegExp(`VERIFICATION-${version.replaceAll('.','\\.')}`));
-  assert.match(releaseVerification,new RegExp(`^# v${version.replaceAll('.','\\.')} Release Verification$`,'m'));
+  assert.match(verification,new RegExp(`^# Verification v${version.replaceAll('.','\\.')}$`,'m'));
 });

@@ -24,7 +24,7 @@ function setup() {
   return { dir, db, repo, service, scheduler, close(){ scheduler.stop(); db.close(); rmSync(dir,{recursive:true,force:true}); } };
 }
 
-test('temporary project scope does not enter Project Registry', () => {
+test('temporary project scope does not enter Project List', () => {
   const x = setup();
   try {
     const tempPath = join(x.dir, 'example'); mkdirSync(tempPath);
@@ -91,7 +91,7 @@ test('completed task can be referenced without reverse mutation', async () => {
 import { existsSync, readFileSync } from 'node:fs';
 import { AttachmentStore } from '../src/core/attachment-store.js';
 
-test('task attachments are durable task inputs and do not enter Project Registry', () => {
+test('task attachments are durable task inputs and do not enter Project List', () => {
   const dir = mkdtempSync(join(tmpdir(), 'taskboard-attachment-test-'));
   const db = new JsonTaskDatabase(join(dir, 'db.json'));
   const repo = new JsonTaskRepository(db);
