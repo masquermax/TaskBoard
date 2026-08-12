@@ -1,0 +1,156 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { CodexExecutor } from '../src/extensions/executors/codex/codex-executor.js';
+
+class CaptureClient {
+  constructor(){ this.calls = []; }
+  async runTurn(request) {
+    this.calls.push(request);
+    return JSON.stringify({ kind:'complete', summary:'ok', stageResult:'done', finalResult:'done', gateway:null, delegations:[] });
+  }
+  async health(){ return { available:true, connected:true, authenticated:true }; }
+}
+
+
+
+test('Codex executor health exposes Capability Provider refresh state without inventing UI-local status', async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'taskboard-codex-health-refresh-'));
+  const client=new CaptureClient();
+  const capability={execution:{available:true,connected:true,ready:true,version:'codex-fake'},provider:{requiresOpenaiAuth:true,authMode:'chatgpt'},discoveryLevel:'partial',models:[],defaults:{model:'model-a'},catalogState:'stale',lastRefresh:{ok:false,source:'manual',at:'now',error:'timeout'}};
+  const capabilityProvider={async initialize(){return capability;},refreshState(){return{state:'manual_failed',source:'manual',startedAt:'before',completedAt:'now',error:'timeout',lastRefresh:capability.lastRefresh};},snapshot(){return capability;}};
+  const executor=new CodexExecutor({runtimeRoot:join(dir,'runtime'),client,capabilityProvider});
+  try{
+    const health=await executor.health();
+    assert.equal(health.model,'model-a');
+    assert.equal(health.catalogState,'stale');
+    assert.equal(health.modelRefresh.state,'manual_failed');
+    assert.equal(health.modelRefresh.lastRefresh.error,'timeout');
+  }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test('Root receives attachment metadata only: no localImage/path and no network capability', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'taskboard-codex-attachment-'));
+  const image = join(dir, 'screen.png');
+  const doc = join(dir, 'spec.txt');
+  writeFileSync(image, Buffer.from([1,2,3]));
+  writeFileSync(doc, 'spec');
+  const client = new CaptureClient();
+  const executor = new CodexExecutor({ runtimeRoot: join(dir, 'runtime'), client });
+  try {
+    await executor.runRoot({
+      task: {
+        id:'T-0001', title:'分析附件', instruction:'分析', projectScopes:[], references:[], last_stage_result:null,
+        attachments:[
+          { id:'A-1', name:'screen.png', mimeType:'image/png', size:3, path:image },
+          { id:'A-2', name:'spec.txt', mimeType:'text/plain', size:4, path:doc },
+        ],
+      },
+      subagentResults:[], humanGatewayHistory:[], modelPolicy:{ model:null },
+    });
+    assert.equal(client.calls.length, 1);
+    assert.deepEqual(client.calls[0].inputItems, []);
+    assert.equal(client.calls[0].networkAccess,false);
+    assert.match(client.calls[0].prompt, /screen\.png/);
+    assert.match(client.calls[0].prompt, /spec\.txt/);
+    assert.doesNotMatch(client.calls[0].prompt,new RegExp(image.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
+    assert.doesNotMatch(client.calls[0].prompt,new RegExp(doc.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
+  } finally {
+    rmSync(dir, { recursive:true, force:true });
+  }
+});
+
+
+test('Project access belongs only to explicit Subagent Work Units; Root has none',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'taskboard-codex-scope-'));
+  const project=join(dir,'project');mkdirSync(project);
+  const runtimeRoot=join(dir,'runtime');
+  const executor=new CodexExecutor({runtimeRoot,client:new CaptureClient()});
+  try{
+    const task={id:'T-analysis',projectScopes:[{path:project}]};
+    const analysisRoot=executor.executionScope(task,{taskMode:'analysis'},{role:'root'});
+    assert.notEqual(analysisRoot.cwd,project);
+    assert.deepEqual(analysisRoot.writableRoots,[analysisRoot.cwd]);
+    assert.equal(analysisRoot.writableRoots.includes(project),false);
+    assert.equal(analysisRoot.projectAccess,'none');
+
+    const readWorker=executor.executionScope(task,{taskMode:'analysis'},{role:'subagent',projectAccess:'read',workUnitId:'inspect'});
+    assert.notEqual(readWorker.cwd,project);
+    assert.deepEqual(readWorker.writableRoots,[readWorker.scratch]);
+    assert.equal(readWorker.writableRoots.includes(project),false);
+
+    const executionRoot=executor.executionScope(task,{taskMode:'execution'},{role:'root'});
+    assert.notEqual(executionRoot.cwd,project,'Root execution control turn must not become an implicit project writer');
+    assert.equal(executionRoot.writableRoots.includes(project),false);
+    assert.equal(executionRoot.projectAccess,'none');
+
+    const writeWorker=executor.executionScope(task,{taskMode:'execution'},{role:'subagent',projectAccess:'write',workUnitId:'change'});
+    assert.equal(writeWorker.cwd,project);
+    assert.equal(writeWorker.writableRoots.includes(project),true);
+
+    const deniedWrite=executor.executionScope(task,{taskMode:'analysis'},{role:'subagent',projectAccess:'write',workUnitId:'bad'});
+    assert.equal(deniedWrite.writableRoots.includes(project),false,'analysis task cannot gain project write authority even if requested');
+
+    assert.equal(executor.cleanupTaskWorkspace(task.id),true);
+    assert.equal(existsSync(analysisRoot.cwd),false);
+  }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test('Validator rework reuses the ordinary Root turn with narrow feedback instead of a separate grounding/patch API',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'taskboard-codex-validator-rework-'));
+  const client=new CaptureClient();
+  const executor=new CodexExecutor({runtimeRoot:join(dir,'runtime'),client});
+  try{
+    assert.equal(typeof executor.repairAnalysisPatch,'undefined');
+    await executor.runRoot({
+      task:{id:'T-rework',title:'分析范围',instruction:'根据材料分析',projectScopes:[],attachments:[],references:[]},
+      subagentResults:[],humanGatewayHistory:[],modelPolicy:{model:null,reasoningEffort:null},policyContext:{taskMode:'analysis',prompt:'POLICY'},
+      validationFeedback:[{ruleId:'C-003',target:'C-1',reason:'缺少可追溯证据',action:'MODEL_REPAIR'}],
+      previousDecision:{kind:'complete',claims:[{id:'C-1',statement:'过强结论'}]},
+    });
+    assert.equal(client.calls.length,1);
+    assert.match(client.calls[0].prompt,/VALIDATOR FEEDBACK/);
+    assert.match(client.calls[0].prompt,/Correct only the listed proof-boundary issues/i);
+    assert.match(client.calls[0].prompt,/缺少可追溯证据/);
+  }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test('Subagent receives one Executor-owned environment snapshot and does not need to rediscover known missing tools',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'taskboard-codex-env-snapshot-'));
+  const client=new CaptureClient();
+  let probes=0;
+  const executor=new CodexExecutor({runtimeRoot:join(dir,'runtime'),client,environmentProbe:()=>{probes+=1;return{checkedAt:'now',rg:false,python:'python',pythonModules:{pdf2image:false,lxml:false},libreOffice:false,wordDesktopBinary:false};}});
+  try{
+    const task={id:'T-env',title:'附件分析',instruction:'分析',projectScopes:[],attachments:[],references:[]};
+    const delegation={id:'WU-1',title:'核对附件',goal:'核对',expectedOutput:'证据',stopCondition:'完成',projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[]};
+    const first=executor.subagentPrompt({task,delegation});
+    const second=executor.subagentPrompt({task,delegation});
+    assert.equal(probes,1);
+    assert.match(first,/Executor Environment Snapshot/);
+    assert.match(first,/"rg":false/);
+    assert.match(first,/"pdf2image":false/);
+    assert.match(second,/Do not re-probe capabilities already marked unavailable/);
+  }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test('Subagent network capability is granted only when both Work Unit and Executor allow it',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'taskboard-codex-network-cap-'));
+  try{
+    const task={id:'T-NET',title:'network',instruction:'x',projectScopes:[],attachments:[],references:[]};
+    const baseDelegation={id:'WU-NET',title:'net',goal:'net',expectedOutput:'result',stopCondition:'done',projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[]};
+
+    const allowedClient=new CaptureClient();
+    const allowed=new CodexExecutor({runtimeRoot:join(dir,'allowed'),client:allowedClient,networkAccess:true});
+    await allowed.runSubagent({task,delegation:{...baseDelegation,networkAccess:false},policyContext:{taskMode:'analysis'},modelPolicy:{}});
+    await allowed.runSubagent({task,delegation:{...baseDelegation,networkAccess:true},policyContext:{taskMode:'analysis'},modelPolicy:{}});
+    assert.equal(allowedClient.calls[0].networkAccess,false,'undeclared network capability stays off');
+    assert.equal(allowedClient.calls[1].networkAccess,true,'declared capability may be granted when Executor allows it');
+
+    const deniedClient=new CaptureClient();
+    const denied=new CodexExecutor({runtimeRoot:join(dir,'denied'),client:deniedClient,networkAccess:false});
+    await denied.runSubagent({task,delegation:{...baseDelegation,networkAccess:true},policyContext:{taskMode:'analysis'},modelPolicy:{}});
+    assert.equal(deniedClient.calls[0].networkAccess,false,'Executor may reduce but never expand Work Unit capability');
+  }finally{rmSync(dir,{recursive:true,force:true});}
+});

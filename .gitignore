@@ -1,0 +1,9 @@
+node_modules/
+data/taskboard.json
+data/*.db
+data/*.db-*
+data/attachments/*
+!data/attachments/.gitkeep
+data/runtime/*
+!data/runtime/.gitkeep
+.DS_Store
