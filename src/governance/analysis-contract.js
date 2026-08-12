@@ -109,10 +109,6 @@ export const analysisFieldsSchema = {
   steps:{type:'array',items:stepSchema,maxItems:30},
 };
 
-export function emptyAnalysisFields(resultMode = 'execution') {
-  return { resultMode, evidence:[], claims:[], gaps:[], recommendations:[], steps:[] };
-}
-
 export function normalizeAnalysisFields(value = {}) {
   const resultMode = value?.resultMode === 'analysis' ? 'analysis' : 'execution';
   return {

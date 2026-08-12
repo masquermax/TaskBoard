@@ -14,7 +14,7 @@ test('new-task Close/Cancel are non-submit buttons and dialog form disables nati
   assert.match(html,/id="task-dialog-cancel"[^>]+type="button"|type="button"[^>]+id="task-dialog-cancel"/i);
   assert.match(js,/task-dialog-close[^\n]+\.close\(\)/);
   assert.match(js,/task-dialog-cancel[^\n]+\.close\(\)/);
-  assert.match(js,/create-task-submit[\s\S]{0,500}if\(!title\|\|!instruction\)return toast\('请填写 Title 和任务内容'\)/);
+  assert.match(js,/create-task-submit[\s\S]{0,500}if\(!title\|\|!instruction\)return toast\('请填写任务标题和任务内容'\)/);
 });
 
 test('progress UI separates active judgment, execution work, completed work, and confirmed knowledge while confirmed progress defaults folded',()=>{
@@ -22,7 +22,7 @@ test('progress UI separates active judgment, execution work, completed work, and
   assert.match(html,/已确认进展/);
   assert.match(html,/已经进入当前认知的结论/);
   assert.match(js,/workOwnerLabel/);
-  assert.match(js,/Root Agent/);
+  assert.match(js,/Root/);
   assert.match(js,/Subagent/);
   assert.match(js,/work-owner/);
   assert.match(js,/runtimeWork/);
@@ -93,7 +93,7 @@ test('simple configuration exposes only task concurrency and per-Root maximum Su
   assert.match(html,/id="setting-task-max-subagents"/);
   const settings=html.slice(html.indexOf('id="settings-dialog"'),html.indexOf('</dialog>',html.indexOf('id="settings-dialog"')));
   assert.match(settings,/value="5">5</);
-  assert.match(settings,/每个 Root Agent 最多同时拥有的 Subagent 数/);
+  assert.match(settings,/每个 Root 最多同时拥有的 Subagent 数/);
   assert.match(settings,/AI 并发能力：未报告明确上限/);
   assert.match(js,/当前 AI 上限为/);
   assert.doesNotMatch(settings,/公平配额|全局资源池|为当前任务选择 Agent|手工分配 Agent/i);
@@ -170,10 +170,14 @@ test('runtimeWork keeps Root or Validator visible beside Work Units and separate
 test('current UI uses one project and Subagent-settings vocabulary without legacy system/thread labels',()=>{
   const currentUi=`${html}\n${js}\n${css}`;
   assert.match(html,/项目筛选/);
+  assert.match(html,/按任务标题模糊搜索/);
+  assert.match(html,/任务标题/);
+  assert.match(html,/项目范围/);
   assert.match(html,/未登记项目/);
   assert.match(html,/临时项目范围/);
+  assert.match(html,/id="task-temp-project-path"/);
   assert.match(html,/每任务 Subagent 上限/);
-  assert.doesNotMatch(currentUi,/系统筛选|列表外|任务最大线程数|system-filter|system-chip/);
+  assert.doesNotMatch(currentUi,/系统筛选|列表外|任务最大线程数|system-filter|system-chip|task-temp-path|\bTitle\b|Project Scope|PROJECT REGISTRY|NEW TASK|SIMPLE SETTINGS|TASK ACTION|HUMAN GATEWAY/);
   assert.match(js,/项目访问：\$\{project\} · 网络：/,'Subagent capability grants must be visible on Work Unit cards');
   assert.match(css,/\.work-capabilities/);
 });

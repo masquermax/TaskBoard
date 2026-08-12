@@ -3,10 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { DatabaseSync } from 'node:sqlite';
 import { JsonTaskDatabase, JsonTaskRepository } from '../src/core/json-repository.js';
-import { TaskDatabase } from '../src/core/database.js';
-import { TaskRepository } from '../src/core/repository.js';
 import { TaskStatus, ReadyReason, CompletionReason, ProjectFilter } from '../src/core/types.js';
 
 function projection(task) {
@@ -38,7 +35,7 @@ function runScenario(repo) {
   const target=repo.createTask({title:'开发任务',instruction:'基于需求开发',referenceTaskIds:[source.id],temporaryProjectPath:'D:/temp/work',executorKey:'mock'});
   repo.createGatewayRecord(target.id,{question:'确认范围?',context:'blocking',options:['A','B'],targetGapId:'G-SCOPE'});
   repo.resolveGatewayRecord(target.id,'A');
-  repo.addProgressHistory(target.id,{title:'附件事实',detail:'done',completedAt:now});
+  repo.commitProgressHistory(target.id,{title:'附件事实',detail:'done',completedAt:now});
   repo.setExecutionState(target.id,{retry:{scope:'root',failureCount:1,paused:false,nextAt:'2026-08-01T11:00:00.000Z'}});
   repo.transitionTask(target.id,TaskStatus.RUNNING,{executionState:repo.getTask(target.id).executionState});
   repo.transitionTask(target.id,TaskStatus.READY,{readyReason:ReadyReason.WAITING_RESOURCE,executionState:repo.getTask(target.id).executionState});
@@ -60,23 +57,22 @@ function runScenario(repo) {
   return result;
 }
 
-test('JSON and SQLite repositories preserve the same core Task semantics',()=>{
+test('JSON repository preserves the complete Task persistence contract',()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-repo-parity-'));
   const jsonDb=new JsonTaskDatabase(join(dir,'taskboard.json'));
-  const sqliteDb=new TaskDatabase(join(dir,'taskboard.db'));
   try{
-    const json=runScenario(new JsonTaskRepository(jsonDb));
-    const sqlite=runScenario(new TaskRepository(sqliteDb));
-    assert.deepEqual(JSON.parse(JSON.stringify(sqlite)),JSON.parse(JSON.stringify(json)));
+    const result=runScenario(new JsonTaskRepository(jsonDb));
+    assert.equal(result.target.ready_reason,ReadyReason.WAITING_RESOURCE);
+    assert.equal(result.gateways[0].targetGapId,'G-SCOPE');
+    assert.equal(result.maintenance.a,1);
   }finally{
-    jsonDb.close();sqliteDb.close();rmSync(dir,{recursive:true,force:true});
+    jsonDb.close();rmSync(dir,{recursive:true,force:true});
   }
 });
 
-test('removing a Project Registry entry keeps existing Task scope but classifies it as unregistered',()=>{
+test('removing a Project List entry keeps existing Task scope but classifies it as unregistered',()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-project-removal-'));
   const jsonDb=new JsonTaskDatabase(join(dir,'taskboard.json'));
-  const sqliteDb=new TaskDatabase(join(dir,'taskboard.db'));
   const check=repo=>{
     const project=repo.createProject({name:'Old OA',path:'D:/projects/old-oa'});
     const task=repo.createTask({title:'Existing task',instruction:'keep scope',projectId:project.id});
@@ -88,28 +84,25 @@ test('removing a Project Registry entry keeps existing Task scope but classifies
     assert.equal(hydrated.projectScopes[0].path,'D:/projects/old-oa');
     assert.deepEqual(repo.listTasks({status:TaskStatus.READY,project:ProjectFilter.UNREGISTERED}).map(t=>t.id),[task.id]);
   };
-  try{check(new JsonTaskRepository(jsonDb));check(new TaskRepository(sqliteDb));}
-  finally{jsonDb.close();sqliteDb.close();rmSync(dir,{recursive:true,force:true});}
+  try{check(new JsonTaskRepository(jsonDb));}
+  finally{jsonDb.close();rmSync(dir,{recursive:true,force:true});}
 });
 
-test('commitProgressHistory atomically writes History and last_stage_result in JSON and SQLite',()=>{
+test('commitProgressHistory atomically writes History and last_stage_result',()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-history-atomic-'));
   const jsonDb=new JsonTaskDatabase(join(dir,'taskboard.json'));
-  const sqliteDb=new TaskDatabase(join(dir,'taskboard.db'));
   try{
-    for(const repo of [new JsonTaskRepository(jsonDb),new TaskRepository(sqliteDb)]){
-      const task=repo.createTask({title:'History atomic',instruction:'test'});
-      repo.commitProgressHistory(task.id,{title:'项目证据已确认',detail:'OA→ERP 链路已确认。',completedAt:'2026-08-09T10:00:00.000Z'});
-      assert.deepEqual(repo.getProgressHistory(task.id).map(x=>({title:x.title,detail:x.detail})),[{title:'项目证据已确认',detail:'OA→ERP 链路已确认。'}]);
-      assert.equal(repo.getTask(task.id).last_stage_result,'OA→ERP 链路已确认。');
-    }
-  }finally{jsonDb.close();sqliteDb.close();rmSync(dir,{recursive:true,force:true});}
+    const repo=new JsonTaskRepository(jsonDb);
+    const task=repo.createTask({title:'History atomic',instruction:'test'});
+    repo.commitProgressHistory(task.id,{title:'项目证据已确认',detail:'OA→ERP 链路已确认。',completedAt:'2026-08-09T10:00:00.000Z'});
+    assert.deepEqual(repo.getProgressHistory(task.id).map(x=>({title:x.title,detail:x.detail})),[{title:'项目证据已确认',detail:'OA→ERP 链路已确认。'}]);
+    assert.equal(repo.getTask(task.id).last_stage_result,'OA→ERP 链路已确认。');
+  }finally{jsonDb.close();rmSync(dir,{recursive:true,force:true});}
 });
 
-test('History commit failure does not leave a partial JSON/SQLite record',()=>{
+test('History commit failure does not leave a partial JSON record',()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-history-rollback-'));
   const jsonDb=new JsonTaskDatabase(join(dir,'taskboard.json'));
-  const sqliteDb=new TaskDatabase(join(dir,'taskboard.db'));
   try{
     const jsonRepo=new JsonTaskRepository(jsonDb);const jt=jsonRepo.createTask({title:'JSON rollback',instruction:'test'});
     const realPersist=jsonDb.persist.bind(jsonDb);let fail=true;
@@ -119,37 +112,9 @@ test('History commit failure does not leave a partial JSON/SQLite record',()=>{
     assert.equal(jsonRepo.getProgressHistory(jt.id).length,0);
     assert.equal(jsonRepo.getTask(jt.id).last_stage_result,null);
 
-    const sqliteRepo=new TaskRepository(sqliteDb);const st=sqliteRepo.createTask({title:'SQLite rollback',instruction:'test'});
-    sqliteDb.db.exec(`CREATE TRIGGER fail_history_stage BEFORE UPDATE OF last_stage_result ON tasks BEGIN SELECT RAISE(ABORT,'forced stage failure'); END;`);
-    assert.throws(()=>sqliteRepo.commitProgressHistory(st.id,{title:'x',detail:'y'}),/forced stage failure/);
-    assert.equal(sqliteRepo.getProgressHistory(st.id).length,0);
-    assert.equal(sqliteRepo.getTask(st.id).last_stage_result,null);
-  }finally{jsonDb.close();sqliteDb.close();rmSync(dir,{recursive:true,force:true});}
+  }finally{jsonDb.close();rmSync(dir,{recursive:true,force:true});}
 });
 
-
-test('SQLite gateway migration preserves legacy rows and adds target_gap_id fail-safe',()=>{
-  const dir=mkdtempSync(join(tmpdir(),'taskboard-gateway-migration-'));
-  const dbPath=join(dir,'legacy.db');
-  const raw=new DatabaseSync(dbPath);
-  try{
-    raw.exec(`
-      CREATE TABLE counters(name TEXT PRIMARY KEY,value INTEGER NOT NULL);
-      INSERT INTO counters VALUES('task',1),('project',0),('gateway',1);
-      CREATE TABLE tasks(id TEXT PRIMARY KEY,title TEXT NOT NULL,instruction TEXT NOT NULL,status TEXT NOT NULL,ready_reason TEXT,status_entered_at TEXT NOT NULL,created_at TEXT NOT NULL,completed_at TEXT,completion_reason TEXT,last_stage_result TEXT,final_result TEXT,executor_key TEXT NOT NULL DEFAULT 'default',locked INTEGER NOT NULL DEFAULT 0,deleted_at TEXT,cancel_requested_at TEXT,execution_state_json TEXT,analysis_state_json TEXT);
-      INSERT INTO tasks(id,title,instruction,status,ready_reason,status_entered_at,created_at,executor_key,locked) VALUES('T-1','x','x','WAITING_HUMAN',NULL,'2026-08-01','2026-08-01','mock',0);
-      CREATE TABLE human_gateways(id TEXT PRIMARY KEY,task_id TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('PENDING','RESOLVED','CANCELLED')),question TEXT NOT NULL,context TEXT,options_json TEXT,answer TEXT,created_at TEXT NOT NULL,resolved_at TEXT);
-      INSERT INTO human_gateways VALUES('HG-1','T-1','RESOLVED','legacy question','legacy context','[]','legacy answer','2026-08-01','2026-08-01');
-    `);
-  }finally{raw.close();}
-  const migrated=new TaskDatabase(dbPath);
-  try{
-    const row=migrated.db.prepare('SELECT target_gap_id,question,answer FROM human_gateways WHERE id=?').get('HG-1');
-    assert.equal(row.target_gap_id,null);
-    assert.equal(row.question,'legacy question');
-    assert.equal(row.answer,'legacy answer');
-  }finally{migrated.close();rmSync(dir,{recursive:true,force:true});}
-});
 
 test('legacy runtime snapshot and RESOURCE_WAIT are normalized at the Repository boundary only',()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-runtime-migration-'));

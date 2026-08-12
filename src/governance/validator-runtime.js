@@ -7,8 +7,16 @@ function uniqueStrings(values) { return [...new Set((Array.isArray(values) ? val
 function compactViolation(v) { return { ruleId:v?.ruleId || null, target:v?.target || null, reason:text(v?.reason), action:v?.action || null }; }
 function copyAnalysis(result = {}) {
   const fields = normalizeAnalysisFields(result);
-  const { progressCommits:_unauthorizedProgress, ...base } = result || {};
-  return { ...base, ...fields };
+  return {
+    kind:result?.kind || null,
+    summary:text(result?.summary),
+    stageResult:result?.stageResult == null ? null : text(result.stageResult),
+    finalResult:result?.finalResult == null ? null : text(result.finalResult),
+    ...fields,
+    gateway:result?.gateway || null,
+    gapResolutions:normalizeGapResolutions(result?.gapResolutions),
+    delegations:Array.isArray(result?.delegations) ? result.delegations : [],
+  };
 }
 function itemKey(prefix, id, value) { return `${prefix}:${text(id)}:${text(value)}`; }
 

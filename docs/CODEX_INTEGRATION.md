@@ -1,10 +1,10 @@
-# Codex Integration v0.9.0
+# Codex Integration v0.9.1
 
 Codex is the first extension implementation. It does not define Task Core architecture.
 
-## 1. Execution Adapter
+## 1. Executor
 
-TaskBoard starts its own `codex app-server --listen stdio://`. A separately visible Codex TUI/Desktop window is not required for execution. The Execution Adapter owns a small runtime resolver: it prefers an existing usable Codex CLI, and on Windows can prepare OpenAI's official standalone CLI automatically when no CLI is available. This removes the previous manual `npm install -g @openai/codex` prerequisite without moving authentication/provider management into TaskBoard.
+TaskBoard starts its own `codex app-server --listen stdio://`. A separately visible Codex TUI/Desktop window is not required for execution. The Executor owns a small runtime resolver: it prefers an existing usable Codex CLI, and on Windows can prepare OpenAI's official standalone CLI automatically when no CLI is available. This removes the previous manual `npm install -g @openai/codex` prerequisite without moving authentication/provider management into TaskBoard.
 
 Execution flow:
 
@@ -96,7 +96,7 @@ TaskBoard tries kebab-case `workspace-write` / `read-only` first for older Codex
 
 ## Human interaction
 
-Codex approval/elicitation requests do not become ad-hoc user prompts. Subagent/Executor cannot call Human Gateway. Root Agent can report a genuinely blocking user-owned decision only after quiescing execution; the Gateway must bind to that exact currently certified blocking Gap and repeat its certified question. Scheduler alone moves the Task into WAITING_HUMAN. On resolution, Runtime creates the system-owned DIRECT Human Evidence and the proof candidate for that Gateway's bound Gap independently of Root output; Codex Root may cite the supplied evidence id but is not the owner of preserving the user decision. Validator checks semantic sufficiency, while deterministic provenance prevents reuse against another Gap. Task-runtime diagnostics record Gateway ids, bound Gap ids, option counts/answer byte counts and proof outcome without logging answer text.
+Codex approval/elicitation requests do not become ad-hoc user prompts. Subagent/Executor cannot call Human Gateway. Root can report a genuinely blocking user-owned decision only after quiescing execution; the Gateway must bind to that exact currently certified blocking Gap and repeat its certified question. Scheduler alone moves the Task into WAITING_HUMAN. On resolution, Runtime creates the system-owned DIRECT Human Evidence and the proof candidate for that Gateway's bound Gap independently of Root output; Codex Root may cite the supplied evidence id but is not the owner of preserving the user decision. Validator checks semantic sufficiency, while deterministic provenance prevents reuse against another Gap. Task-runtime diagnostics record Gateway ids, bound Gap ids, option counts/answer byte counts and proof outcome without logging answer text.
 
 ## Codex Desktop renderer CSP and the blob surface bridge
 

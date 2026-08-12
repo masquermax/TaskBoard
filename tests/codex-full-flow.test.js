@@ -59,7 +59,7 @@ test('Codex-backed full flow reaches Human Gateway and resumes to completion', a
   const projectDir = join(dir, 'oa-project');
   const { mkdirSync } = await import('node:fs');
   mkdirSync(projectDir);
-  const runtime = bootstrap({ rootDir:dir, storage:'json', executorName:'codex', startScheduler:false });
+  const runtime = bootstrap({ rootDir:dir, executorName:'codex', startScheduler:false });
   try {
     const health = await runtime.executor.health();
     assert.equal(health.connected, true);

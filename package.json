@@ -1,9 +1,9 @@
 {
   "name": "taskboard-codex",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "private": true,
   "type": "module",
-  "description": "Local-first AI task board with Human Gateway and a decoupled Codex executor adapter.",
+  "description": "Local-first AI task board with Human Gateway and a decoupled Codex Executor.",
   "scripts": {
     "dev": "node --watch src/server/mock.js",
     "start": "node src/server/index.js",

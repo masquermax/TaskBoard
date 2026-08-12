@@ -54,22 +54,6 @@ function parseConstitution(text) {
   }).filter(Boolean);
 }
 
-function parseAcceptedMarkedSections(text, prefix, source, priority) {
-  if (!documentIsActive(text)) return [];
-  return splitSections(text).map(section => {
-    const accepted = new RegExp(`^(${prefix}-\\d+)\\s+🔒\\s+—\\s+(.+)$`).exec(section.heading);
-    if (!accepted) return null;
-    return {
-      id:accepted[1],
-      title:accepted[2].trim(),
-      source,
-      priority,
-      hard:/Type:\s*HARD/i.test(section.body) || source === 'adr',
-      text:compactBody(section.body),
-    };
-  }).filter(Boolean);
-}
-
 export function loadRuntimeConstitution(rootDir) {
   const constitutionText = readText(rootDir, 'docs/PRODUCT_CONSTITUTION.md');
   return {
@@ -78,16 +62,4 @@ export function loadRuntimeConstitution(rootDir) {
   };
 }
 
-export function loadGovernanceDocuments(rootDir) {
-  const constitutionText = readText(rootDir, 'docs/PRODUCT_CONSTITUTION.md');
-  const adrText = readText(rootDir, 'docs/ADR.md');
-  const constitution = parseConstitution(constitutionText);
-  const adrs = parseAcceptedMarkedSections(adrText, 'ADR', 'adr', 1);
-  return {
-    loadedAt:new Date().toISOString(),
-    constitution,
-    adrs,
-  };
-}
-
-export { parseConstitution, parseAcceptedMarkedSections, documentIsActive };
+export { parseConstitution, documentIsActive };

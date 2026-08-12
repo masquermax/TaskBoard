@@ -12,6 +12,14 @@ import {
   gapResolutionSchema,
 } from '../../../governance/analysis-contract.js';
 
+const rootEvidenceSchema={
+  ...evidenceSchema,
+  properties:{
+    ...evidenceSchema.properties,
+    sourceType:{type:'string',enum:['human','reference']},
+  },
+};
+
 const rootSchema = {
   type:'object',
   properties:{
@@ -20,6 +28,7 @@ const rootSchema = {
     stageResult:{type:['string','null']},
     finalResult:{type:['string','null']},
     ...analysisFieldsSchema,
+    evidence:{type:'array',items:rootEvidenceSchema,maxItems:50},
     gateway:{anyOf:[{type:'null'},{type:'object',properties:{gapId:{type:'string'},question:{type:'string'},context:{type:'string'},options:{type:'array',items:{type:'string'},maxItems:6}},required:['gapId','question','context','options'],additionalProperties:false}]},
     gapResolutions:{type:'array',items:gapResolutionSchema,maxItems:30},
     delegations:{type:'array',items:{type:'object',properties:{id:{type:'string'},title:{type:'string'},goal:{type:'string'},expectedOutput:{type:'string'},stopCondition:{type:'string'},projectAccess:{type:'string',enum:['none','read','write']},networkAccess:{type:'boolean'},skillId:{type:['string','null']},dependsOn:{type:'array',items:{type:'string'}},inputRefs:{type:'array',items:{type:'string'},maxItems:40}},required:['id','title','goal','expectedOutput','stopCondition','projectAccess','networkAccess','skillId','dependsOn','inputRefs'],additionalProperties:false}},
@@ -155,7 +164,7 @@ export class CodexExecutor extends ExecutorPort {
   rootPrompt({task,subagentResults,activeWork=[],humanGatewayHistory,policyContext=null,planningFeedback=null,scratchPath=null,validationFeedback=null,previousDecision=null,certifiedContext=null,authorityHandoff=false}){
     const refs=(task.references||[]).map(r=>({taskId:r.source_task_id,title:r.title,result:r.final_result}));
     const resolvedHuman=(humanGatewayHistory||[]).filter(g=>g.status==='RESOLVED').map(g=>({id:g.id,evidenceId:humanGatewayEvidenceId(g),targetGapId:g.targetGapId??g.target_gap_id??null,question:g.question,answer:g.answer}));
-    const planningBlock=planningFeedback?.length?`\nWORK PLAN REPAIR — the new Work Unit description/dependency contract is invalid. Correct only these planning fields.\n${JSON.stringify(planningFeedback,null,2)}\n`:'';
+    const planningBlock=planningFeedback?.length?`\nWORK PLAN REPAIR — the Work Unit capability/dependency contract is invalid. Correct only these planning fields.\n${JSON.stringify(planningFeedback,null,2)}\n`:'';
     const validationBlock=validationFeedback?.length?`\nVALIDATOR FEEDBACK — the candidate content was not fully certifiable. Correct only the listed proof-boundary issues and preserve already certified content.\n${JSON.stringify(validationFeedback,null,2)}\nPrevious candidate:\n${JSON.stringify(previousDecision,null,2)}\n`:'';
     const authorityBlock=authorityHandoff?`\nCONTROL HANDOFF — the certified/narrowed content below is fixed input for this Turn. Choose the next Task control action from the certified state.\n`:'';
     const skillCatalog=Array.isArray(policyContext?.skillCatalog)?policyContext.skillCatalog:[];
@@ -163,7 +172,7 @@ export class CodexExecutor extends ExecutorPort {
 
 Turn protocol:
 - Evidence/Claims/Gaps are THIS TURN'S knowledge delta. Committed knowledge is carried forward by TaskBoard.
-- When a Work Unit already supplies an Evidence id, cite that id from Claims/Gaps instead of rewriting the Evidence; return evidence[] only for genuinely new source material obtained by Root.
+- When a Work Unit already supplies an Evidence id, cite that id from Claims/Gaps instead of rewriting it. Root evidence[] is only for Human/Reference material already present in Root context; project/attachment/search/runtime Evidence belongs to bounded Subagent work.
 - Recommendations/Steps are current presentation over certified knowledge, not durable memory. On kind=complete return only the concise recommendations/steps that should be shown now.
 - gapResolutions[] closes an existing Gap by id with reason + evidenceIds; omitted committed items remain unchanged. Resolved Human Gateway answers listed below already have system-owned DIRECT evidenceId values: cite those ids from Claims/Gap resolutions and do not copy the Human answer into evidence[]. Runtime will independently submit the bound Gateway Gap for proof even if Root omits that resolution.
 - kind=delegate emits NEW bounded Work Units in delegations[] with goal, expectedOutput, stopCondition, projectAccess, networkAccess, dependsOn, inputRefs and optional skillId. inputRefs selects only the Task inputs needed by that Work Unit from the catalog below; use [] when no Task source is needed. Runtime separately enforces capacity and grants only the declared Project/network capabilities.

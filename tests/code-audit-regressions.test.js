@@ -146,7 +146,6 @@ test('current runtime contains no removed role or duplicate-domain entry outside
   const allowed=new Set([
     'src/core/runtime-settings.js',
     'src/core/runtime-state-migration.js',
-    'src/core/database.js',
     'src/core/retry-policy.js',
   ]);
   const files=[];
@@ -154,4 +153,17 @@ test('current runtime contains no removed role or duplicate-domain entry outside
   walk('src');
   const forbidden=/SystemFilter|\bOUTSIDE\b|temporaryPath|taskMaxThreads|workerConcurrency|runLead|runWorker|LeadRuntime|WorkerRuntime|ExecutionAdapterPort|ownerLabel|ownerType|RESOURCE_WAIT|pendingSubagentValidation|reviewSubagent|resumeValidation|workerExecutionWindowMs|\bWorker\b|\bworker\b/;
   for(const file of files){if(allowed.has(file))continue;assert.doesNotMatch(readFileSync(resolve(file),'utf8'),forbidden,`legacy current-domain entry leaked into ${file}`);}
+});
+
+test('current documentation is one active set and does not reintroduce superseded version artifacts or role names',()=>{
+  const expected=[
+    'ADR.md','ARCHITECTURE.md','ARCHITECTURE_REVIEW.md','CAPABILITY_CONTRACTS.md','CAPABILITY_MAP.md',
+    'CODEX_INTEGRATION.md','CURRENT_STATE.md','PRODUCT_CONSTITUTION.md','SPECIFICATION.md','VERIFICATION.md',
+  ];
+  const actual=readdirSync(resolve('docs')).filter(name=>name.endsWith('.md')).sort();
+  assert.deepEqual(actual,expected.slice().sort());
+  const currentState=readFileSync(resolve('docs/CURRENT_STATE.md'),'utf8');
+  const active=[readFileSync(resolve('README.md'),'utf8'),...actual.filter(name=>name!=='CURRENT_STATE.md').map(name=>readFileSync(resolve('docs',name),'utf8'))].join('\n');
+  assert.doesNotMatch(active,/Root Agent|Execution Adapter|TOOL_EXECUTOR|Project Registry|SystemFilter|\bOUTSIDE\b|taskMaxThreads|workerConcurrency|ownerType|ownerLabel|RESOURCE_WAIT|Task maximum threads|VERIFICATION-0\.|RULE_REALIGNMENT|ANALYSIS_RULES/);
+  assert.match(currentState,/## Migration-only names/,'legacy names may be documented only in the explicit migration boundary');
 });
