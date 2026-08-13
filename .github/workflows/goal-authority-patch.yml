@@ -7,6 +7,7 @@ on:
     paths:
       - scripts/goal-authority-patch-7.mjs
       - scripts/run-goal-authority-patch-7.mjs
+      - scripts/goal-authority-patch-8.mjs
       - .github/workflows/goal-authority-patch.yml
 
 permissions:
@@ -24,6 +25,7 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/run-goal-authority-patch-7.mjs
+      - run: node scripts/goal-authority-patch-8.mjs
       - name: Remove cloud patch scaffolding before product verification
         run: rm -f scripts/goal-authority-patch*.mjs scripts/run-goal-authority-patch-*.mjs
       - run: git diff --check
