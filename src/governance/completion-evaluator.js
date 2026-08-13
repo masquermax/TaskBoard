@@ -1,0 +1,1 @@
+export const GoalState=Object.freeze({SATISFIED:'satisfied',UNSATISFIED:'unsatisfied'});
