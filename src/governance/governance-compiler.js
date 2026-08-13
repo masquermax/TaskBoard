@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { loadRuntimeConstitution } from './governance-loader.js';
 import { loadCapabilityContracts, renderCapabilityContract } from './capability-contract-loader.js';
+import { roleCapabilityContract, roleCapabilityContracts, renderRoleCapabilityContract } from './role-capability-contract.js';
 import { normalizeSkillLibrary } from '../skills/skill-library-port.js';
 
 function deepFreeze(value) {
@@ -13,8 +14,19 @@ function deepFreeze(value) {
 function compactRule(rule) { return `[${rule.id}] ${rule.title}: ${rule.text}`; }
 function hashPolicy(parts) { return createHash('sha256').update(parts.join('\n')).digest('hex').slice(0,16); }
 function strings(values){return [...new Set((Array.isArray(values)?values:[]).map(value=>String(value||'').trim()).filter(Boolean))];}
+function authorityItem(task,key){return task?.taskContract?.authority?.[key]??task?.task_contract?.authority?.[key]??null;}
+function certifiedTrue(task,key){const item=authorityItem(task,key);return item?.certification==='supported'&&item?.value===true;}
 
-const ROLE_CONTRACT = Object.freeze({ root:'ROOT', subagent:'SUBAGENT', validator:'VALIDATOR' });
+const ACCESS_RANK=Object.freeze({none:0,read:1,write:2});
+function access(value){const normalized=String(value||'none').trim().toLowerCase();return normalized in ACCESS_RANK?normalized:'none';}
+function meetAccess(...values){let result='write';for(const value of values){const next=access(value);if(ACCESS_RANK[next]<ACCESS_RANK[result])result=next;}return result;}
+function selectedProjectAccessCeiling(task,workUnit){
+  const refs=strings(workUnit?.inputRefs).filter(ref=>ref.startsWith('project:'));
+  const count=Array.isArray(task?.projectScopes)?task.projectScopes.length:0;
+  const hasSelected=refs.some(ref=>{const index=Number(ref.slice('project:'.length));return Number.isInteger(index)&&index>=0&&index<count;});
+  if(!hasSelected)return 'none';
+  return certifiedTrue(task,'projectWrite')?'write':'read';
+}
 
 export function inferTaskMode(task) {
   const value = `${task?.title || ''}\n${task?.instruction || ''}`.trim();
@@ -26,20 +38,27 @@ export function inferTaskMode(task) {
   return 'auto';
 }
 
-export function compileExecutionGrant({role,taskMode,workUnit=null}={}){
-  if(role==='root')return{role:'root',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'none'};
-  if(role==='validator')return{role:'validator',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'proof-only'};
-  if(role!=='subagent')return{role:String(role||'unknown'),projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'none'};
-  const requested=String(workUnit?.projectAccess||'none').trim().toLowerCase();
-  const projectAccess=['none','read','write'].includes(requested) ? requested : 'none';
-  const effectiveProjectAccess=projectAccess==='write'&&taskMode!=='execution' ? 'none' : projectAccess;
+export function compileAuthorizedGrant({role,task=null,workUnit=null}={}){
+  const capability=roleCapabilityContract(role);
+  if(!capability)return{role:String(role||'unknown'),projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'none',environmentAccess:'none'};
+  if(capability.role!=='subagent')return{
+    role:capability.role,
+    projectAccess:'none',
+    networkAccess:false,
+    inputRefs:[],
+    sourceAccess:capability.sourceAccess,
+    environmentAccess:capability.environmentAccess,
+  };
   const inputRefs=strings(workUnit?.inputRefs);
+  const requestedProject=access(workUnit?.projectAccess);
+  const taskProjectCeiling=selectedProjectAccessCeiling(task,workUnit);
   return{
-    role:'subagent',
-    projectAccess:effectiveProjectAccess,
-    networkAccess:workUnit?.networkAccess===true,
+    role:capability.role,
+    projectAccess:meetAccess(capability.projectAccess,taskProjectCeiling,requestedProject),
+    networkAccess:capability.networkAccess===true&&workUnit?.networkAccess===true&&certifiedTrue(task,'networkAccess'),
     inputRefs,
-    sourceAccess:inputRefs.length?'selected':'none',
+    sourceAccess:inputRefs.length?capability.sourceAccess:'none',
+    environmentAccess:capability.environmentAccess,
   };
 }
 
@@ -47,51 +66,58 @@ export class GovernanceCompiler {
   constructor({ rootDir, skillLibrary = null }) {
     this.rootDir = rootDir;
     this.documents = loadRuntimeConstitution(rootDir); // Runtime authority only. ADR stays engineering memory outside Agent execution.
+    // Human-readable role guides remain prompt/document projections only. They do
+    // not participate in AuthorizedGrant derivation.
     this.contracts = loadCapabilityContracts(rootDir);
+    this.roleCapabilities=roleCapabilityContracts();
     this.skills = normalizeSkillLibrary(skillLibrary);
     const runtimeAuthority = [
       ...this.documents.constitution.map(compactRule),
-      ...Object.values(this.contracts).map(contract=>renderCapabilityContract(contract)),
+      JSON.stringify(this.roleCapabilities),
       ...this.skills.list().map(skill=>`${skill.id}:${skill.purpose}`),
     ];
     this.fingerprint = hashPolicy(runtimeAuthority);
   }
 
   compileForTask(task) {
-    const taskMode=inferTaskMode(task);
+    const taskMode=inferTaskMode(task); // non-authoritative presentation/analysis hint only
     return deepFreeze({
       fingerprint:this.fingerprint,
       taskMode,
-      executionGrant:compileExecutionGrant({role:'root',taskMode}),
+      authorizedGrant:compileAuthorizedGrant({role:'root',task}),
       skillCatalog:this.skills.list(),
       prompt:this.compilePrompt({taskMode,role:'root'}),
     });
   }
 
   compilePrompt({taskMode,role,skillId=null}) {
-    const contractId=ROLE_CONTRACT[role] || String(role||'').toUpperCase();
-    const contract=this.contracts[contractId] || null;
+    const machine=roleCapabilityContract(role);
+    const guideId=machine?.id||String(role||'').toUpperCase();
+    const guide=this.contracts[guideId] || null;
     const skill=skillId ? this.skills.get(skillId) : null;
     const parts=[
       'TASKBOARD ROLE CONTEXT',
-      `Task mode: ${taskMode}.`,
+      `Task presentation mode hint: ${taskMode}. This hint is not an authority grant.`,
     ];
-    if(contract)parts.push('',renderCapabilityContract(contract));
+    if(machine)parts.push('',renderRoleCapabilityContract(machine));
+    if(guide)parts.push('',renderCapabilityContract(guide).replace(/^CAPABILITY CONTRACT/m,'ROLE GUIDE'));
     if(skill)parts.push('',`SELECTED METHOD\n${skill.raw}`);
     return parts.join('\n');
   }
 
   compileForRole(task, role, {skillId=null,workUnit=null}={}) {
-    const taskMode=inferTaskMode(task);
-    const contractId=ROLE_CONTRACT[role] || String(role||'').toUpperCase();
-    const contract=this.contracts[contractId] || null;
+    const taskMode=inferTaskMode(task); // not consulted by compileAuthorizedGrant
+    const machine=roleCapabilityContract(role);
+    const guideId=machine?.id||String(role||'').toUpperCase();
+    const guide=this.contracts[guideId] || null;
     const skill=skillId ? this.skills.get(skillId) : null;
     return deepFreeze({
       fingerprint:this.fingerprint,
       taskMode,
       role,
-      contract:contract ? {...contract} : null,
-      executionGrant:compileExecutionGrant({role,taskMode,workUnit}),
+      contract:machine ? {...machine} : null,
+      roleGuide:guide ? {...guide} : null,
+      authorizedGrant:compileAuthorizedGrant({role,task,workUnit}),
       selectedSkill:skill ? {id:skill.id,purpose:[...skill.purpose]} : null,
       skillCatalog: role==='root' ? this.skills.list() : [],
       prompt:this.compilePrompt({taskMode,role,skillId:skill?.id||null}),
