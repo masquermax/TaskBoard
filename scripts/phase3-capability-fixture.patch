@@ -1,0 +1,25 @@
+diff --git a/tests/capability-architecture.test.js b/tests/capability-architecture.test.js
+--- a/tests/capability-architecture.test.js
++++ b/tests/capability-architecture.test.js
+@@ -30,7 +30,7 @@ function demoSkillLibrary(){
+-test('Capability Contracts are the complete positive authority surface for every current core position',()=>{
++test('Human-readable Capability Contracts document every current core position without becoming Runtime authority data',()=>{
+@@ -118,15 +118,14 @@ test('TaskBoard core ships no concrete Skill content; a Skill library is an inj
+-test('Work Unit project write access is explicit and cannot be granted inside an analysis Task',()=>{
++test('Work Unit validation is structural; Task mode cannot independently grant or deny project write authority',()=>{
+   const base={id:'w1',title:'改代码',goal:'修改目标文件',expectedOutput:'返回修改结果',stopCondition:'修改完成并返回后停止',projectAccess:'write',networkAccess:false,skillId:null,dependsOn:[],inputRefs:['project:0']};
+   const options={availableInputRefs:['project:0']};
+   const analysis=validateDelegationPlan([base],{taskMode:'analysis',...options});
+-  assert.equal(analysis.valid,false);
+-  assert.match(analysis.issues.join(' '),/只有明确 execution Task.*才能取得 Project Scope 写权限/);
++  assert.equal(analysis.valid,true);
+   const auto=validateDelegationPlan([base],{taskMode:'auto',...options});
+-  assert.equal(auto.valid,false,'auto/ambiguous Task must not silently acquire project write authority');
++  assert.equal(auto.valid,true,'Task mode is not an Authority owner');
+   const execution=validateDelegationPlan([base],{taskMode:'execution',...options});
+   assert.equal(execution.valid,true);
++  assert.deepEqual(analysis.issues,execution.issues);
+   assert.equal(execution.delegations[0].projectAccess,'write');
+   const omitted=validateDelegationPlan([{...base,id:'w2',projectAccess:undefined,networkAccess:undefined,inputRefs:[]}],{taskMode:'analysis',...options});
+-  assert.equal(omitted.valid,true,'legacy/custom adapters fail closed instead of inheriting Project/network capability');
++  assert.equal(omitted.valid,true,'structural validation keeps omitted capabilities at none');
