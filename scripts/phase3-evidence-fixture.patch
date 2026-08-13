@@ -1,7 +1,0 @@
-diff --git a/tests/evidence-boundary.test.js b/tests/evidence-boundary.test.js
---- a/tests/evidence-boundary.test.js
-+++ b/tests/evidence-boundary.test.js
-@@ -119,7 +119,7 @@ test('completed analysis publishes only Subagent-collected certified source fact
--  const root=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()}),maxConcurrentSubagents:2});
-+  const root=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()}),governanceCompiler:new GovernanceCompiler({rootDir:resolve('.')}),maxConcurrentSubagents:2});
-   try{

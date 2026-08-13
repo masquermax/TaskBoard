@@ -1,8 +1,0 @@
-diff --git a/tests/context-input-scope.test.js b/tests/context-input-scope.test.js
---- a/tests/context-input-scope.test.js
-+++ b/tests/context-input-scope.test.js
-@@ -103,7 +103,7 @@ test('Codex Subagent prompt and write surface do not expose unselected Project/A
--    const scope=executor.executionScope(selected,{taskMode:'execution',executionGrant:{role:'subagent',projectAccess:'write',networkAccess:false,inputRefs:['project:1','attachment:A-2','reference:T-old-2'],sourceAccess:'selected'}},{workUnitId:'w'});
-+    const scope=executor.executionScope(selected,{taskMode:'execution',authorizedGrant:{role:'subagent',projectAccess:'write',networkAccess:false,inputRefs:['project:1','attachment:A-2','reference:T-old-2'],sourceAccess:'selected',environmentAccess:'default'}},{workUnitId:'w'});
-     assert.equal(scope.writableRoots.includes(join(dir,'project-a')),false);
-     assert.equal(scope.writableRoots.includes(join(dir,'project-b')),true);

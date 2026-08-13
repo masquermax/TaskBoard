@@ -1,6 +1,0 @@
-diff --git a/tests/validator-semantic-proof.test.js b/tests/validator-semantic-proof.test.js
---- a/tests/validator-semantic-proof.test.js
-+++ b/tests/validator-semantic-proof.test.js
-@@ -133,1 +133,1 @@
--    const result=await executor.runValidator({task:{id:'T',title:'分析',projectScopes:[{path:project}],attachments:[]},candidates:[{id:'C-1',statement:'claim',evidence:[{id:'E-1',locator:'A#L1',observation:'raw'}]}],policyContext:{taskMode:'analysis',prompt:'CAPABILITY CONTRACT — VALIDATOR',executionGrant:{role:'validator',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'proof-only'}},modelPolicy:{model:null,reasoningEffort:null}});
-+    const result=await executor.runValidator({task:{id:'T',title:'分析',projectScopes:[{path:project}],attachments:[]},candidates:[{id:'C-1',statement:'claim',evidence:[{id:'E-1',locator:'A#L1',observation:'raw'}]}],policyContext:{taskMode:'analysis',prompt:'CAPABILITY CONTRACT — VALIDATOR',authorizedGrant:{role:'validator',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'proof-only',environmentAccess:'none'}},modelPolicy:{model:null,reasoningEffort:null}});

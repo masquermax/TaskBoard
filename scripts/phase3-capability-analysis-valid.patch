@@ -1,6 +1,0 @@
-diff --git a/tests/capability-architecture.test.js b/tests/capability-architecture.test.js
---- a/tests/capability-architecture.test.js
-+++ b/tests/capability-architecture.test.js
-@@ -132,1 +132,1 @@
--  assert.equal(analysis.valid,false);
-+  assert.equal(analysis.valid,true);
