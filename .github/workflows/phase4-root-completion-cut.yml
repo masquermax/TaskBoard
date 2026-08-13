@@ -1,0 +1,37 @@
+name: Phase 4 Root completion owner cut
+
+on:
+  push:
+    branches: [agent/completion-single-owner-phase4]
+    paths:
+      - scripts/phase4-root-completion-cut.mjs
+      - .github/workflows/phase4-root-completion-cut.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cut-root-owner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/completion-single-owner-phase4
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/phase4-root-completion-cut.mjs
+      - run: git diff --check
+      - name: Verify CompletionEvaluator semantics
+        run: node --test tests/completion-evaluator-phase4.test.js
+      - name: Verify Root no longer emits terminal complete
+        run: node --test --test-name-pattern="Root complete is only a proposal" tests/completion-single-owner-boundary-phase4.test.js
+      - name: Commit verified Root owner cut
+        run: |
+          git config user.name "taskboard-phase4-bot"
+          git config user.email "taskboard-phase4-bot@users.noreply.github.com"
+          git add src/core/root-runtime.js
+          git diff --cached --quiet && exit 0
+          git commit -m "refactor: make Root completion a proposal only"
+          git push origin HEAD:agent/completion-single-owner-phase4
