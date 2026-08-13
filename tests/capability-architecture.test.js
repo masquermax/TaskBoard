@@ -29,7 +29,7 @@ function demoSkillLibrary(){
   };
 }
 
-test('Capability Contracts are the complete positive authority surface for every current core position',()=>{
+test('Human-readable Capability Contracts document every current core position without becoming Runtime authority data',()=>{
   const contracts=loadCapabilityContracts(rootDir);
   assert.deepEqual(Object.keys(contracts),expectedContracts);
   for(const id of expectedContracts){
@@ -129,10 +129,10 @@ test('Work Unit project write access is explicit and cannot be granted inside an
   const base={id:'w1',title:'改代码',goal:'修改目标文件',expectedOutput:'返回修改结果',stopCondition:'修改完成并返回后停止',projectAccess:'write',networkAccess:false,skillId:null,dependsOn:[],inputRefs:['project:0']};
   const options={availableInputRefs:['project:0']};
   const analysis=validateDelegationPlan([base],{taskMode:'analysis',...options});
-  assert.equal(analysis.valid,false);
-  assert.match(analysis.issues.join(' '),/只有明确 execution Task.*才能取得 Project Scope 写权限/);
+  assert.equal(analysis.valid,true);
+  assert.deepEqual(analysis.issues,[]);
   const auto=validateDelegationPlan([base],{taskMode:'auto',...options});
-  assert.equal(auto.valid,false,'auto/ambiguous Task must not silently acquire project write authority');
+  assert.equal(auto.valid,true,'Task mode is not an Authority owner');
   const execution=validateDelegationPlan([base],{taskMode:'execution',...options});
   assert.equal(execution.valid,true);
   assert.equal(execution.delegations[0].projectAccess,'write');

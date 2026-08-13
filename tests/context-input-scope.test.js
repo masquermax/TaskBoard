@@ -99,7 +99,7 @@ test('Codex Subagent prompt and write surface do not expose unselected Project/A
     assert.match(prompt,/project-b/);
     assert.match(prompt,/two\.png/);
     assert.match(prompt,/T-old-2/);
-    const scope=executor.executionScope(selected,{taskMode:'execution',executionGrant:{role:'subagent',projectAccess:'write',networkAccess:false,inputRefs:['project:1','attachment:A-2','reference:T-old-2'],sourceAccess:'selected'}},{workUnitId:'w'});
+    const scope=executor.executionScope(selected,{taskMode:'execution',authorizedGrant:{role:'subagent',projectAccess:'write',networkAccess:false,inputRefs:['project:1','attachment:A-2','reference:T-old-2'],sourceAccess:'selected',environmentAccess:'default'}},{workUnitId:'w'});
     assert.equal(scope.writableRoots.includes(join(dir,'project-a')),false);
     assert.equal(scope.writableRoots.includes(join(dir,'project-b')),true);
   }finally{rmSync(dir,{recursive:true,force:true});}

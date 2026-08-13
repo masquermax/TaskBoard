@@ -182,6 +182,7 @@ export class Scheduler {
         onProgress:snapshot=>this.setActivity(taskId,admitted?{state:'running',summary:'当前阶段正在推进',detail:snapshotProgressDetail(snapshot),current:snapshot}:{state:'queued',summary:'等待执行资源',detail:'正在等待本轮所需的执行资源；获得真实执行资源前任务仍保持「需执行」。',current:snapshot}),
         onStageResult:value=>{if(!this.shuttingDown)this.repository.updateStageResult(taskId,value);},
         onCertifiedTurn:commit=>{if(!this.shuttingDown)this.repository.commitCertifiedTurn(taskId,commit);},
+        onTaskContractAuthority:authority=>{if(this.shuttingDown){const error=new Error('TASK_CONTRACT_PERSISTENCE_UNAVAILABLE_DURING_SHUTDOWN');error.nonRetryable=true;throw error;}this.repository.commitTaskContractAuthority(taskId,authority);},
         onWorkReceipt:receipt=>{if(this.shuttingDown){const error=new Error('WORK_RECEIPT_PERSISTENCE_UNAVAILABLE_DURING_SHUTDOWN');error.nonRetryable=true;throw error;}this.repository.commitWorkReceipt(taskId,receipt);},
         onWorkReceiptsConsumed:ids=>{if(!this.shuttingDown)this.repository.consumeWorkReceipts(taskId,ids);},
         onProgressCommit:commit=>{if(this.shuttingDown)return;const history=this.repository.getProgressHistory(taskId);if(history.some(item=>item.title===commit.title&&item.detail===commit.detail))return;this.repository.commitProgressHistory(taskId,commit);},
