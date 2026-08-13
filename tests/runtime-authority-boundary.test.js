@@ -59,7 +59,7 @@ test('completed Work Unit result survives process/session boundaries without bec
   }finally{db.close();rmSync(dir,{recursive:true,force:true});}
 });
 
-test('Capability Contract compiles into one typed executionGrant for Root, Subagent and Validator',()=>{
+test('GovernanceCompiler compiles one typed AuthorizedGrant for Root, Subagent and Validator',()=>{
   const compiler=new GovernanceCompiler({rootDir});
   const task=analysisTask(['/project/a','/project/b']);
   const root=compiler.compileForRole(task,'root');
@@ -68,18 +68,18 @@ test('Capability Contract compiles into one typed executionGrant for Root, Subag
     id:'WU-1',projectAccess:'read',networkAccess:false,inputRefs:['project:1'],skillId:null,
   }});
 
-  assert.deepEqual(root.executionGrant,{
-    role:'root',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'none',
+  assert.deepEqual(root.authorizedGrant,{
+    role:'root',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'none',environmentAccess:'none',
   });
-  assert.deepEqual(validator.executionGrant,{
-    role:'validator',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'proof-only',
+  assert.deepEqual(validator.authorizedGrant,{
+    role:'validator',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'proof-only',environmentAccess:'none',
   });
-  assert.deepEqual(subagent.executionGrant,{
-    role:'subagent',projectAccess:'read',networkAccess:false,inputRefs:['project:1'],sourceAccess:'selected',
+  assert.deepEqual(subagent.authorizedGrant,{
+    role:'subagent',projectAccess:'read',networkAccess:false,inputRefs:['project:1'],sourceAccess:'selected',environmentAccess:'default',
   });
 });
 
-test('CodexExecutor consumes executionGrant and projects it to an explicit runtime workspace/permission boundary',async()=>{
+test('CodexExecutor enforces AuthorizedGrant and projects it to an explicit runtime workspace/permission boundary',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-authority-grant-'));
   const project=join(dir,'project');mkdirSync(project);
   const client=new CaptureClient();
