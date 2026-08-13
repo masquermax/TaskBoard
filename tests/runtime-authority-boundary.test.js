@@ -4,6 +4,8 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { GovernanceCompiler } from '../src/governance/governance-compiler.js';
+import { AnalysisResultValidator } from '../src/governance/analysis-validator.js';
+import { ValidatorRuntime } from '../src/governance/validator-runtime.js';
 import { CodexExecutor } from '../src/extensions/executors/codex/codex-executor.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
 import { ModelRouter } from '../src/core/model-router.js';
@@ -27,6 +29,8 @@ function analysisTask(projects=[]){return{
   projectScopes:projects.map((path,index)=>({id:`P-${index+1}`,label:`P${index+1}`,path})),
   attachments:[],references:[],last_stage_result:null,ready_reason:'NEW',analysisState:null,
 };}
+
+function analysisValidatorRuntime(){return new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()});}
 
 test('Capability Contract compiles into one typed executionGrant for Root, Subagent and Validator',()=>{
   const compiler=new GovernanceCompiler({rootDir});
@@ -83,18 +87,20 @@ test('source-backed analysis cannot complete on the initial Root turn without de
   };
   const router=new ModelRouter();
   const subagent=new SubagentRuntime({executor,modelRouter:router});
-  const runtime=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent});
-  await assert.rejects(
-    runtime.execute(analysisTask([project])),
-    /SOURCE_ANALYSIS_REQUIRES_DELEGATED_EVIDENCE/,
-  );
-  assert.equal(rootTurns,1);
-  rmSync(dir,{recursive:true,force:true});
+  const runtime=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:analysisValidatorRuntime()});
+  try{
+    await assert.rejects(
+      runtime.execute(analysisTask([project])),
+      /SOURCE_ANALYSIS_REQUIRES_DELEGATED_EVIDENCE/,
+    );
+    assert.equal(rootTurns,1);
+  }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
 test('Root completion cannot silently cancel already-issued read-only Work Units',async()=>{
   let rootTurns=0;
   let workRuns=0;
+  let bCompleted=false;
   const executor={
     async runRoot({subagentResults}){
       rootTurns+=1;
@@ -108,9 +114,15 @@ test('Root completion cannot silently cancel already-issued read-only Work Units
       assert.ok(subagentResults.length>=1);
       return{kind:'complete',summary:'done',stageResult:'done',finalResult:'done',resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[]};
     },
-    async runSubagent({delegation}){
+    async runSubagent({delegation,signal}){
       workRuns+=1;
-      if(delegation.id==='B')await new Promise(resolve=>setTimeout(resolve,30));
+      if(delegation.id==='B'){
+        await new Promise((resolve,reject)=>{
+          const timer=setTimeout(resolve,40);
+          signal?.addEventListener?.('abort',()=>{clearTimeout(timer);const error=new Error('interrupted');error.interrupted=true;reject(error);},{once:true});
+        });
+        bCompleted=true;
+      }
       return{delegationId:delegation.id,result:`${delegation.id} done`,evidence:[],findings:[],discoveries:[],blocker:null,uncertainty:null};
     },
   };
@@ -120,5 +132,6 @@ test('Root completion cannot silently cancel already-issued read-only Work Units
   const outcome=await runtime.execute({id:'T-WORK',title:'执行',instruction:'执行',projectScopes:[],attachments:[],references:[],ready_reason:'NEW'});
   assert.equal(outcome.kind,'complete');
   assert.equal(workRuns,2);
+  assert.equal(bCompleted,true,'an issued Work Unit is a real obligation unless Root explicitly supersedes it; complete must not cancel it implicitly');
   assert.ok(rootTurns>=2);
 });
