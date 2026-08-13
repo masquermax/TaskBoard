@@ -34,8 +34,25 @@ jobs:
             git apply --recount --unidiff-zero "$patch"
           done
       - run: git diff --check
-      - run: npm run verify
+      - name: Run full verify
+        id: verify
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run verify 2>&1 | tee verify.log
+      - name: Preserve failed verify log
+        if: steps.verify.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-verify-failure
+          path: verify.log
+          if-no-files-found: error
+      - name: Stop on verify failure
+        if: steps.verify.outcome == 'failure'
+        run: exit 1
       - name: Commit verified Phase 3 source and regression changes
+        if: steps.verify.outcome == 'success'
         run: |
           git config user.name "taskboard-phase3-bot"
           git config user.email "taskboard-phase3-bot@users.noreply.github.com"
