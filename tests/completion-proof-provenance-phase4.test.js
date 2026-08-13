@@ -40,7 +40,7 @@ test('Completion proposal and Requirement provenance are structurally outside ce
   const assessment=result.assessments[0];
   assert.equal(assessment.proofKind,'completion_obligation_support');
   assert.equal(assessment.criterionSatisfied,true);
-  assert.equal(assessment.outcome,'succeeded',false);
+  assert.notEqual(assessment.outcome,'succeeded');
   assert.deepEqual(assessment.proofFactRefs.sort(),['C-A','E-A']);
 });
 
