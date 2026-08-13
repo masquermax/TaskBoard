@@ -1,6 +1,0 @@
-diff --git a/tests/capability-architecture.test.js b/tests/capability-architecture.test.js
---- a/tests/capability-architecture.test.js
-+++ b/tests/capability-architecture.test.js
-@@ -118,1 +118,1 @@
--test('Work Unit project write access is explicit and cannot be granted inside an analysis Task',()=>{
-+test('Work Unit validation is structural; Task mode cannot independently grant or deny project write authority',()=>{
