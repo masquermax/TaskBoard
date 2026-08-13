@@ -33,7 +33,7 @@ export class JsonTaskDatabase {
         task.execution_state = migrateExecutionState(task.execution_state);
         if (task.analysis_state === undefined) task.analysis_state = null;
         if (!Array.isArray(task.work_receipts)) task.work_receipts = [];
-        if (task.completion_reason === undefined) task.completion_reason = task.status === TaskStatus.COMPLETED ? CompletionReason.SUCCESS : null;
+        if (task.completion_reason === undefined) task.completion_reason = null;
         const contractState = bootstrapTaskContractState(task);
         task.requirement_sources = contractState.requirement_sources;
         task.task_contract = contractState.task_contract;
@@ -133,15 +133,15 @@ export class JsonTaskRepository {
     const refs=this.state.references.filter(r=>r.target_task_id===row.id).sort((a,b)=>a.id-b.id).map(r=>{const s=this.state.tasks.find(t=>t.id===r.source_task_id);return s?{source_task_id:s.id,title:s.title,final_result:s.final_result,completed_at:s.completed_at}:null;}).filter(Boolean);
     const g=[...this.state.gateways].filter(x=>x.task_id===row.id&&x.status==='PENDING').sort((a,b)=>b.created_at.localeCompare(a.created_at))[0]||null;
     const attachments=this.state.attachments.filter(a=>a.task_id===row.id).sort((a,b)=>a.created_at.localeCompare(b.created_at));
-    return clone({ ...row,locked:Boolean(row.locked),ready_reason:migrateReadyReason(row.ready_reason),completion_reason:row.completion_reason||(row.status===TaskStatus.COMPLETED?CompletionReason.SUCCESS:null),executionState:migrateExecutionState(row.execution_state),analysisState:row.analysis_state||null,workReceipts:Array.isArray(row.work_receipts)?clone(row.work_receipts):[],requirementSources:hydrateRequirementSources(row.requirement_sources),taskContract:hydrateTaskContract(row.task_contract),
+    return clone({ ...row,locked:Boolean(row.locked),ready_reason:migrateReadyReason(row.ready_reason),completion_reason:row.completion_reason??null,executionState:migrateExecutionState(row.execution_state),analysisState:row.analysis_state||null,workReceipts:Array.isArray(row.work_receipts)?clone(row.work_receipts):[],requirementSources:hydrateRequirementSources(row.requirement_sources),taskContract:hydrateTaskContract(row.task_contract),
       projectScopes:scopes.map(s=>{const p=s.project_id?this.state.projects.find(x=>x.id===s.project_id):null;return{source:s.source,projectId:s.project_id,label:s.source==='registry'?(p?.name||s.label):(s.label||'临时项目范围'),path:s.source==='registry'?(p?.path||s.path):s.path};}),references:refs,
       attachments:attachments.map(a=>({id:a.id,name:a.name,mimeType:a.mime_type,size:a.size_bytes,path:a.path,createdAt:a.created_at})),pendingGateway:g?{...g,options:g.options||[]}:null });
   }
   getAttachment(taskId,attachmentId){const a=this.state.attachments.find(x=>x.task_id===taskId&&x.id===attachmentId);return a?clone({id:a.id,taskId:a.task_id,name:a.name,mimeType:a.mime_type,size:a.size_bytes,path:a.path,createdAt:a.created_at}):null;}
 
   transitionTask(id,nextStatus,{finalResult=null,lastStageResult=undefined,readyReason=undefined,completionReason=undefined,clearCancel=false,executionState=undefined}={}){
-    const task=this.state.tasks.find(t=>t.id===id);if(!task)throw new Error('TASK_NOT_FOUND');const now=this.now();
-    this.store.transaction(()=>{this.closeOpenPhase(id,now);this.addPhase(id,nextStatus,now);task.status=nextStatus;task.status_entered_at=now;if(readyReason!==undefined)task.ready_reason=readyReason;task.completed_at=nextStatus===TaskStatus.COMPLETED?now:null;task.completion_reason=nextStatus===TaskStatus.COMPLETED?(completionReason||CompletionReason.SUCCESS):null;if(finalResult!=null)task.final_result=finalResult;if(lastStageResult!==undefined&&lastStageResult!==null)task.last_stage_result=lastStageResult;if(clearCancel)task.cancel_requested_at=null;if(executionState!==undefined)task.execution_state=executionState;});
+    const task=this.state.tasks.find(t=>t.id===id);if(!task)throw new Error('TASK_NOT_FOUND');if(nextStatus===TaskStatus.COMPLETED&&completionReason==null)throw new Error('TASK_COMPLETION_REASON_REQUIRED');const now=this.now();
+    this.store.transaction(()=>{this.closeOpenPhase(id,now);this.addPhase(id,nextStatus,now);task.status=nextStatus;task.status_entered_at=now;if(readyReason!==undefined)task.ready_reason=readyReason;task.completed_at=nextStatus===TaskStatus.COMPLETED?now:null;task.completion_reason=nextStatus===TaskStatus.COMPLETED?completionReason:null;if(finalResult!=null)task.final_result=finalResult;if(lastStageResult!==undefined&&lastStageResult!==null)task.last_stage_result=lastStageResult;if(clearCancel)task.cancel_requested_at=null;if(executionState!==undefined)task.execution_state=executionState;});
     return this.getTask(id);
   }
   touchTask(id,{readyReason=undefined,executionState=undefined}={}){const t=this.state.tasks.find(x=>x.id===id);if(!t)throw new Error('TASK_NOT_FOUND');this.store.transaction(()=>{if(readyReason!==undefined)t.ready_reason=readyReason;if(executionState!==undefined)t.execution_state=executionState;});return this.getTask(id);}
