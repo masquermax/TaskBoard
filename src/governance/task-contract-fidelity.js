@@ -1,0 +1,113 @@
+function clone(value){return JSON.parse(JSON.stringify(value));}
+function text(value){return String(value==null?'':value).trim();}
+
+export const FidelityCertification=Object.freeze({
+  SUPPORTED:'supported',
+  UNRESOLVED:'unresolved',
+  UNSUPPORTED:'unsupported',
+});
+
+function normalizeRef(ref={}){
+  const sourceId=text(ref.sourceId??ref.source_id);
+  const start=Number(ref.start),end=Number(ref.end);
+  return{sourceId,start,end};
+}
+
+export function createAuthoritySemanticCandidate({id,key,value,requirementRefs=[]}={}){
+  const candidateId=text(id),semanticKey=text(key);
+  if(!candidateId)throw new Error('TASK_CONTRACT_CANDIDATE_ID_REQUIRED');
+  if(!semanticKey)throw new Error('TASK_CONTRACT_SEMANTIC_KEY_REQUIRED');
+  return{id:candidateId,key:semanticKey,value:clone(value),requirementRefs:(Array.isArray(requirementRefs)?requirementRefs:[]).map(normalizeRef)};
+}
+
+export function resolveRequirementRefs(requirementSources=[],requirementRefs=[]){
+  const sources=new Map((Array.isArray(requirementSources)?requirementSources:[]).map(source=>[text(source?.id),source]).filter(([id])=>id));
+  const excerpts=[];const errors=[];
+  for(const ref of Array.isArray(requirementRefs)?requirementRefs:[]){
+    const normalized=normalizeRef(ref),source=sources.get(normalized.sourceId),sourceText=String(source?.text??'');
+    if(!source){errors.push({ref:normalized,reason:'requirement_source_not_found'});continue;}
+    if(!Number.isInteger(normalized.start)||!Number.isInteger(normalized.end)||normalized.start<0||normalized.end<=normalized.start||normalized.end>sourceText.length){
+      errors.push({ref:normalized,reason:'requirement_range_invalid'});continue;
+    }
+    excerpts.push({...normalized,text:sourceText.slice(normalized.start,normalized.end)});
+  }
+  if(!excerpts.length&&!errors.length)errors.push({ref:null,reason:'requirement_refs_required'});
+  return{valid:errors.length===0,excerpts,errors};
+}
+
+function proofCandidates(candidate,excerpts){
+  const evidence=excerpts.map((excerpt,index)=>({
+    id:`${candidate.id}:source:${index+1}`,
+    sourceType:'human',
+    coverage:'component',
+    locator:`${excerpt.sourceId}#${excerpt.start}-${excerpt.end}`,
+    observation:excerpt.text,
+    sourceContext:excerpt.text,
+  }));
+  const semantic=`${candidate.key} = ${JSON.stringify(candidate.value)}`;
+  return[
+    {id:`${candidate.id}:support`,targetId:candidate.id,candidateType:'claim',proofKind:'requirement_fidelity_support',statement:`The cited Requirement explicitly supports semantic item ${semantic}.`,evidence},
+    {id:`${candidate.id}:contradiction`,targetId:candidate.id,candidateType:'claim',proofKind:'requirement_fidelity_contradiction',statement:`The cited Requirement explicitly contradicts semantic item ${semantic}.`,evidence},
+  ];
+}
+
+function classify(candidate,responseById){
+  const support=responseById.get(`${candidate.id}:support`),contradiction=responseById.get(`${candidate.id}:contradiction`);
+  const supports=support?.verdict==='supported',contradicts=contradiction?.verdict==='supported';
+  if(supports&&!contradicts)return{certification:FidelityCertification.SUPPORTED,reason:text(support?.reason)||'Requirement supports the candidate semantic value.'};
+  if(!supports&&contradicts)return{certification:FidelityCertification.UNSUPPORTED,reason:text(contradiction?.reason)||'Requirement contradicts the candidate semantic value.'};
+  if(supports&&contradicts)return{certification:FidelityCertification.UNRESOLVED,reason:'Requirement proof is internally conflicting; semantic value remains unresolved.'};
+  return{certification:FidelityCertification.UNRESOLVED,reason:text(support?.reason)||text(contradiction?.reason)||'Requirement does not prove or contradict the candidate semantic value.'};
+}
+
+export class TaskContractFidelityVerifier{
+  constructor({executor=null,modelRouter=null}={}){this.executor=executor;this.modelRouter=modelRouter;}
+  available(){return typeof this.executor?.runValidator==='function';}
+
+  async review({task,candidates=[],policyContext=null,onProgress=null,onExecutionStarted=null,signal=null}={}){
+    const sources=task?.requirementSources??task?.requirement_sources??[];
+    const normalized=(Array.isArray(candidates)?candidates:[]).map(createAuthoritySemanticCandidate);
+    const prepared=[];const reviews=[];
+    for(const candidate of normalized){
+      const resolved=resolveRequirementRefs(sources,candidate.requirementRefs);
+      if(!resolved.valid){
+        reviews.push({...candidate,certification:FidelityCertification.UNRESOLVED,reason:`Requirement provenance is not valid: ${resolved.errors.map(error=>error.reason).join(', ')}`});
+        continue;
+      }
+      prepared.push({candidate,proofs:proofCandidates(candidate,resolved.excerpts)});
+    }
+    if(!prepared.length)return{checked:reviews.length>0,reviews};
+    if(!this.available()){
+      for(const {candidate} of prepared)reviews.push({...candidate,certification:FidelityCertification.UNRESOLVED,reason:'Validator semantic certification is unavailable; authority semantics cannot be expanded.'});
+      return{checked:true,reviews};
+    }
+    await this.modelRouter?.prepare?.({role:'validator',task});
+    onProgress?.({summary:'Validator 正在核对 Requirement',detail:`正在逐项核对 ${prepared.length} 个 Contract semantic item；只读取其 requirementRefs 指向的原始片段。`});
+    const response=await this.executor.runValidator({
+      task,
+      candidates:prepared.flatMap(item=>item.proofs),
+      policyContext,
+      modelPolicy:this.modelRouter?.route?.({role:'validator',task})||null,
+      onProgress,onExecutionStarted,signal,
+    });
+    const byId=new Map((Array.isArray(response?.reviews)?response.reviews:[]).map(item=>[text(item?.id),item]).filter(([id])=>id));
+    for(const {candidate} of prepared)reviews.push({...candidate,...classify(candidate,byId)});
+    return{checked:true,reviews};
+  }
+}
+
+export function applyAuthorityFidelity(taskContract,candidates=[],reviews=[]){
+  if(!taskContract||typeof taskContract!=='object')throw new Error('TASK_CONTRACT_REQUIRED');
+  const next=clone(taskContract),byId=new Map((Array.isArray(reviews)?reviews:[]).map(review=>[text(review?.id),review]).filter(([id])=>id));
+  next.authority={...(next.authority||{})};
+  for(const raw of Array.isArray(candidates)?candidates:[]){
+    const candidate=createAuthoritySemanticCandidate(raw),review=byId.get(candidate.id);
+    const certification=Object.values(FidelityCertification).includes(review?.certification)?review.certification:FidelityCertification.UNRESOLVED;
+    next.authority[candidate.key]={
+      value:clone(candidate.value),
+      certification,
+      requirement_refs:candidate.requirementRefs.map(ref=>({source_id:ref.sourceId,start:ref.start,end:ref.end})),
+    };
+  }
+  return next;
+}
