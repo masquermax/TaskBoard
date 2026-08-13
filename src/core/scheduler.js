@@ -202,14 +202,6 @@ export class Scheduler {
         return done;
       }
 
-      if(outcome.kind==='complete'){
-        if(!admitted){const error=new Error('EXECUTOR_START_NOT_REPORTED');error.nonRetryable=true;throw error;}
-        this.ensureQuiescent(taskId);
-        const done=this.repository.transitionTask(taskId,TaskStatus.COMPLETED,{completionReason:CompletionReason.SUCCESS,finalResult:outcome.finalResult,lastStageResult:outcome.stageResult,clearCancel:true,executionState:null});
-        this.setActivity(taskId,{state:'completed',summary:'任务已完成',detail:outcome.summary||'最终结果已经形成。',current:null});
-        this.rootRuntime.cleanupTaskWorkspace?.(taskId);
-        return done;
-      }
       if(outcome.kind==='needs_human'){
         if(!admitted){const error=new Error('EXECUTOR_START_NOT_REPORTED');error.nonRetryable=true;throw error;}
         this.ensureQuiescent(taskId);
