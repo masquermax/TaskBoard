@@ -31,7 +31,7 @@ jobs:
         run: |
           for patch in scripts/phase3-*.patch; do
             echo "Applying $patch"
-            git apply --recount "$patch"
+            git apply --recount --unidiff-zero "$patch"
           done
       - run: git diff --check
       - run: npm run verify
