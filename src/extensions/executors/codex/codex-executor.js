@@ -1,5 +1,5 @@
 import { humanGatewayEvidenceId } from '../../../governance/human-gateway-evidence.js';
-import { mkdirSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { extname, resolve } from 'node:path';
@@ -133,20 +133,42 @@ export class CodexExecutor extends ExecutorPort {
   taskWorkspace(task){const id=typeof task==='string'?task:task.id;const dir=resolve(this.runtimeRoot,id);mkdirSync(dir,{recursive:true});return dir;}
   workUnitWorkspace(task,workUnitId='work'){const safe=String(workUnitId||'work').replace(/[^A-Za-z0-9._-]/g,'_');const dir=resolve(this.taskWorkspace(task),'work-units',safe);mkdirSync(dir,{recursive:true});return dir;}
   cleanupTaskWorkspace(taskId){try{rmSync(resolve(this.runtimeRoot,String(taskId)),{recursive:true,force:true});return true;}catch{return false;}}
-  executionScope(task,policyContext=null,{role='root',projectAccess='none',workUnitId=null}={}){
+  executionScope(task,policyContext=null,{workUnitId=null}={}){
+    const grant=policyContext?.executionGrant;
+    if(!grant){const error=new Error('EXECUTION_GRANT_REQUIRED: role Capability Contract was not compiled into a Runtime execution grant.');error.nonRetryable=true;throw error;}
+    const role=String(grant.role||'');
+    if(!['root','subagent','validator'].includes(role)){const error=new Error(`EXECUTION_GRANT_ROLE_INVALID: ${role||'missing'}`);error.nonRetryable=true;throw error;}
     const paths=(task.projectScopes||[]).map(s=>s.path).filter(Boolean).map(p=>resolve(p));
-    if(role==='validator'){const scratch=resolve(this.taskWorkspace(task),'validator');mkdirSync(scratch,{recursive:true});return{cwd:scratch,writableRoots:[],scratch,projectAccess:'none'};}
-    if(role==='subagent'){
-      const scratch=this.workUnitWorkspace(task,workUnitId);
-      const wantsWrite=projectAccess==='write'&&policyContext?.taskMode==='execution';
-      if(wantsWrite)return{cwd:paths[0]||scratch,writableRoots:[...new Set([...paths,scratch])],scratch,projectAccess:'write'};
-      if(projectAccess==='read')return{cwd:scratch,writableRoots:[scratch],scratch,projectAccess:'read'};
-      return{cwd:scratch,writableRoots:[scratch],scratch,projectAccess:'none'};
-    }
-    // Root owns Task reasoning, not source investigation. It receives no Project
-    // path, attachment local path, network, or project-write capability.
-    const scratch=resolve(this.taskWorkspace(task),'root');mkdirSync(scratch,{recursive:true});
-    return{cwd:scratch,writableRoots:[scratch],scratch,projectAccess:'none'};
+    const scratch=role==='subagent'?this.workUnitWorkspace(task,workUnitId):(resolve(this.taskWorkspace(task),role));mkdirSync(scratch,{recursive:true});
+    const projectAccess=role==='subagent'?String(grant.projectAccess||'none'):'none';
+    if(projectAccess!=='none'&&!paths.length){const error=new Error('EXECUTION_GRANT_SCOPE_MISMATCH: Project access was granted without a selected Project input.');error.nonRetryable=true;throw error;}
+    if(projectAccess==='none'&&paths.length&&role==='subagent'){const error=new Error('EXECUTION_GRANT_SCOPE_MISMATCH: scoped Task contains Project input while projectAccess=none.');error.nonRetryable=true;throw error;}
+    const runtimeWorkspaceRoots=[scratch,...(role==='subagent'&&projectAccess!=='none'?paths:[])];
+    const fileAccess=role==='subagent'&&projectAccess==='write'?'write':'read';
+    const networkAccess=role==='subagent'&&grant.networkAccess===true&&this.networkAccess===true;
+    const permissionProfile='taskboard_runtime';
+    const runtimeConfig={
+      permissions:{taskboard_runtime:{filesystem:{':minimal':'read',':workspace_roots':{'.':fileAccess}},network:{enabled:networkAccess}}},
+      features:{plugins:false,connectors:false,apps:false},
+      skills:{include_instructions:false},
+      web_search:networkAccess?'live':'disabled',
+      include_apps_instructions:false,
+      allow_login_shell:false,
+    };
+    return{cwd:scratch,writableRoots:fileAccess==='write'?runtimeWorkspaceRoots:[],scratch,projectAccess,permissionProfile,runtimeWorkspaceRoots,environments:role==='subagent'?null:[],runtimeConfig,networkAccess};
+  }
+  stageSelectedAttachments(task,scratch,attachments=task.attachments||[]){
+    const selected=(Array.isArray(attachments)?attachments:[]).filter(item=>item?.path&&existsSync(item.path));
+    if(!selected.length)return{...task,attachments:[]};
+    const inputDir=resolve(scratch,'inputs');mkdirSync(inputDir,{recursive:true});
+    const staged=selected.map((attachment,index)=>{
+      const safe=String(attachment.id||attachment.name||index+1).replace(/[^A-Za-z0-9._-]/g,'_');
+      const extension=extname(attachment.name||attachment.path||'');
+      const target=resolve(inputDir,`${index+1}-${safe}${extension&&safe.toLowerCase().endsWith(extension.toLowerCase())?'':extension}`);
+      copyFileSync(attachment.path,target);
+      return{...attachment,path:target};
+    });
+    return{...task,attachments:staged};
   }
   attachmentInputs(task){return(task.attachments||[]).filter(isSupportedLocalImage).map(a=>({type:'localImage',path:a.path}));}
   validatorAttachmentInputs(task,candidates=[]){
@@ -163,6 +185,7 @@ export class CodexExecutor extends ExecutorPort {
 
   rootPrompt({task,subagentResults,activeWork=[],humanGatewayHistory,policyContext=null,planningFeedback=null,scratchPath=null,validationFeedback=null,previousDecision=null,certifiedContext=null,authorityHandoff=false}){
     const refs=(task.references||[]).map(r=>({taskId:r.source_task_id,title:r.title,result:r.final_result}));
+    const completedWork=(task.workReceipts||[]).map(receipt=>({id:receipt.id,title:receipt.workUnit?.title||receipt.id,goal:receipt.workUnit?.goal||'',inputRefs:receipt.workUnit?.inputRefs||[],projectAccess:receipt.workUnit?.projectAccess||'none',networkAccess:receipt.workUnit?.networkAccess===true,completedAt:receipt.completed_at||null}));
     const resolvedHuman=(humanGatewayHistory||[]).filter(g=>g.status==='RESOLVED').map(g=>({id:g.id,evidenceId:humanGatewayEvidenceId(g),targetGapId:g.targetGapId??g.target_gap_id??null,question:g.question,answer:g.answer}));
     const planningBlock=planningFeedback?.length?`\nWORK PLAN REPAIR — the Work Unit capability/dependency contract is invalid. Correct only these planning fields.\n${JSON.stringify(planningFeedback,null,2)}\n`:'';
     const validationBlock=validationFeedback?.length?`\nVALIDATOR FEEDBACK — the candidate content was not fully certifiable. Correct only the listed proof-boundary issues and preserve already certified content.\n${JSON.stringify(validationFeedback,null,2)}\nPrevious candidate:\n${JSON.stringify(previousDecision,null,2)}\n`:'';
@@ -193,6 +216,7 @@ Task Input Catalog (use these refs in Work Unit inputRefs):\n${JSON.stringify(ta
 
 TaskBoard Scratch:\n${scratchPath||'(none)'}
 Referenced completed Results:\n${JSON.stringify(refs,null,2)}
+Completed Work Receipts (control history only; Task knowledge remains Current Certified State):\n${JSON.stringify(completedWork,null,2)}
 Resolved Human Gateway answers:\n${JSON.stringify(resolvedHuman,null,2)}
 Last valuable stage result:\n${task.last_stage_result||'(none)'}
 Source-traced Work Unit results delivered to Root:\n${JSON.stringify(subagentResults||[],null,2)}
@@ -244,8 +268,8 @@ Return only the structured Subagent result.`;
 
 
   async runRoot(request){const scope=this.executionScope(request.task,request.policyContext,{role:'root'});const text=await this.client.runTurn({...scope,prompt:this.rootPrompt({...request,scratchPath:scope.scratch||null}),inputItems:[],outputSchema:rootSchema,model:request.modelPolicy?.model||null,reasoningEffort:request.modelPolicy?.reasoningEffort||null,networkAccess:false,onProgress:request.onProgress||null,onExecutionStarted:request.onExecutionStarted||null,signal:request.signal||null,diagnosticContext:{taskId:request.task?.id||null,workUnitId:null,role:'root',routeReason:request.modelPolicy?.routeReason||null,configuredDefaultModel:request.modelPolicy?.configuredDefaultModel||null}});return safeParse(text);}
-  async runSubagent(request){const scope=this.executionScope(request.task,request.policyContext,{role:'subagent',projectAccess:request.delegation?.projectAccess||'none',workUnitId:request.delegation?.id});const networkAccess=request.delegation?.networkAccess===true&&this.networkAccess===true;const text=await this.client.runTurn({cwd:scope.cwd,writableRoots:scope.writableRoots,prompt:this.subagentPrompt(request),inputItems:this.attachmentInputs(request.task),outputSchema:subagentSchema,model:request.modelPolicy?.model||null,reasoningEffort:request.modelPolicy?.reasoningEffort||null,networkAccess,onProgress:request.onProgress||null,onExecutionStarted:request.onExecutionStarted||null,signal:request.signal||null,stopCondition:request.delegation?.stopCondition||null,diagnosticContext:{taskId:request.task?.id||null,workUnitId:request.delegation?.id||null,role:'subagent',routeReason:request.modelPolicy?.routeReason||null,configuredDefaultModel:request.modelPolicy?.configuredDefaultModel||null}});return safeParse(text);}
-  async runValidator(request){const scope=this.executionScope(request.task,request.policyContext,{role:'validator'});const text=await this.client.runTurn({cwd:scope.cwd,writableRoots:[],prompt:this.validatorPrompt(request),inputItems:this.validatorAttachmentInputs(request.task,request.candidates),outputSchema:validatorSchema,model:request.modelPolicy?.model||null,reasoningEffort:request.modelPolicy?.reasoningEffort||null,networkAccess:false,onProgress:request.onProgress||null,onExecutionStarted:request.onExecutionStarted||null,signal:request.signal||null,diagnosticContext:{taskId:request.task?.id||null,workUnitId:null,role:'validator',routeReason:request.modelPolicy?.routeReason||null,configuredDefaultModel:request.modelPolicy?.configuredDefaultModel||null}});return safeParse(text);}
+  async runSubagent(request){const scope=this.executionScope(request.task,request.policyContext,{workUnitId:request.delegation?.id});const stagedTask=this.stageSelectedAttachments(request.task,scope.scratch);const text=await this.client.runTurn({...scope,prompt:this.subagentPrompt({...request,task:stagedTask}),inputItems:this.attachmentInputs(stagedTask),outputSchema:subagentSchema,model:request.modelPolicy?.model||null,reasoningEffort:request.modelPolicy?.reasoningEffort||null,onProgress:request.onProgress||null,onExecutionStarted:request.onExecutionStarted||null,signal:request.signal||null,stopCondition:request.delegation?.stopCondition||null,diagnosticContext:{taskId:request.task?.id||null,workUnitId:request.delegation?.id||null,role:'subagent',projectAccess:scope.projectAccess,networkAccess:scope.networkAccess,routeReason:request.modelPolicy?.routeReason||null,configuredDefaultModel:request.modelPolicy?.configuredDefaultModel||null}});return safeParse(text);}
+  async runValidator(request){const scope=this.executionScope(request.task,request.policyContext,{workUnitId:null});const cited=this.validatorAttachmentInputs(request.task,request.candidates).map(item=>(request.task.attachments||[]).find(attachment=>attachment.path===item.path)).filter(Boolean);const stagedTask=this.stageSelectedAttachments(request.task,scope.scratch,cited);const text=await this.client.runTurn({...scope,prompt:this.validatorPrompt({...request,task:stagedTask}),inputItems:this.attachmentInputs(stagedTask),outputSchema:validatorSchema,model:request.modelPolicy?.model||null,reasoningEffort:request.modelPolicy?.reasoningEffort||null,onProgress:request.onProgress||null,onExecutionStarted:request.onExecutionStarted||null,signal:request.signal||null,diagnosticContext:{taskId:request.task?.id||null,workUnitId:null,role:'validator',projectAccess:'none',networkAccess:false,routeReason:request.modelPolicy?.routeReason||null,configuredDefaultModel:request.modelPolicy?.configuredDefaultModel||null}});return safeParse(text);}
 }
 
 export { rootSchema, subagentSchema, validatorSchema };

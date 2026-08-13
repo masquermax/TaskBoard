@@ -27,7 +27,13 @@ export class TaskService {
 
   publicTask(task) {
     if (!task) return task;
-    const { analysisState:_internalAnalysisState, ...visible } = task;
+    const {
+      analysisState:_analysisState, analysis_state:_analysisStateRaw,
+      workReceipts:_workReceipts, work_receipts:_workReceiptsRaw,
+      execution_state:_executionStateRaw,
+      ...visible
+    } = task;
+    if(Array.isArray(visible.attachments))visible.attachments=visible.attachments.map(({path:_localPath,...attachment})=>attachment);
     return visible;
   }
 

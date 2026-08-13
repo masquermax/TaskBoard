@@ -132,7 +132,7 @@ test('Codex Validator narrow proof turn is read-only, network-disabled, and rece
   const client={async runTurn(request){calls.push(request);return JSON.stringify({reviews:[{id:'C-1',verdict:'overreach',reason:'missing proof'}]});},async health(){return{available:true,connected:true,authenticated:true};}};
   const executor=new CodexExecutor({runtimeRoot:join(dir,'runtime'),client});
   try{
-    const result=await executor.runValidator({task:{id:'T',title:'分析',projectScopes:[{path:project}],attachments:[]},candidates:[{id:'C-1',statement:'claim',evidence:[{id:'E-1',locator:'A#L1',observation:'raw'}]}],policyContext:{taskMode:'analysis',prompt:'CAPABILITY CONTRACT — VALIDATOR'},modelPolicy:{model:null,reasoningEffort:null}});
+    const result=await executor.runValidator({task:{id:'T',title:'分析',projectScopes:[{path:project}],attachments:[]},candidates:[{id:'C-1',statement:'claim',evidence:[{id:'E-1',locator:'A#L1',observation:'raw'}]}],policyContext:{taskMode:'analysis',prompt:'CAPABILITY CONTRACT — VALIDATOR',executionGrant:{role:'validator',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'proof-only'}},modelPolicy:{model:null,reasoningEffort:null}});
     assert.equal(result.reviews[0].verdict,'overreach');
     assert.equal(calls[0].networkAccess,false);
     assert.deepEqual(calls[0].writableRoots,[]);
@@ -150,8 +150,12 @@ test('Codex Validator sees only the cited visual attachment',async()=>{
   const calls=[];const client={async runTurn(request){calls.push(request);return JSON.stringify({reviews:[{id:'C-1',verdict:'supported',reason:'supported'}]});},async health(){return{available:true,connected:true,authenticated:true};}};
   const executor=new CodexExecutor({runtimeRoot:join(dir,'runtime'),client});
   try{
-    await executor.runValidator({task:{id:'T',title:'分析',projectScopes:[{path:project}],attachments:[{name:'cited.png',mimeType:'image/png',path:cited},{name:'unrelated.png',mimeType:'image/png',path:unrelated}]},candidates:[{id:'C-1',statement:'外部备注不可修改',evidence:[{id:'E-1',sourceType:'attachment_visual',locator:'cited.png#page=1',observation:'外部备注不可修改',sourceContext:'cited region'}]}],policyContext:{taskMode:'analysis',prompt:'CAPABILITY CONTRACT — VALIDATOR'},modelPolicy:{model:null,reasoningEffort:null}});
-    assert.deepEqual(calls[0].inputItems,[{type:'localImage',path:cited}]);
+    await executor.runValidator({task:{id:'T',title:'分析',projectScopes:[{path:project}],attachments:[{name:'cited.png',mimeType:'image/png',path:cited},{name:'unrelated.png',mimeType:'image/png',path:unrelated}]},candidates:[{id:'C-1',statement:'外部备注不可修改',evidence:[{id:'E-1',sourceType:'attachment_visual',locator:'cited.png#page=1',observation:'外部备注不可修改',sourceContext:'cited region'}]}],policyContext:{taskMode:'analysis',prompt:'CAPABILITY CONTRACT — VALIDATOR',executionGrant:{role:'validator',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'proof-only'}},modelPolicy:{model:null,reasoningEffort:null}});
+    assert.equal(calls[0].inputItems.length,1);
+    assert.equal(calls[0].inputItems[0].type,'localImage');
+    assert.notEqual(calls[0].inputItems[0].path,cited,'Validator receives a TaskBoard-managed copy, not the shared attachment-store path');
+    assert.match(calls[0].inputItems[0].path,/validator[\\/]inputs[\\/]/);
+    assert.equal(calls[0].inputItems.some(item=>item.path===unrelated),false);
     assert.doesNotMatch(calls[0].prompt,/unrelated\.png/);
   }finally{rmSync(dir,{recursive:true,force:true});}
 });

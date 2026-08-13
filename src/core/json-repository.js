@@ -31,6 +31,7 @@ export class JsonTaskDatabase {
         if (task.execution_state === undefined) task.execution_state = null;
         task.execution_state = migrateExecutionState(task.execution_state);
         if (task.analysis_state === undefined) task.analysis_state = null;
+        if (!Array.isArray(task.work_receipts)) task.work_receipts = [];
         if (task.completion_reason === undefined) task.completion_reason = task.status === TaskStatus.COMPLETED ? CompletionReason.SUCCESS : null;
       }
       return state;
@@ -92,7 +93,7 @@ export class JsonTaskRepository {
         if(!source||source.status!==TaskStatus.COMPLETED||source.deleted_at)throw new Error('REFERENCE_MUST_BE_COMPLETED');
         return source;
       });
-      this.state.tasks.push({ id,title:title.trim(),instruction:instruction.trim(),status:TaskStatus.READY,ready_reason:ReadyReason.NEW,status_entered_at:now,created_at:now,completed_at:null,completion_reason:null,last_stage_result:null,final_result:null,executor_key:executorKey,locked:false,deleted_at:null,cancel_requested_at:null,execution_state:null,analysis_state:null });
+      this.state.tasks.push({ id,title:title.trim(),instruction:instruction.trim(),status:TaskStatus.READY,ready_reason:ReadyReason.NEW,status_entered_at:now,created_at:now,completed_at:null,completion_reason:null,last_stage_result:null,final_result:null,executor_key:executorKey,locked:false,deleted_at:null,cancel_requested_at:null,execution_state:null,analysis_state:null,work_receipts:[] });
       this.addPhase(id,TaskStatus.READY,now);
       if(project)this.addScope({taskId:id,source:'registry',projectId:project.id,label:project.name,path:project.path,createdAt:now});
       if(temporaryProjectPath?.trim())this.addScope({taskId:id,source:'temporary',projectId:null,label:'临时项目范围',path:temporaryProjectPath.trim(),createdAt:now});
@@ -127,7 +128,7 @@ export class JsonTaskRepository {
     const refs=this.state.references.filter(r=>r.target_task_id===row.id).sort((a,b)=>a.id-b.id).map(r=>{const s=this.state.tasks.find(t=>t.id===r.source_task_id);return s?{source_task_id:s.id,title:s.title,final_result:s.final_result,completed_at:s.completed_at}:null;}).filter(Boolean);
     const g=[...this.state.gateways].filter(x=>x.task_id===row.id&&x.status==='PENDING').sort((a,b)=>b.created_at.localeCompare(a.created_at))[0]||null;
     const attachments=this.state.attachments.filter(a=>a.task_id===row.id).sort((a,b)=>a.created_at.localeCompare(b.created_at));
-    return clone({ ...row,locked:Boolean(row.locked),ready_reason:migrateReadyReason(row.ready_reason),completion_reason:row.completion_reason||(row.status===TaskStatus.COMPLETED?CompletionReason.SUCCESS:null),executionState:migrateExecutionState(row.execution_state),analysisState:row.analysis_state||null,
+    return clone({ ...row,locked:Boolean(row.locked),ready_reason:migrateReadyReason(row.ready_reason),completion_reason:row.completion_reason||(row.status===TaskStatus.COMPLETED?CompletionReason.SUCCESS:null),executionState:migrateExecutionState(row.execution_state),analysisState:row.analysis_state||null,workReceipts:Array.isArray(row.work_receipts)?clone(row.work_receipts):[],
       projectScopes:scopes.map(s=>{const p=s.project_id?this.state.projects.find(x=>x.id===s.project_id):null;return{source:s.source,projectId:s.project_id,label:s.source==='registry'?(p?.name||s.label):(s.label||'临时项目范围'),path:s.source==='registry'?(p?.path||s.path):s.path};}),references:refs,
       attachments:attachments.map(a=>({id:a.id,name:a.name,mimeType:a.mime_type,size:a.size_bytes,path:a.path,createdAt:a.created_at})),pendingGateway:g?{...g,options:g.options||[]}:null });
   }
@@ -141,7 +142,28 @@ export class JsonTaskRepository {
   touchTask(id,{readyReason=undefined,executionState=undefined}={}){const t=this.state.tasks.find(x=>x.id===id);if(!t)throw new Error('TASK_NOT_FOUND');this.store.transaction(()=>{if(readyReason!==undefined)t.ready_reason=readyReason;if(executionState!==undefined)t.execution_state=executionState;});return this.getTask(id);}
   updateStageResult(id,value){const t=this.state.tasks.find(x=>x.id===id);if(!t)throw new Error('TASK_NOT_FOUND');this.store.transaction(()=>{t.last_stage_result=value||null;});return this.getTask(id);}
   setExecutionState(id,state){const t=this.state.tasks.find(x=>x.id===id);if(!t)throw new Error('TASK_NOT_FOUND');this.store.transaction(()=>{t.execution_state=state;});return this.getTask(id);}
-  commitCertifiedTurn(taskId,{analysisState,historyCommit=null}){const t=this.state.tasks.find(x=>x.id===taskId);if(!t)throw new Error('TASK_NOT_FOUND');this.store.transaction(()=>{t.analysis_state=analysisState==null?null:clone(analysisState);if(historyCommit?.title&&historyCommit?.detail){this.state.progressHistory.push({id:++this.state.counters.progress,task_id:taskId,title:historyCommit.title,detail:historyCommit.detail,completed_at:historyCommit.completedAt||this.now()});t.last_stage_result=historyCommit.detail||null;}});return this.getTask(taskId);}
+  commitWorkReceipt(taskId,receipt){
+    const t=this.state.tasks.find(x=>x.id===taskId);if(!t)throw new Error('TASK_NOT_FOUND');
+    const value=clone(receipt||{});const id=String(value.id||value.workUnit?.id||'').trim(),signature=String(value.signature||'').trim();
+    if(!id||!signature||!value.result||!value.workUnit)throw new Error('WORK_RECEIPT_INVALID');
+    this.store.transaction(()=>{
+      if(!Array.isArray(t.work_receipts))t.work_receipts=[];
+      const byId=t.work_receipts.find(item=>String(item?.id||'')===id);
+      if(byId&&String(byId.signature||'')!==signature)throw new Error('WORK_RECEIPT_ID_CONFLICT');
+      const existing=t.work_receipts.find(item=>String(item?.signature||'')===signature);
+      if(existing)return;
+      t.work_receipts.push({...value,id,signature,completed_at:value.completed_at||this.now(),consumed_at:null});
+    });
+    return this.getTask(taskId);
+  }
+  consumeWorkReceipts(taskId,workReceiptIds=[]){
+    const t=this.state.tasks.find(x=>x.id===taskId);if(!t)throw new Error('TASK_NOT_FOUND');
+    const consumed=new Set((Array.isArray(workReceiptIds)?workReceiptIds:[]).map(value=>String(value||'').trim()).filter(Boolean));
+    if(!consumed.size)return this.getTask(taskId);
+    this.store.transaction(()=>{for(const receipt of t.work_receipts||[])if(consumed.has(String(receipt?.id||''))&&!receipt.consumed_at)receipt.consumed_at=this.now();});
+    return this.getTask(taskId);
+  }
+  commitCertifiedTurn(taskId,{analysisState,historyCommit=null,workReceiptIds=[]}){const t=this.state.tasks.find(x=>x.id===taskId);if(!t)throw new Error('TASK_NOT_FOUND');this.store.transaction(()=>{t.analysis_state=analysisState==null?null:clone(analysisState);const consumed=new Set((Array.isArray(workReceiptIds)?workReceiptIds:[]).map(value=>String(value||'').trim()).filter(Boolean));if(consumed.size){for(const receipt of t.work_receipts||[])if(consumed.has(String(receipt?.id||''))&&!receipt.consumed_at)receipt.consumed_at=this.now();}if(historyCommit?.title&&historyCommit?.detail){this.state.progressHistory.push({id:++this.state.counters.progress,task_id:taskId,title:historyCommit.title,detail:historyCommit.detail,completed_at:historyCommit.completedAt||this.now()});t.last_stage_result=historyCommit.detail||null;}});return this.getTask(taskId);}
   setCancelRequested(id,value=true){const t=this.state.tasks.find(x=>x.id===id);if(!t)throw new Error('TASK_NOT_FOUND');this.store.transaction(()=>{t.cancel_requested_at=value?this.now():null;});return this.getTask(id);}
   setDeleted(id,value=true){const t=this.state.tasks.find(x=>x.id===id);if(!t)throw new Error('TASK_NOT_FOUND');this.store.transaction(()=>{t.deleted_at=value?this.now():null;});return this.getTask(id);}
   setLocked(id,locked){const t=this.state.tasks.find(x=>x.id===id);if(!t)throw new Error('TASK_NOT_FOUND');this.store.transaction(()=>{t.locked=Boolean(locked);});return this.getTask(id);}

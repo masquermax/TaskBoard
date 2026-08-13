@@ -178,7 +178,7 @@ test('validated analysis knowledge creates History even when Root returns no pro
   };
   const x=rig(executor,{governance:true});const commits=[];
   try{
-    const outcome=await x.root.execute({id:'H-1',title:'OA需求分析',instruction:'根据附件分析',projectScopes:[],attachments:[{name:'requirements.txt',path:attachment}],references:[{source_task_id:'REF-1',title:'已确认需求',final_result:'附件规定 OA→ERP 为现有逻辑'}]},{onProgressCommit:c=>commits.push(c)});
+    const outcome=await x.root.execute({id:'H-1',title:'OA需求分析',instruction:'根据附件分析',projectScopes:[],attachments:[],references:[{source_task_id:'REF-1',title:'已确认需求',final_result:'附件规定 OA→ERP 为现有逻辑'}]},{onProgressCommit:c=>commits.push(c)});
     assert.equal(outcome.kind,'complete');
     assert.deepEqual(commits,[{title:'阶段事实已确认',detail:'附件规定 OA→ERP 为现有逻辑',completedAt:commits[0].completedAt}]);
   }finally{x.close();rmSync(dir,{recursive:true,force:true});}

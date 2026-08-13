@@ -282,16 +282,18 @@ export class RootRuntime {
 
   createSession(task) {
     const restoredAnalysisState = normalizeCertifiedState(task.analysisState);
+    const durableWorkReceipts=(Array.isArray(task.workReceipts)?task.workReceipts:[]).filter(receipt=>receipt?.signature&&receipt?.workUnit&&receipt?.result);
+    const pendingWorkResults=durableWorkReceipts.filter(receipt=>!receipt.consumed_at).map(receipt=>({...clone(receipt.result),workUnit:clone(receipt.workUnit),persistedReceipt:true}));
     const session = {
       taskId: task.id,
       round: 0,
       // Certified Work Unit results waiting for the next Root synthesis. Results
       // already absorbed into a certified Root result are removed to keep context bounded.
-      subagentResults: [],
+      subagentResults: pendingWorkResults,
       currentStage: null,
       // Runtime-only execution visibility. These completed Work Units remain visible
       // while the Task is still open, but never become certified knowledge/History.
-      completedWorkUnits: [],
+      completedWorkUnits: durableWorkReceipts.map(receipt=>({ id:receipt.id, stageId:null, title:receipt.workUnit.title||receipt.id, projectAccess:receipt.workUnit.projectAccess||'none', networkAccess:receipt.workUnit.networkAccess===true, status:WorkUnitStatus.COMPLETED, detail:receipt.result?.result||'工作已完成。', updatedAt:receipt.completed_at||nowIso(), failureCount:0, nextRetryAt:null, canRetry:false, owner:'subagent' })),
       cancelRequested: false,
       rootController: null,
       runningControllers: new Map(),
@@ -309,7 +311,7 @@ export class RootRuntime {
       // Work Unit identity is semantic, not merely an Agent-provided id. Keeping
       // accepted signatures prevents Root from accidentally re-issuing the same
       // completed/active work under fresh ids instead of making a new Task decision.
-      issuedWorkSignatures: new Set(),
+      issuedWorkSignatures: new Set(durableWorkReceipts.map(receipt=>String(receipt.signature||'')).filter(Boolean)),
       pendingValidation: null,
       rootTurnCount: 0,
       controlHandoffCount: 0,
@@ -467,8 +469,9 @@ export class RootRuntime {
       recordTaskDiagnostic('human-gap-proof-result',{taskId:task.id,gatewayId,targetGapId,proofAttempted:Boolean(synthesizeHumanGapResolution&&beforeOpen),resolved:beforeOpen&&!afterOpen,gapStillOpen:afterOpen});
     }
     const historyCommit=deriveHistoryFromTurn(prepared.turnNode);
+    const workReceiptIds=(Array.isArray(rootInputs)?rootInputs:[]).map(item=>String(item?.delegationId||item?.workUnit?.id||'').trim()).filter(Boolean);
     if(prepared.turnNode){
-      const commitPayload={analysisState:prepared.state,turnNode:prepared.turnNode,historyCommit:historyCommit?{...historyCommit,completedAt:prepared.turnNode.committedAt}:null};
+      const commitPayload={analysisState:prepared.state,turnNode:prepared.turnNode,historyCommit:historyCommit?{...historyCommit,completedAt:prepared.turnNode.committedAt}:null,workReceiptIds};
       if(callbacks.onCertifiedTurn)callbacks.onCertifiedTurn(commitPayload);
       else if(historyCommit)this.commitProgress(session,callbacks,[historyCommit]);
       session.analysisState=prepared.state;
@@ -479,6 +482,8 @@ export class RootRuntime {
         const key=`${historyCommit.title}\n${historyCommit.detail}`;
         session.committedProgressKeys.add(key);
       }
+    } else if(workReceiptIds.length) {
+      callbacks.onWorkReceiptsConsumed?.(workReceiptIds);
     }
     const blockingGap=prepared.current.gaps?.find?.(gap=>gap?.blocking===true);
     const stateFeedback=(prepared.issues||[]).map(issue=>({ruleId:'C-003',target:issue.target||'state',reason:issue.reason,action:issue.code}));
@@ -614,7 +619,7 @@ export class RootRuntime {
       dependencyResults,
     }, {
       signal: controller.signal,
-      policyContext: this.governanceCompiler?.compileForRole?.(task,'subagent',{skillId:unit.skillId}) || session.policyContext,
+      policyContext: this.governanceCompiler?.compileForRole?.(task,'subagent',{skillId:unit.skillId,workUnit:unit}) || session.policyContext,
       onExecutionStarted: _meta => {
         unit.status = WorkUnitStatus.RUNNING;
         unit.owner = 'subagent';
@@ -635,12 +640,12 @@ export class RootRuntime {
       unit.owner = 'subagent';
       unit.detail = result?.result || '工作已完成。';
       unit.updatedAt = nowIso();
-      session.subagentResults.push({
-        ...result,
-        workUnit:{ id:unit.id, title:unit.title, goal:unit.goal, expectedOutput:unit.expectedOutput, stopCondition:unit.stopCondition, projectAccess:unit.projectAccess||'none', networkAccess:unit.networkAccess===true, skillId:unit.skillId },
-      });
+      const workUnit={ id:unit.id, title:unit.title, goal:unit.goal, expectedOutput:unit.expectedOutput, stopCondition:unit.stopCondition, projectAccess:unit.projectAccess||'none', networkAccess:unit.networkAccess===true, skillId:unit.skillId, dependsOn:[...(unit.dependsOn||[])], inputRefs:[...(unit.inputRefs||[])] };
+      const receipt={id:unit.id,signature:workSemanticSignature(workUnit),workUnit,result:clone(result),completed_at:unit.updatedAt};
+      try{callbacks.onWorkReceipt?.(receipt);}catch(error){error.nonRetryable=true;error.workReceiptPersistence=true;throw error;}
+      session.subagentResults.push({...result,workUnit});
     }).catch(error => {
-      if ((session.cancelRequested || unit.stopRequested === 'root_converged') && isInterrupted(error)) return;
+      if (session.cancelRequested && isInterrupted(error)) return;
       if (isCapacityUnavailable(error)) {
         const delay = capacityRetryDelayMs(this.retryDelaysMs);
         unit.owner = null;
@@ -673,18 +678,6 @@ export class RootRuntime {
     return promise;
   }
 
-  async stopReadOnlyWorkForConvergence(session) {
-    const stage=session.currentStage;
-    if(!stage)return;
-    const unfinished=stage.workUnits.filter(unit=>unit.status!==WorkUnitStatus.COMPLETED);
-    if(!unfinished.length||unfinished.some(unit=>(unit.projectAccess||'none')==='write'))return;
-    for(const unit of unfinished)unit.stopRequested='root_converged';
-    for(const [id,controller] of session.runningControllers.entries()){
-      const unit=stage.workUnits.find(item=>item.id===id);
-      if(unit?.stopRequested==='root_converged')controller.abort();
-    }
-    if(session.runningPromises.size)await Promise.allSettled([...session.runningPromises.values()]);
-  }
 
   async runStage(task, session, callbacks) {
     const stage = session.currentStage;
@@ -761,10 +754,10 @@ export class RootRuntime {
 
 
 
-  async execute(task, { humanGatewayHistory = [], onProgress = null, onStageCompleted = null, onStageResult = null, onProgressCommit = null, onCertifiedTurn = null, onExecutionStarted = null } = {}) {
+  async execute(task, { humanGatewayHistory = [], onProgress = null, onStageCompleted = null, onStageResult = null, onProgressCommit = null, onCertifiedTurn = null, onWorkReceipt = null, onWorkReceiptsConsumed = null, onExecutionStarted = null } = {}) {
     const session = this.sessions.get(task.id) || this.createSession(task);
     session.cancelRequested = false;
-    const callbacks = { onProgress, onStageCompleted, onStageResult, onProgressCommit, onCertifiedTurn, onExecutionStarted };
+    const callbacks = { onProgress, onStageCompleted, onStageResult, onProgressCommit, onCertifiedTurn, onWorkReceipt, onWorkReceiptsConsumed, onExecutionStarted };
     const newlyResolvedHuman=(Array.isArray(humanGatewayHistory)?humanGatewayHistory:[]).filter(g=>g?.status==='RESOLVED'&&String(g?.id||'').trim()&&!session.consumedHumanGatewayIds.has(String(g.id).trim()));
     let invocationTriggerRefs=newlyResolvedHuman.map(g=>`human:${String(g.id).trim()}`);
     if(!invocationTriggerRefs.length){
@@ -893,6 +886,20 @@ export class RootRuntime {
       }
       if (decision.kind === 'cancelled') return { kind:'cancelled', quiescent:this.isQuiescent(task.id) };
 
+      const sourceBackedAnalysis=session.policyContext?.taskMode==='analysis'&&Boolean((task.projectScopes||[]).length||(task.attachments||[]).length);
+      const hasCertifiedWorkTrigger=(session.analysisState?.turns||[]).some(turn=>(turn?.triggerRefs||[]).some(ref=>String(ref||'').startsWith('work:')));
+      const hasIssuedSourceWork=session.issuedWorkSignatures.size>0||session.completedWorkUnits.length>0||rootInputs.length>0||hasCertifiedWorkTrigger;
+      if(sourceBackedAnalysis&&decision.kind==='complete'&&!hasIssuedSourceWork){
+        const issue='SOURCE_ANALYSIS_REQUIRES_DELEGATED_EVIDENCE: Root does not own Project/Attachment investigation; source-backed analysis must first obtain bounded Work Unit evidence.';
+        session.planningRepairCount+=1;
+        session.planningFeedback=[issue];
+        session.planningTriggerRefs=[...rootTriggerRefs];
+        session.actor={title:'Completion Contract 校验',status:WorkUnitStatus.COMPLETED,detail:'Root 试图在没有 delegated source evidence 时完成 source-backed analysis；已返回同一 Root 触发做一次受限规划修正。',updatedAt:nowIso(),owner:'root'};
+        this.emit(session,callbacks);
+        if(session.planningRepairCount>=2){const error=new Error(`ROOT_INVALID_COMPLETION_PLAN: ${issue}`);error.nonRetryable=true;throw error;}
+        continue;
+      }
+
       let reviewed;
       try {
         reviewed = await this.reviewRootDecision(task, session, decision, callbacks, { humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs), validatorHumanGatewayHistory:humanGatewayHistory, startAttempt:validationStartAttempt, rootInputs, triggerRefs:rootTriggerRefs, synthesizeHumanGapResolution:pendingValidation?.phase!=='authority_handoff' });
@@ -941,19 +948,9 @@ export class RootRuntime {
       // Root cannot implicitly abandon already-issued Work Units, so completion or
       // Human Gateway waits until the active work set naturally reaches a boundary.
       if (this.hasUnfinishedWork(session) && (decision.kind === 'complete' || decision.kind === 'human_gateway')) {
-        const unfinished=session.currentStage?.workUnits?.filter(unit=>unit.status!==WorkUnitStatus.COMPLETED) || [];
-        const hasWriteWork=unfinished.some(unit=>(unit.projectAccess||'none')==='write');
-        if(!hasWriteWork){
-          // Root owns Task convergence. Once a certified Root decision says the
-          // Task can complete/wait for human, unfinished read-only investigation
-          // no longer has business value and may be stopped. This is distinct
-          // from resource-limit changes, which never preempt active work.
-          await this.stopReadOnlyWorkForConvergence(session);
-        } else {
-          session.actor = { title:'阶段结论已认证', status:WorkUnitStatus.COMPLETED, detail:reviewed.commits.length?'阶段结论已写入历史；存在未完成的写入型 Work Unit，先等待其安全收敛。':'阶段结论已认证；存在未完成的写入型 Work Unit，先等待其安全收敛。', updatedAt:nowIso(), owner:'root' };
-          this.emit(session, callbacks);
-          continue;
-        }
+        session.actor = { title:'阶段结论已认证', status:WorkUnitStatus.COMPLETED, detail:reviewed.commits.length?'阶段结论已写入历史；等待已签发 Work Unit 到达明确停止边界。':'阶段结论已认证；等待已签发 Work Unit 到达明确停止边界。', updatedAt:nowIso(), owner:'root' };
+        this.emit(session, callbacks);
+        continue;
       }
 
       if (decision.kind === 'delegate') {

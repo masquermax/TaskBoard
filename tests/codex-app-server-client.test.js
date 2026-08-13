@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { CodexAppServerClient } from '../src/extensions/executors/codex/app-server-client.js';
 
+function turnGrant(dir){return{permissionProfile:'taskboard_runtime',runtimeWorkspaceRoots:[dir]};}
+
 function createFakeCodex(dir) {
   const file = join(dir, 'codex-fake.mjs');
   writeFileSync(file, `#!/usr/bin/env node
@@ -16,7 +18,7 @@ rl.on('line', line => {
   const msg = JSON.parse(line);
   if (msg.method === 'initialize') return send({ id:msg.id, result:{ userAgent:'fake' } });
   if (msg.method === 'account/read') return send({ id:msg.id, result:{ account:{ type:'chatgpt', planType:'plus' }, requiresOpenaiAuth:true } });
-  if (msg.method === 'thread/start') return send({ id:msg.id, result:{ thread:{ id:'thr_test', ephemeral:true } } });
+  if (msg.method === 'thread/start') return send({ id:msg.id, result:{ thread:{ id:'thr_test', ephemeral:true }, activePermissionProfile:{id:msg.params.permissions}, runtimeWorkspaceRoots:msg.params.runtimeWorkspaceRoots||[] } });
   if (msg.method === 'turn/start') {
     send({ id:msg.id, result:{ turn:{ id:'turn_test', status:'inProgress', items:[] } } });
     setTimeout(() => {
@@ -48,7 +50,7 @@ test('Codex app-server client reads final agentMessage from item/completed', asy
       prompt: 'test',
       inputItems: [],
       outputSchema: { type:'object' },
-      networkAccess: false,
+      networkAccess: false, ...turnGrant(dir),
     });
     assert.match(text, /"kind":"complete"/);
     assert.equal(client.activeTurnCount,0);
@@ -70,7 +72,7 @@ test('Codex turn accounting releases capacity even when the execution-start call
   const client=new CodexAppServerClient({command,diagnosticLogger:line=>diagnostics.push(line)});
   try {
     await assert.rejects(client.runTurn({
-      cwd:dir,writableRoots:[],prompt:'test',inputItems:[],outputSchema:{type:'object'},networkAccess:false,
+      cwd:dir,writableRoots:[],prompt:'test',inputItems:[],outputSchema:{type:'object'},networkAccess:false, ...turnGrant(dir),
       onExecutionStarted(){throw new Error('execution-start callback failed');},
     }),/execution-start callback failed/);
     assert.equal(client.activeTurnCount,0);
@@ -81,28 +83,31 @@ test('Codex turn accounting releases capacity even when the execution-start call
   } finally { client.close(); rmSync(dir,{recursive:true,force:true}); }
 });
 
-function createSandboxStrictFakeCodex(dir) {
-  const file = join(dir, 'codex-sandbox-strict.mjs');
+function createPermissionStrictFakeCodex(dir) {
+  const file = join(dir, 'codex-permission-strict.mjs');
   writeFileSync(file, `#!/usr/bin/env node
 import readline from 'node:readline';
-if (process.argv.includes('--version')) { console.log('codex-fake 0.147.0'); process.exit(0); }
+if (process.argv.includes('--version')) { console.log('codex-fake current'); process.exit(0); }
 const rl = readline.createInterface({ input: process.stdin });
 const send = value => process.stdout.write(JSON.stringify(value) + '\\n');
 rl.on('line', line => {
   const msg = JSON.parse(line);
-  if (msg.method === 'initialize') return send({ id:msg.id, result:{} });
+  if (msg.method === 'initialize') {
+    if (msg.params?.capabilities?.experimentalApi !== true) return send({id:msg.id,error:{code:-32602,message:'experimentalApi required'}});
+    return send({ id:msg.id, result:{} });
+  }
   if (msg.method === 'thread/start') {
-    if ('sandbox' in msg.params) return send({ id:msg.id, error:{ code:-32600, message:'thread sandbox spelling is version-sensitive' } });
-    return send({ id:msg.id, result:{ thread:{ id:'thr_strict', ephemeral:true } } });
+    if (msg.params?.permissions !== 'taskboard_runtime') return send({id:msg.id,error:{code:-32602,message:'permission profile missing'}});
+    if (!Array.isArray(msg.params?.runtimeWorkspaceRoots) || msg.params.runtimeWorkspaceRoots.length !== 1) return send({id:msg.id,error:{code:-32602,message:'runtime roots missing'}});
+    if (msg.params?.config?.permissions?.taskboard_runtime == null) return send({id:msg.id,error:{code:-32602,message:'profile config missing'}});
+    return send({ id:msg.id, result:{ thread:{ id:'thr_strict', ephemeral:true }, activePermissionProfile:{id:msg.params.permissions}, runtimeWorkspaceRoots:msg.params.runtimeWorkspaceRoots } });
   }
   if (msg.method === 'turn/start') {
-    if (msg.params?.sandboxPolicy?.type !== 'workspace-write') {
-      return send({ id:msg.id, error:{ code:-32600, message:'Invalid request: unknown variant workspaceWrite, expected one of read-only, workspace-write, danger-full-access' } });
-    }
+    if ('sandboxPolicy' in msg.params) return send({id:msg.id,error:{code:-32602,message:'legacy sandbox must not be combined with permissions'}});
     if (msg.params?.effort !== 'high') return send({ id:msg.id, error:{ code:-32602, message:'missing expected effort override' } });
     send({ id:msg.id, result:{ turn:{ id:'turn_strict', status:'inProgress', items:[] } } });
     setTimeout(() => {
-      send({ method:'item/completed', params:{ threadId:'thr_strict', turnId:'turn_strict', item:{ type:'agentMessage', text:'{"kind":"complete"}' } } });
+      send({ method:'item/completed', params:{ threadId:'thr_strict', turnId:'turn_strict', item:{ type:'agentMessage', text:'{\"kind\":\"complete\"}' } } });
       send({ method:'turn/completed', params:{ threadId:'thr_strict', turn:{ id:'turn_strict', status:'completed', items:[], error:null } } });
     }, 5);
   }
@@ -112,17 +117,35 @@ rl.on('line', line => {
   return file;
 }
 
-test('Codex app-server uses 0.147-compatible kebab-case workspace sandbox without thread-level sandbox', async () => {
+test('Codex app-server applies the TaskBoard permission profile and exact runtime roots without legacy sandboxPolicy', async () => {
   if (process.platform === 'win32') return;
-  const dir = mkdtempSync(join(tmpdir(), 'taskboard-fake-codex-sandbox-'));
-  const command = createSandboxStrictFakeCodex(dir);
+  const dir = mkdtempSync(join(tmpdir(), 'taskboard-fake-codex-permissions-'));
+  const command = createPermissionStrictFakeCodex(dir);
   const client = new CodexAppServerClient({ command });
   try {
     const text = await client.runTurn({
-      cwd:dir, writableRoots:[dir], prompt:'test', inputItems:[], outputSchema:{type:'object'}, reasoningEffort:'high', networkAccess:false,
+      cwd:dir, writableRoots:[], prompt:'test', inputItems:[], outputSchema:{type:'object'}, reasoningEffort:'high', networkAccess:false,
+      ...turnGrant(dir),
+      runtimeConfig:{permissions:{taskboard_runtime:{filesystem:{':minimal':'read',':workspace_roots':{'.':'read'}},network:{enabled:false}}}},
     });
-    assert.match(text, /"kind":"complete"/);
+    assert.match(text, /\"kind\":\"complete\"/);
   } finally { client.close(); rmSync(dir,{recursive:true,force:true}); }
+});
+
+function createPermissionIgnoringFakeCodex(dir) {
+  const file=join(dir,'codex-permission-ignore.mjs');
+  writeFileSync(file,`#!/usr/bin/env node
+import readline from 'node:readline';
+if (process.argv.includes('--version')) { console.log('codex-fake legacy'); process.exit(0); }
+const rl=readline.createInterface({input:process.stdin});const send=value=>process.stdout.write(JSON.stringify(value)+'\\n');
+rl.on('line',line=>{const msg=JSON.parse(line);if(msg.method==='initialize')return send({id:msg.id,result:{}});if(msg.method==='thread/start')return send({id:msg.id,result:{thread:{id:'legacy',ephemeral:true}}});});
+`);chmodSync(file,0o755);return file;
+}
+
+test('Codex app-server that cannot confirm the permission profile fails closed',async()=>{
+  if(process.platform==='win32')return;
+  const dir=mkdtempSync(join(tmpdir(),'taskboard-fake-codex-permission-ignore-'));const client=new CodexAppServerClient({command:createPermissionIgnoringFakeCodex(dir)});
+  try{await assert.rejects(client.runTurn({cwd:dir,writableRoots:[],prompt:'test',inputItems:[],outputSchema:{type:'object'},networkAccess:false,...turnGrant(dir)}),/CODEX_PERMISSION_PROFILE_NOT_APPLIED/);}finally{client.close();rmSync(dir,{recursive:true,force:true});}
 });
 
 function createInterruptFakeCodex(dir) {
@@ -135,7 +158,7 @@ const send = value => process.stdout.write(JSON.stringify(value) + '\\n');
 rl.on('line', line => {
   const msg = JSON.parse(line);
   if (msg.method === 'initialize') return send({ id:msg.id, result:{} });
-  if (msg.method === 'thread/start') return send({ id:msg.id, result:{ thread:{ id:'thr_interrupt', ephemeral:true } } });
+  if (msg.method === 'thread/start') return send({ id:msg.id, result:{ thread:{ id:'thr_interrupt', ephemeral:true }, activePermissionProfile:{id:msg.params.permissions}, runtimeWorkspaceRoots:msg.params.runtimeWorkspaceRoots||[] } });
   if (msg.method === 'turn/start') return send({ id:msg.id, result:{ turn:{ id:'turn_interrupt', status:'inProgress', items:[] } } });
   if (msg.method === 'turn/interrupt') {
     if (msg.params?.threadId !== 'thr_interrupt' || msg.params?.turnId !== 'turn_interrupt') return send({ id:msg.id, error:{code:-32602,message:'wrong interrupt ids'} });
@@ -155,7 +178,7 @@ test('Codex cancellation interrupts the active turn and reports an interrupted e
   const client=new CodexAppServerClient({command});
   const controller=new AbortController();
   try {
-    const running=client.runTurn({cwd:dir,writableRoots:[],prompt:'long task',inputItems:[],outputSchema:{type:'object'},networkAccess:false,signal:controller.signal});
+    const running=client.runTurn({cwd:dir,writableRoots:[],prompt:'long task',inputItems:[],outputSchema:{type:'object'},networkAccess:false, ...turnGrant(dir),signal:controller.signal});
     setTimeout(()=>controller.abort(),40);
     await assert.rejects(running,error=>Boolean(error?.interrupted));
   } finally { client.close(); rmSync(dir,{recursive:true,force:true}); }
@@ -171,7 +194,7 @@ const send = value => process.stdout.write(JSON.stringify(value) + '\\n');
 rl.on('line', line => {
   const msg = JSON.parse(line);
   if (msg.method === 'initialize') return send({ id:msg.id, result:{} });
-  if (msg.method === 'thread/start') return send({ id:msg.id, result:{ thread:{ id:'thr_exit', ephemeral:true } } });
+  if (msg.method === 'thread/start') return send({ id:msg.id, result:{ thread:{ id:'thr_exit', ephemeral:true }, activePermissionProfile:{id:msg.params.permissions}, runtimeWorkspaceRoots:msg.params.runtimeWorkspaceRoots||[] } });
   if (msg.method === 'turn/start') {
     send({ id:msg.id, result:{ turn:{ id:'turn_exit', status:'inProgress', items:[] } } });
     setTimeout(() => process.exit(7), 5);
@@ -197,7 +220,7 @@ test('Codex app-server failure rejects notification waiters immediately and remo
   };
   try {
     await assert.rejects(client.runTurn({
-      cwd:dir, writableRoots:[], prompt:'exit', inputItems:[], outputSchema:{type:'object'}, networkAccess:false, signal,
+      cwd:dir, writableRoots:[], prompt:'exit', inputItems:[], outputSchema:{type:'object'}, networkAccess:false, ...turnGrant(dir), signal,
     }), /app-server exited/);
     assert.equal(added, 1);
     assert.equal(removed, 1, 'runTurn must remove its abort listener even when app-server exits');
@@ -258,7 +281,7 @@ const completeOnSteer=${completeOnSteer?'true':'false'};
 rl.on('line',line=>{
   const msg=JSON.parse(line);
   if(msg.method==='initialize') return send({id:msg.id,result:{}});
-  if(msg.method==='thread/start') return send({id:msg.id,result:{thread:{id:'thr_lease',ephemeral:true}}});
+  if(msg.method==='thread/start') return send({id:msg.id,result:{thread:{id:'thr_lease',ephemeral:true},activePermissionProfile:{id:msg.params.permissions},runtimeWorkspaceRoots:msg.params.runtimeWorkspaceRoots||[]}});
   if(msg.method==='turn/start') return send({id:msg.id,result:{turn:{id:'turn_lease',status:'inProgress',items:[]}}});
   if(msg.method==='turn/steer') {
     if(msg.params?.threadId!=='thr_lease'||msg.params?.expectedTurnId!=='turn_lease') return send({id:msg.id,error:{code:-32602,message:'wrong steer ids'}});
@@ -289,7 +312,7 @@ test('bounded Subagent steers once at the soft lease boundary and can finish in 
   const client=new CodexAppServerClient({command,diagnosticLogger:line=>diagnostics.push(line),turnEventTimeoutMs:1_200,subagentExecutionWindowMs:1_200});
   try{
     const text=await client.runTurn({
-      cwd:dir,writableRoots:[],prompt:'bounded subagent',inputItems:[],outputSchema:{type:'object'},networkAccess:false,
+      cwd:dir,writableRoots:[],prompt:'bounded subagent',inputItems:[],outputSchema:{type:'object'},networkAccess:false, ...turnGrant(dir),
       stopCondition:'STOP_AFTER_ENOUGH_EVIDENCE',diagnosticContext:{role:'subagent',taskId:'T-LEASE',workUnitId:'WU-LEASE'},
     });
     assert.match(text,/bounded/);
@@ -309,7 +332,7 @@ test('bounded Subagent is interrupted at the hard lease boundary and reports a n
   const client=new CodexAppServerClient({command,diagnosticLogger:line=>diagnostics.push(line),turnEventTimeoutMs:1_200,subagentExecutionWindowMs:1_200});
   try{
     await assert.rejects(client.runTurn({
-      cwd:dir,writableRoots:[],prompt:'unbounded subagent',inputItems:[],outputSchema:{type:'object'},networkAccess:false,
+      cwd:dir,writableRoots:[],prompt:'unbounded subagent',inputItems:[],outputSchema:{type:'object'},networkAccess:false, ...turnGrant(dir),
       stopCondition:'STOP_AFTER_ENOUGH_EVIDENCE',diagnosticContext:{role:'subagent',taskId:'T-LEASE',workUnitId:'WU-LEASE'},
     }),error=>Boolean(error?.executionBoundary&&error?.nonRetryable));
     assert.equal(client.activeTurnCount,0);

@@ -5,6 +5,10 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { CodexExecutor } from '../src/extensions/executors/codex/codex-executor.js';
 
+
+const rootPolicy=(taskMode='analysis')=>({taskMode,prompt:'POLICY',executionGrant:{role:'root',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'none'}});
+const subPolicy=({taskMode='analysis',projectAccess='none',networkAccess=false,inputRefs=[]}={})=>({taskMode,prompt:'POLICY',executionGrant:{role:'subagent',projectAccess,networkAccess,inputRefs,sourceAccess:inputRefs.length?'selected':'none'}});
+
 class CaptureClient {
   constructor(){ this.calls = []; }
   async runTurn(request) {
@@ -48,7 +52,7 @@ test('Root receives attachment metadata only: no localImage/path and no network 
           { id:'A-2', name:'spec.txt', mimeType:'text/plain', size:4, path:doc },
         ],
       },
-      subagentResults:[], humanGatewayHistory:[], modelPolicy:{ model:null },
+      subagentResults:[], humanGatewayHistory:[], modelPolicy:{ model:null }, policyContext:rootPolicy('analysis'),
     });
     assert.equal(client.calls.length, 1);
     assert.deepEqual(client.calls[0].inputItems, []);
@@ -70,28 +74,24 @@ test('Project access belongs only to explicit Subagent Work Units; Root has none
   const executor=new CodexExecutor({runtimeRoot,client:new CaptureClient()});
   try{
     const task={id:'T-analysis',projectScopes:[{path:project}]};
-    const analysisRoot=executor.executionScope(task,{taskMode:'analysis'},{role:'root'});
+    const analysisRoot=executor.executionScope(task,rootPolicy('analysis'));
     assert.notEqual(analysisRoot.cwd,project);
-    assert.deepEqual(analysisRoot.writableRoots,[analysisRoot.cwd]);
-    assert.equal(analysisRoot.writableRoots.includes(project),false);
+    assert.deepEqual(analysisRoot.runtimeWorkspaceRoots,[analysisRoot.cwd]);
+    assert.equal(analysisRoot.runtimeWorkspaceRoots.includes(project),false);
     assert.equal(analysisRoot.projectAccess,'none');
 
-    const readSubagent=executor.executionScope(task,{taskMode:'analysis'},{role:'subagent',projectAccess:'read',workUnitId:'inspect'});
+    const readSubagent=executor.executionScope(task,subPolicy({taskMode:'analysis',projectAccess:'read',inputRefs:['project:0']}),{workUnitId:'inspect'});
     assert.notEqual(readSubagent.cwd,project);
-    assert.deepEqual(readSubagent.writableRoots,[readSubagent.scratch]);
-    assert.equal(readSubagent.writableRoots.includes(project),false);
+    assert.equal(readSubagent.runtimeWorkspaceRoots.includes(project),true,'selected Project is readable through the explicit Runtime roots');
+    assert.deepEqual(readSubagent.writableRoots,[],'read Work Unit does not gain Project write authority');
 
-    const executionRoot=executor.executionScope(task,{taskMode:'execution'},{role:'root'});
+    const executionRoot=executor.executionScope(task,rootPolicy('execution'));
     assert.notEqual(executionRoot.cwd,project,'Root execution control turn must not become an implicit project writer');
-    assert.equal(executionRoot.writableRoots.includes(project),false);
-    assert.equal(executionRoot.projectAccess,'none');
+    assert.equal(executionRoot.runtimeWorkspaceRoots.includes(project),false);
 
-    const writeWorker=executor.executionScope(task,{taskMode:'execution'},{role:'subagent',projectAccess:'write',workUnitId:'change'});
-    assert.equal(writeWorker.cwd,project);
+    const writeWorker=executor.executionScope(task,subPolicy({taskMode:'execution',projectAccess:'write',inputRefs:['project:0']}),{workUnitId:'change'});
+    assert.equal(writeWorker.runtimeWorkspaceRoots.includes(project),true);
     assert.equal(writeWorker.writableRoots.includes(project),true);
-
-    const deniedWrite=executor.executionScope(task,{taskMode:'analysis'},{role:'subagent',projectAccess:'write',workUnitId:'bad'});
-    assert.equal(deniedWrite.writableRoots.includes(project),false,'analysis task cannot gain project write authority even if requested');
 
     assert.equal(executor.cleanupTaskWorkspace(task.id),true);
     assert.equal(existsSync(analysisRoot.cwd),false);
@@ -106,7 +106,7 @@ test('Validator rework reuses the ordinary Root turn with narrow feedback instea
     assert.equal(typeof executor.repairAnalysisPatch,'undefined');
     await executor.runRoot({
       task:{id:'T-rework',title:'分析范围',instruction:'根据材料分析',projectScopes:[],attachments:[],references:[]},
-      subagentResults:[],humanGatewayHistory:[],modelPolicy:{model:null,reasoningEffort:null},policyContext:{taskMode:'analysis',prompt:'POLICY'},
+      subagentResults:[],humanGatewayHistory:[],modelPolicy:{model:null,reasoningEffort:null},policyContext:rootPolicy('analysis'),
       validationFeedback:[{ruleId:'C-003',target:'C-1',reason:'缺少可追溯证据',action:'MODEL_REPAIR'}],
       previousDecision:{kind:'complete',claims:[{id:'C-1',statement:'过强结论'}]},
     });
@@ -143,14 +143,14 @@ test('Subagent network capability is granted only when both Work Unit and Execut
 
     const allowedClient=new CaptureClient();
     const allowed=new CodexExecutor({runtimeRoot:join(dir,'allowed'),client:allowedClient,networkAccess:true});
-    await allowed.runSubagent({task,delegation:{...baseDelegation,networkAccess:false},policyContext:{taskMode:'analysis'},modelPolicy:{}});
-    await allowed.runSubagent({task,delegation:{...baseDelegation,networkAccess:true},policyContext:{taskMode:'analysis'},modelPolicy:{}});
+    await allowed.runSubagent({task,delegation:{...baseDelegation,networkAccess:false},policyContext:subPolicy({taskMode:'analysis',projectAccess:'none',networkAccess:false,inputRefs:[]}),modelPolicy:{}});
+    await allowed.runSubagent({task,delegation:{...baseDelegation,networkAccess:true},policyContext:subPolicy({taskMode:'analysis',projectAccess:'none',networkAccess:true,inputRefs:[]}),modelPolicy:{}});
     assert.equal(allowedClient.calls[0].networkAccess,false,'undeclared network capability stays off');
     assert.equal(allowedClient.calls[1].networkAccess,true,'declared capability may be granted when Executor allows it');
 
     const deniedClient=new CaptureClient();
     const denied=new CodexExecutor({runtimeRoot:join(dir,'denied'),client:deniedClient,networkAccess:false});
-    await denied.runSubagent({task,delegation:{...baseDelegation,networkAccess:true},policyContext:{taskMode:'analysis'},modelPolicy:{}});
+    await denied.runSubagent({task,delegation:{...baseDelegation,networkAccess:true},policyContext:subPolicy({taskMode:'analysis',projectAccess:'none',networkAccess:true,inputRefs:[]}),modelPolicy:{}});
     assert.equal(deniedClient.calls[0].networkAccess,false,'Executor may reduce but never expand Work Unit capability');
   }finally{rmSync(dir,{recursive:true,force:true});}
 });

@@ -20,14 +20,17 @@ rl.on('line', line => {
   if (msg.method === 'config/read') return send({ id:msg.id, result:{ config:{ model:'model-test', model_reasoning_effort:'medium' } } });
   if (msg.method === 'model/list') return send({ id:msg.id, result:{ data:[{ id:'model-test', supportedReasoningEfforts:[{effort:'low'},{effort:'medium'},{effort:'high'}] }] } });
   if (msg.method === 'modelProvider/capabilities/read') return send({ id:msg.id, result:{} });
-  if (msg.method === 'thread/start') return send({ id:msg.id, result:{ thread:{ id:'thr_' + (turnNo + 1), ephemeral:true } } });
+  if (msg.method === 'thread/start') return send({ id:msg.id, result:{ thread:{ id:'thr_' + (turnNo + 1), ephemeral:true }, activePermissionProfile:{id:msg.params.permissions}, runtimeWorkspaceRoots:msg.params.runtimeWorkspaceRoots||[] } });
   if (msg.method === 'turn/start') {
-    if (!['workspace-write','read-only'].includes(msg.params?.sandboxPolicy?.type)) return send({ id:msg.id, error:{ code:-32600, message:'Invalid sandbox policy' } });
     turnNo += 1;
     const threadId = msg.params.threadId;
     const turnId = 'turn_' + turnNo;
     send({ id:msg.id, result:{ turn:{ id:turnId, status:'inProgress', items:[] } } });
     const prompt = msg.params.input?.[0]?.text || '';
+    if (prompt.includes('Work Unit protocol:')) {
+      const payload={delegationId:'project-scan',result:'项目范围已检查',evidence:[],findings:[],discoveries:[],blocker:null,uncertainty:null};
+      return setTimeout(()=>{send({method:'item/completed',params:{threadId,turnId,item:{id:'agent_'+turnNo,type:'agentMessage',text:JSON.stringify(payload)}}});send({method:'turn/completed',params:{threadId,turn:{id:turnId,status:'completed',items:[],error:null}}});},5);
+    }
     if (prompt.includes('Semantic proof obligation:')) {
       const payload={reviews:[{id:'C-1',verdict:'supported',reason:'fake source proof supports the test claim'},{id:'gap_resolution:G-1',verdict:'supported',reason:'the answer explicitly supplies the requested scope'}]};
       return setTimeout(() => {
@@ -36,7 +39,10 @@ rl.on('line', line => {
       }, 5);
     }
     const answered = prompt.includes('基础办公');
-    const payload = answered
+    const hasProjectResult=prompt.includes('project-scan');
+    const payload = !hasProjectResult
+      ? {kind:'delegate',summary:'先核对项目范围',stageResult:null,finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[],gateway:null,delegations:[{id:'project-scan',title:'核对项目范围',goal:'核对项目中与 OA 范围相关的现有事实',expectedOutput:'返回项目范围核对结果',stopCondition:'完成有限核对后停止',projectAccess:'read',networkAccess:false,skillId:null,dependsOn:[],inputRefs:['project:0']}]}
+      : answered
       ? { kind:'complete', summary:'完成', stageResult:'本次 OA 范围为基础办公', progressCommits:[{title:'需求范围已确认',detail:'本次 OA 范围为基础办公',sourceIds:['C-1']}], finalResult:null, resultMode:'analysis', evidence:[{id:'E-1',strength:'direct',kind:'requirement',sourceType:'human',coverage:'system',statement:'基础办公',basis:'Human Gateway 回答：基础办公',locator:'Human Gateway answer',observation:'基础办公'}], claims:[{id:'C-1',statement:'本次 OA 范围为基础办公',level:'confirmed',evidenceIds:['E-1'],scope:'single_system',coverage:'system',hops:[]}], gaps:[], recommendations:[], steps:[{order:1,text:'本次 OA 范围为基础办公',kind:'confirmed',sourceIds:['C-1']}], gapResolutions:[{gapId:'G-1',reason:'用户已确认范围为基础办公',evidenceIds:['E-1']}], gateway:null, delegations:[] }
       : { kind:'human_gateway', summary:'需要范围', stageResult:null, progressCommits:[], finalResult:null, resultMode:'analysis', evidence:[], claims:[], gaps:[{id:'G-1',question:'OA 核心范围？',reason:'范围会改变结果且当前材料没有答案',kind:'business_decision',blocking:true,evidenceIds:[]}], recommendations:[], steps:[], gapResolutions:[], gateway:{ gapId:'G-1', question:'OA 核心范围？', context:'范围会改变结果', options:['基础办公'] }, delegations:[] };
     setTimeout(() => {
