@@ -1,0 +1,6 @@
+diff --git a/tests/capability-architecture.test.js b/tests/capability-architecture.test.js
+--- a/tests/capability-architecture.test.js
++++ b/tests/capability-architecture.test.js
+@@ -133,1 +133,1 @@
+-  assert.match(analysis.issues.join(' '),/只有明确 execution Task.*才能取得 Project Scope 写权限/);
++  assert.deepEqual(analysis.issues,[]);
