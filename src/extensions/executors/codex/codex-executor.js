@@ -142,7 +142,7 @@ export class CodexExecutor extends ExecutorPort {
     const scratch=role==='subagent'?this.workUnitWorkspace(task,workUnitId):(resolve(this.taskWorkspace(task),role));mkdirSync(scratch,{recursive:true});
     const projectAccess=String(grant.projectAccess||'none');
     if(!['none','read','write'].includes(projectAccess)){const error=new Error(`AUTHORIZED_GRANT_PROJECT_ACCESS_INVALID: ${projectAccess}`);error.nonRetryable=true;throw error;}
-    if(projectAccess!=='none'&&!paths.length){const error=new Error('EXECUTION_GRANT_SCOPE_MISMATCH: Project access was granted without a selected Project input.');error.nonRetryable=true;throw error;}
+    if(projectAccess!=='none'&&!paths.length){const error=new Error('AUTHORIZED_GRANT_SCOPE_MISMATCH: Project access was granted without a selected Project input.');error.nonRetryable=true;throw error;}
     const runtimeWorkspaceRoots=[scratch,...(projectAccess!=='none'?paths:[])];
     const fileAccess=projectAccess==='write'?'write':'read';
     const networkAccess=grant.networkAccess===true&&this.networkAccess===true;
