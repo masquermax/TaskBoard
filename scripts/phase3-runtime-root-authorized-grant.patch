@@ -1,0 +1,8 @@
+diff --git a/tests/runtime-authority-boundary.test.js b/tests/runtime-authority-boundary.test.js
+--- a/tests/runtime-authority-boundary.test.js
++++ b/tests/runtime-authority-boundary.test.js
+@@ -71,2 +71,2 @@
+-  assert.deepEqual(root.executionGrant,{
+-    role:'root',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'none',
++  assert.deepEqual(root.authorizedGrant,{
++    role:'root',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'none',environmentAccess:'none',
