@@ -17,14 +17,29 @@ function certifiedProofMaterial(certifiedContext={}){
   });
   return[...evidence,...claims].map(item=>JSON.parse(JSON.stringify(item)));
 }
+function proofRelation(obligation,proofMaterial){
+  return{
+    proofKind:'completion_obligation_support',
+    subject:{obligationId:text(obligation.id)},
+    criterion:obligation?.criterion||{},
+    certifiedFactRefs:proofMaterial.map(item=>text(item?.id)).filter(Boolean),
+    claim:'Certified Facts in proofMaterial are sufficient to satisfy this governed Criterion.',
+    requirementContextRole:'Requirement provenance defines what is required and the governed Criterion; it is not completion evidence.',
+    proposalRole:'Completion proposal is the candidate claim under review; it is not proof.',
+    supportRule:'Return supported only when proofMaterial Certified Facts alone satisfy the entire Criterion; partial proof is overreach.',
+    forbiddenProofSources:['completion proposal','Requirement wording alone','bare WorkReceipt','WorkUnit obligationRefs','taskMode','TaskStatus','completionReason','Scheduler lifecycle','UI Completed'],
+  };
+}
 function proofCandidate(task,obligation,proposal,excerpts,proofMaterial){
   const id=`completion:${text(obligation.id)}`;
+  const relation=proofRelation(obligation,proofMaterial);
   return{
     id,
     targetId:text(obligation.id),
     candidateType:'completion_assessment',
     proofKind:'completion_obligation_support',
-    statement:`Certified Facts in proofMaterial are sufficient to satisfy governed obligation ${text(obligation.id)} under criterion ${JSON.stringify(obligation?.criterion||{})}.`,
+    statement:relation.claim,
+    proofRelation:relation,
     obligation:{id:text(obligation.id),criterion:obligation?.criterion||{}},
     criterion:obligation?.criterion||{},
     requirementContext:requirementContext(excerpts),
@@ -57,7 +72,7 @@ export class CompletionAssessmentVerifier{
     const reviews=new Map((Array.isArray(response?.reviews)?response.reviews:[]).map(item=>[text(item?.id),item]).filter(([id])=>id));
     for(const {obligation,candidate} of candidates){
       const review=reviews.get(candidate.id);
-      if(review?.verdict==='supported')assessments.push({id:`ASSESS:${text(obligation.id)}`,proofKind:'completion_obligation_support',certification:'supported',obligationRefs:[text(obligation.id)],criterionSatisfied:true,proofFactRefs:candidate.proofMaterial.map(item=>text(item?.id)).filter(Boolean),reason:text(review.reason)});
+      if(review?.verdict==='supported')assessments.push({id:`ASSESS:${text(obligation.id)}`,proofKind:'completion_obligation_support',certification:'supported',obligationRefs:[text(obligation.id)],criterionSatisfied:true,proofFactRefs:candidate.proofRelation.certifiedFactRefs,reason:text(review.reason)});
       else assessments.push(unresolved(obligation,text(review?.reason)||'Validator did not certify obligation satisfaction.'));
     }
     return{checked:true,assessments};
