@@ -31,6 +31,8 @@ export class TaskService {
       analysisState:_analysisState, analysis_state:_analysisStateRaw,
       workReceipts:_workReceipts, work_receipts:_workReceiptsRaw,
       execution_state:_executionStateRaw,
+      taskContract:_taskContract, task_contract:_taskContractRaw,
+      requirementSources:_requirementSources, requirement_sources:_requirementSourcesRaw,
       ...visible
     } = task;
     if(Array.isArray(visible.attachments))visible.attachments=visible.attachments.map(({path:_localPath,...attachment})=>attachment);
