@@ -7,7 +7,7 @@ test('new TaskContract carries one canonical whole-Requirement obligation withou
   assert.deepEqual(state.task_contract.obligations,[{
     id:'OBL-T-1-GOAL',
     certification:'supported',
-    requirement_refs:[{source_id:'REQ-T-1-0001',start:0,end:15}],
+    requirement_refs:[{source_id:'REQ-T-1-0001',start:0,end:16}],
     criterion:{mode:'outcome',acceptedOutcomes:['succeeded']},
   }]);
   assert.equal('goal_state' in state.task_contract,false);
