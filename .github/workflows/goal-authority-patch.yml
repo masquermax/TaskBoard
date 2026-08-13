@@ -1,0 +1,38 @@
+name: Goal authority patch
+
+on:
+  push:
+    branches:
+      - agent/main-authority-root-cause
+    paths:
+      - scripts/goal-authority-patch.mjs
+      - .github/workflows/goal-authority-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/main-authority-root-cause
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/goal-authority-patch.mjs
+      - run: git diff --check
+      - run: npm run verify
+      - name: Commit verified production patch
+        run: |
+          if git diff --quiet -- src; then
+            echo "No production changes to commit"
+            exit 0
+          fi
+          git config user.name "taskboard-goal-bot"
+          git config user.email "taskboard-goal-bot@users.noreply.github.com"
+          git add src
+          git commit -m "fix: enforce compiled runtime authority boundaries"
+          git push origin HEAD:agent/main-authority-root-cause
