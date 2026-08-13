@@ -4,7 +4,8 @@ on:
   push:
     branches: [agent/authority-single-owner-phase3]
     paths:
-      - scripts/phase3-final-*.patch
+      - scripts/phase3-final-executor.patch
+      - scripts/phase3-final-role-guide.mjs
       - .github/workflows/phase3-authority-migrate.yml
 
 permissions:
@@ -24,7 +25,7 @@ jobs:
       - name: Apply final Authority hygiene
         run: |
           git apply scripts/phase3-final-executor.patch
-          git apply scripts/phase3-final-role-guide.patch
+          node scripts/phase3-final-role-guide.mjs
       - run: git diff --check
       - run: npm run verify
       - name: Commit verified product and documentation hygiene
