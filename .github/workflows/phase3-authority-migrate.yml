@@ -28,7 +28,11 @@ jobs:
           node-version: 22
       - run: node scripts/phase3-authority-migrate.mjs
       - name: Apply transparent Phase 3 regression migrations
-        run: git apply scripts/phase3-*.patch
+        run: |
+          for patch in scripts/phase3-*.patch; do
+            echo "Applying $patch"
+            git apply --recount "$patch"
+          done
       - run: git diff --check
       - run: npm run verify
       - name: Commit verified Phase 3 source and regression changes
