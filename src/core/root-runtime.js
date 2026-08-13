@@ -1022,7 +1022,7 @@ export class RootRuntime {
         const finalSummary = finalView ? canonicalAnalysisSummary(finalView) : decision.summary;
         const stageResult = session.lastCommittedStageResult || decision.stageResult || null;
         this.discardSession(task.id);
-        return { kind:'complete', finalResult, summary:finalSummary, stageResult, quiescent:true };
+        return { kind:'completion_proposed', proposal:{ finalResult, summary:finalSummary, stageResult }, quiescent:true };
       }
 
       const error = new Error('ROOT_INVALID_DECISION');
