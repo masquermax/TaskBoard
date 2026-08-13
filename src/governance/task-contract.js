@@ -14,17 +14,38 @@ export function createRequirementSource({ taskId, instruction, createdAt = null,
   };
 }
 
+function canonicalGoalObligation({ taskId, requirementRefs = [] } = {}) {
+  const id = clean(taskId);
+  if (!id) throw new Error('TASK_CONTRACT_TASK_ID_REQUIRED');
+  const refs = clone(Array.isArray(requirementRefs) ? requirementRefs : []);
+  if (!refs.length) throw new Error('TASK_CONTRACT_REQUIREMENT_REF_REQUIRED');
+  return {
+    id: `OBL-${id}-GOAL`,
+    certification: 'supported',
+    requirement_refs: refs,
+    criterion: { mode:'outcome', acceptedOutcomes:['succeeded'] },
+  };
+}
+
+function ensureCanonicalGoalObligation(contract, taskId) {
+  const next = clone(contract);
+  if (Array.isArray(next.obligations) && next.obligations.length) return next;
+  next.obligations = [canonicalGoalObligation({ taskId, requirementRefs:next.requirement_refs })];
+  return next;
+}
+
 export function createTaskContractSkeleton({ taskId, requirementSource, createdAt = null } = {}) {
   const id = clean(taskId);
   if (!id) throw new Error('TASK_CONTRACT_TASK_ID_REQUIRED');
   if (!requirementSource?.id) throw new Error('TASK_CONTRACT_REQUIREMENT_SOURCE_REQUIRED');
   const text = String(requirementSource.text ?? '');
+  const requirementRefs = [{ source_id: requirementSource.id, start: 0, end: text.length }];
   return {
     id: `TC-${id}`,
     revision: 1,
-    requirement_refs: [{ source_id: requirementSource.id, start: 0, end: text.length }],
+    requirement_refs: requirementRefs,
     authority: {},
-    obligations: [],
+    obligations: [canonicalGoalObligation({ taskId:id, requirementRefs })],
     constraints: [],
     created_at: createdAt || requirementSource.created_at || null,
   };
@@ -44,7 +65,7 @@ export function bootstrapTaskContractState(task) {
   const existingSources = Array.isArray(task.requirement_sources) ? clone(task.requirement_sources) : [];
   const existingContract = task.task_contract && typeof task.task_contract === 'object' ? clone(task.task_contract) : null;
   if (existingSources.length && existingContract) {
-    return { requirement_sources: existingSources, task_contract: existingContract };
+    return { requirement_sources: existingSources, task_contract: ensureCanonicalGoalObligation(existingContract,task.id) };
   }
   return createInitialTaskContractState({
     taskId: task.id,
