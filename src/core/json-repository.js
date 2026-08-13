@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname } from 'node:path';
 import { TaskStatus, ReadyReason, CompletionReason, ProjectFilter } from './types.js';
 import { migrateExecutionState, migrateReadyReason } from './runtime-state-migration.js';
+import { bootstrapTaskContractState, createInitialTaskContractState, hydrateRequirementSources, hydrateTaskContract } from '../governance/task-contract.js';
 
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 function emptyState() {
@@ -33,6 +34,9 @@ export class JsonTaskDatabase {
         if (task.analysis_state === undefined) task.analysis_state = null;
         if (!Array.isArray(task.work_receipts)) task.work_receipts = [];
         if (task.completion_reason === undefined) task.completion_reason = task.status === TaskStatus.COMPLETED ? CompletionReason.SUCCESS : null;
+        const contractState = bootstrapTaskContractState(task);
+        task.requirement_sources = contractState.requirement_sources;
+        task.task_contract = contractState.task_contract;
       }
       return state;
     } catch (error) {
@@ -84,7 +88,8 @@ export class JsonTaskRepository {
   deleteProject(id){ const i=this.state.projects.findIndex(x=>x.id===id); if(i<0)return false; this.store.transaction(()=>{this.state.projects.splice(i,1);for(const s of this.state.scopes)if(s.project_id===id)s.project_id=null;});return true; }
 
   createTask({title,instruction,projectId=null,temporaryProjectPath=null,referenceTaskIds=[],executorKey='default',attachments=[]}) {
-    const id=this.store.nextId('task','T'),now=this.now();
+    const id=this.store.nextId('task','T'),now=this.now(),normalizedInstruction=instruction.trim();
+    const contractState=createInitialTaskContractState({taskId:id,instruction:normalizedInstruction,createdAt:now});
     this.store.transaction(()=>{
       const project=projectId?this.state.projects.find(p=>p.id===projectId):null;
       if(projectId&&!project)throw new Error('PROJECT_NOT_FOUND');
@@ -93,7 +98,7 @@ export class JsonTaskRepository {
         if(!source||source.status!==TaskStatus.COMPLETED||source.deleted_at)throw new Error('REFERENCE_MUST_BE_COMPLETED');
         return source;
       });
-      this.state.tasks.push({ id,title:title.trim(),instruction:instruction.trim(),status:TaskStatus.READY,ready_reason:ReadyReason.NEW,status_entered_at:now,created_at:now,completed_at:null,completion_reason:null,last_stage_result:null,final_result:null,executor_key:executorKey,locked:false,deleted_at:null,cancel_requested_at:null,execution_state:null,analysis_state:null,work_receipts:[] });
+      this.state.tasks.push({ id,title:title.trim(),instruction:normalizedInstruction,status:TaskStatus.READY,ready_reason:ReadyReason.NEW,status_entered_at:now,created_at:now,completed_at:null,completion_reason:null,last_stage_result:null,final_result:null,executor_key:executorKey,locked:false,deleted_at:null,cancel_requested_at:null,execution_state:null,analysis_state:null,work_receipts:[],requirement_sources:contractState.requirement_sources,task_contract:contractState.task_contract });
       this.addPhase(id,TaskStatus.READY,now);
       if(project)this.addScope({taskId:id,source:'registry',projectId:project.id,label:project.name,path:project.path,createdAt:now});
       if(temporaryProjectPath?.trim())this.addScope({taskId:id,source:'temporary',projectId:null,label:'临时项目范围',path:temporaryProjectPath.trim(),createdAt:now});
@@ -128,7 +133,7 @@ export class JsonTaskRepository {
     const refs=this.state.references.filter(r=>r.target_task_id===row.id).sort((a,b)=>a.id-b.id).map(r=>{const s=this.state.tasks.find(t=>t.id===r.source_task_id);return s?{source_task_id:s.id,title:s.title,final_result:s.final_result,completed_at:s.completed_at}:null;}).filter(Boolean);
     const g=[...this.state.gateways].filter(x=>x.task_id===row.id&&x.status==='PENDING').sort((a,b)=>b.created_at.localeCompare(a.created_at))[0]||null;
     const attachments=this.state.attachments.filter(a=>a.task_id===row.id).sort((a,b)=>a.created_at.localeCompare(b.created_at));
-    return clone({ ...row,locked:Boolean(row.locked),ready_reason:migrateReadyReason(row.ready_reason),completion_reason:row.completion_reason||(row.status===TaskStatus.COMPLETED?CompletionReason.SUCCESS:null),executionState:migrateExecutionState(row.execution_state),analysisState:row.analysis_state||null,workReceipts:Array.isArray(row.work_receipts)?clone(row.work_receipts):[],
+    return clone({ ...row,locked:Boolean(row.locked),ready_reason:migrateReadyReason(row.ready_reason),completion_reason:row.completion_reason||(row.status===TaskStatus.COMPLETED?CompletionReason.SUCCESS:null),executionState:migrateExecutionState(row.execution_state),analysisState:row.analysis_state||null,workReceipts:Array.isArray(row.work_receipts)?clone(row.work_receipts):[],requirementSources:hydrateRequirementSources(row.requirement_sources),taskContract:hydrateTaskContract(row.task_contract),
       projectScopes:scopes.map(s=>{const p=s.project_id?this.state.projects.find(x=>x.id===s.project_id):null;return{source:s.source,projectId:s.project_id,label:s.source==='registry'?(p?.name||s.label):(s.label||'临时项目范围'),path:s.source==='registry'?(p?.path||s.path):s.path};}),references:refs,
       attachments:attachments.map(a=>({id:a.id,name:a.name,mimeType:a.mime_type,size:a.size_bytes,path:a.path,createdAt:a.created_at})),pendingGateway:g?{...g,options:g.options||[]}:null });
   }
@@ -175,7 +180,7 @@ export class JsonTaskRepository {
 
   commitProgressHistory(taskId,{title,detail='',completedAt=null}){const t=this.state.tasks.find(x=>x.id===taskId);if(!t)throw new Error('TASK_NOT_FOUND');this.store.transaction(()=>{this.state.progressHistory.push({id:++this.state.counters.progress,task_id:taskId,title,detail,completed_at:completedAt||this.now()});t.last_stage_result=detail||null;});return this.getTask(taskId);}
   getProgressHistory(taskId){return clone(this.state.progressHistory.filter(p=>p.task_id===taskId).sort((a,b)=>a.id-b.id));}
-  getPhaseHistory(taskId){return clone(this.state.phaseHistory.filter(p=>p.task_id===taskId).sort((a,b)=>a.id-b.id).map(({phase,entered_at,exited_at})=>({phase,entered_at,exited_at})));}
+  getPhaseHistory(taskId){return clone(this.state.phaseHistory.filter(p=>p.task_id===taskId).sort((a,b)=>a.id-b.id).map(({phase,entered_at,exited_at})=>({phase,entered_at,exited_at})))}
   listStaleRunningTasks(){return this.state.tasks.filter(t=>t.status===TaskStatus.RUNNING).map(t=>this.hydrateTask(t));}
   counts(){const result={READY:0,RUNNING:0,WAITING_HUMAN:0,COMPLETED:0};for(const t of this.state.tasks)if(!t.deleted_at)result[t.status]=(result[t.status]||0)+1;return result;}
 
