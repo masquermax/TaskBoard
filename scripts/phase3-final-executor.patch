@@ -1,0 +1,8 @@
+diff --git a/src/extensions/executors/codex/codex-executor.js b/src/extensions/executors/codex/codex-executor.js
+--- a/src/extensions/executors/codex/codex-executor.js
++++ b/src/extensions/executors/codex/codex-executor.js
+@@ -134,3 +134,3 @@
+-    if(projectAccess!=='none'&&!paths.length){const error=new Error('EXECUTION_GRANT_SCOPE_MISMATCH: Project access was granted without a selected Project input.');error.nonRetryable=true;throw error;}
++    if(projectAccess!=='none'&&!paths.length){const error=new Error('AUTHORIZED_GRANT_SCOPE_MISMATCH: Project access was granted without a selected Project input.');error.nonRetryable=true;throw error;}
+     const runtimeWorkspaceRoots=[scratch,...(projectAccess!=='none'?paths:[])];
+     const fileAccess=projectAccess==='write'?'write':'read';
