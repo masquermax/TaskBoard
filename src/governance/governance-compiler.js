@@ -19,7 +19,7 @@ const ROLE_CONTRACT = Object.freeze({ root:'ROOT', subagent:'SUBAGENT', validato
 export function inferTaskMode(task) {
   const value = `${task?.title || ''}\n${task?.instruction || ''}`.trim();
   const mutationText = value.replace(/(?:不|不要|无需|不需要|禁止)\s*(?:进行)?\s*(?:修改|修复|开发|实现|部署|安装|删除|重构|提交|打包|发布|升级|改造|写代码)[^，。；;\n]*/gi, '');
-  const explicitExecution = /(?:请|帮我|直接|现在|开始|需要|把|给我)?\s*(?:开发|实现|修复(?:这个|该|当前|问题|bug|代码|功能|项目)|修改(?:代码|文件|功能|项目)|新增功能|生成(?:新版|代码|版本|文件|项目)|部署(?:到|这个|该)?|安装(?:依赖|组件|软件|包)?|删除(?:代码|文件|资源|任务|项目)?|重构(?:代码|项目)?|提交(?:代码|变更)?|打包(?:发布|项目)?|发布(?:版本|项目)?|升级(?:版本|依赖|项目)?|改造代码|写代码)|(?:implement|fix|modify|deploy|install|refactor|release|build)\b/i.test(mutationText);
+  const explicitExecution = /(?:请|帮我|直接|现在|开始|需要|把|给我)?\s*(?:开发|修复(?:这个|该|当前|问题|bug|代码|功能|项目)|修改(?:代码|文件|功能|项目)|新增功能|生成(?:新版|代码|版本|文件|项目)|部署(?:到|这个|该)?|安装(?:依赖|组件|软件|包)?|删除(?:代码|文件|资源|任务|项目)?|重构(?:代码|项目)?|提交(?:代码|变更)?|打包(?:发布|项目)?|发布(?:版本|项目)?|升级(?:版本|依赖|项目)?|改造代码|写代码)|(?:请|帮我|直接|现在|开始|需要|把|给我|要求|完成)\s*(?:这个|该|当前|以下|上述)?\s*实现(?:一下|功能|需求|逻辑|代码|方案|改造)?|实现(?:这个|该|以下|上述)?(?:功能|需求|逻辑|代码|方案|改造)|(?:implement|fix|modify|deploy|install|refactor|release|build)\b/i.test(mutationText);
   const explicitAnalysis = /分析|评估|审查|核对|判断|梳理|需求分析|根据附件|根据项目|告知.*步骤|告诉我.*步骤|是否有误|是否合理|对比|研究|总结|看一下|检查.*方案|review|analy[sz]e|evaluate|assess|requirement/i.test(value);
   if (explicitExecution) return 'execution';
   if (explicitAnalysis) return 'analysis';

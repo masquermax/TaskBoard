@@ -104,8 +104,10 @@ test('task attachments are durable task inputs and do not enter Project List', (
     });
     assert.equal(task.attachments.length, 1);
     assert.equal(task.attachments[0].name, '需求说明.txt');
-    assert.ok(existsSync(task.attachments[0].path));
-    assert.equal(readFileSync(task.attachments[0].path, 'utf8'), '附件里的需求内容');
+    assert.equal('path' in task.attachments[0], false, 'public Task attachment metadata must not expose a local filesystem path');
+    const internalTask=repo.getTask(task.id);
+    assert.ok(existsSync(internalTask.attachments[0].path));
+    assert.equal(readFileSync(internalTask.attachments[0].path, 'utf8'), '附件里的需求内容');
     assert.equal(service.listProjects().length, 0);
 
     db.close();

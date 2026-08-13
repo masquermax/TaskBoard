@@ -135,7 +135,7 @@ export class CodexAppServerClient {
 
     await this.request('initialize', {
       clientInfo: { name: 'taskboard_local', title: 'TaskBoard Local', version: APP_VERSION },
-      capabilities: { experimentalApi: false, optOutNotificationMethods: ['item/agentMessage/delta'] },
+      capabilities: { experimentalApi: true, optOutNotificationMethods: ['item/agentMessage/delta'] },
     }, 12_000);
     this.notify('initialized', {});
     this.initialized = true;
@@ -327,42 +327,20 @@ export class CodexAppServerClient {
     }
   }
 
-  isSandboxVariantError(error) {
-    return /unknown variant.*(?:workspace|read)|sandbox(?:Policy)?|expected one of [`'"]?(?:read-only|readOnly|workspace-write|workspaceWrite)/i.test(error?.message || '');
+  validateExecutionGrant({permissionProfile,runtimeWorkspaceRoots}) {
+    const profile=String(permissionProfile||'').trim();
+    const roots=[...new Set((Array.isArray(runtimeWorkspaceRoots)?runtimeWorkspaceRoots:[]).map(value=>String(value||'').trim()).filter(Boolean))];
+    if(!profile||!roots.length){const error=new Error('CODEX_EXECUTION_GRANT_REQUIRED: permissionProfile and runtimeWorkspaceRoots are mandatory.');error.nonRetryable=true;throw error;}
+    return{profile,roots};
   }
 
-  async startTurnWithCompatibleSandbox({ threadId, input, outputSchema, model, reasoningEffort, writableRoots, networkAccess }) {
-    const policies = writableRoots.length
-      ? [
-          { type: 'workspace-write', writableRoots, networkAccess },
-          { type: 'workspaceWrite', writableRoots, networkAccess },
-        ]
-      : [
-          { type: 'read-only', networkAccess },
-          { type: 'readOnly', networkAccess },
-        ];
-    let lastError = null;
-    for (const sandboxPolicy of policies) {
-      try {
-        return await this.request('turn/start', {
-          threadId,
-          input,
-          approvalPolicy: 'never',
-          sandboxPolicy,
-          outputSchema,
-          ...(model ? { model } : {}),
-          ...(reasoningEffort ? { effort: reasoningEffort } : {}),
-        });
-      } catch (error) {
-        lastError = error;
-        if (!this.isSandboxVariantError(error)) throw error;
-      }
-    }
-    if (lastError) lastError.nonRetryable = true;
-    throw lastError || new Error('Codex sandbox policy is unsupported');
+  sameRuntimeRoots(expected,actual){
+    const norm=value=>{const text=String(value||'').replace(/\\/g,'/').replace(/\/$/,'');return process.platform==='win32'?text.toLowerCase():text;};
+    const left=[...new Set((expected||[]).map(norm))].sort();const right=[...new Set((actual||[]).map(norm))].sort();
+    return left.length===right.length&&left.every((value,index)=>value===right[index]);
   }
 
-  async runTurn({ cwd, writableRoots, prompt, inputItems = [], outputSchema, model = null, reasoningEffort = null, networkAccess = false, onProgress = null, onExecutionStarted = null, signal = null, diagnosticContext = null, stopCondition = null }) {
+  async runTurn({ cwd, writableRoots = [], prompt, inputItems = [], outputSchema, model = null, reasoningEffort = null, networkAccess = false, permissionProfile = null, runtimeWorkspaceRoots = [], environments = null, runtimeConfig = null, onProgress = null, onExecutionStarted = null, signal = null, diagnosticContext = null, stopCondition = null }) {
     const role=diagnosticContext?.role||'root';
     const roleLabel=role==='validator'?'Validator':role==='subagent'?'Subagent':'Root';
     const runningDetail=role==='validator'?'模型正在认证当前证明关系。':role==='subagent'?'模型正在执行当前 Work Unit。':'模型正在进行 Task 级判断。';
@@ -382,32 +360,36 @@ export class CodexAppServerClient {
       reasoningEffort:reasoningEffort||null,
       inputBytes:Buffer.byteLength(String(prompt||''),'utf8'),
     };
-    this.recordDiagnostic('turn-route',routeMeta);
+    const executionGrant=this.validateExecutionGrant({permissionProfile,runtimeWorkspaceRoots});
+    this.recordDiagnostic('turn-route',{...routeMeta,permissionProfile:executionGrant.profile,runtimeWorkspaceRootCount:executionGrant.roots.length});
     await this.connect();
     onProgress?.({ summary:'Codex 已连接', detail:'正在建立本轮执行上下文。' });
 
-    // Do not pin thread-level sandbox spelling here. Older/current Codex app-server
-    // builds differ in enum serialization. The turn-level sandbox is the actual
-    // execution boundary and is negotiated below with a compatibility fallback.
     const thread = await this.request('thread/start', {
       cwd,
       ephemeral: true,
       approvalPolicy: 'never',
       personality: 'pragmatic',
+      permissions:executionGrant.profile,
+      runtimeWorkspaceRoots:executionGrant.roots,
+      ...(Array.isArray(environments)?{environments}:{}),
+      ...(runtimeConfig&&typeof runtimeConfig==='object'?{config:runtimeConfig}:{}),
       ...(model ? { model } : {}),
     });
+    const activePermissionProfile=thread?.activePermissionProfile?.id||null;
+    if(activePermissionProfile!==executionGrant.profile){const error=new Error(`CODEX_PERMISSION_PROFILE_NOT_APPLIED: requested ${executionGrant.profile}, got ${activePermissionProfile||'none'}`);error.nonRetryable=true;throw error;}
+    if(!this.sameRuntimeRoots(executionGrant.roots,thread?.runtimeWorkspaceRoots||[])){const error=new Error('CODEX_RUNTIME_ROOTS_NOT_APPLIED: app-server did not confirm the exact Runtime workspace roots.');error.nonRetryable=true;throw error;}
     const threadId = thread.thread.id;
     const resolvedThreadModel=thread?.thread?.model||thread?.thread?.modelId||null;
     onProgress?.({ summary:'Codex 会话已建立', detail:`正在启动本轮 ${roleLabel} 执行。` });
 
-    const start = await this.startTurnWithCompatibleSandbox({
+    const start = await this.request('turn/start', {
       threadId,
       input: [{ type: 'text', text: prompt }, ...inputItems],
+      approvalPolicy:'never',
       outputSchema,
-      model,
-      reasoningEffort,
-      writableRoots,
-      networkAccess,
+      ...(model ? { model } : {}),
+      ...(reasoningEffort ? { effort: reasoningEffort } : {}),
     });
     const turnId = start.turn.id;
     const resolvedTurnModel=start?.turn?.model||start?.turn?.modelId||resolvedThreadModel||null;
@@ -492,8 +474,18 @@ export class CodexAppServerClient {
 
         if (event.method === 'item/started') {
           const item = event.params?.item;
-          if (item?.type === 'commandExecution') { toolCallCount+=1; onProgress?.({ summary:'正在核对证据', detail:commandDetail }); }
-          else if (item?.type === 'fileChange') onProgress?.({ summary:'Codex 正在处理文件变更', detail:fileChangeDetail });
+          const type=String(item?.type||'');
+          const roleCanExecute=role==='subagent';
+          const roleCanWrite=roleCanExecute&&diagnosticContext?.projectAccess==='write';
+          const roleCanNetwork=roleCanExecute&&diagnosticContext?.networkAccess===true;
+          const forbiddenAmbient=new Set(['mcpToolCall','collabToolCall','dynamicToolCall']);
+          const actionViolation=forbiddenAmbient.has(type)||(type==='commandExecution'&&!roleCanExecute)||(type==='fileChange'&&!roleCanWrite)||(type==='webSearch'&&!roleCanNetwork);
+          if(actionViolation){
+            interrupt();
+            const error=new Error(`ROLE_EXECUTION_SURFACE_VIOLATION: ${role} cannot execute ${type||'unknown'} under the current Execution Grant.`);error.nonRetryable=true;error.authorityViolation=true;throw error;
+          }
+          if (type === 'commandExecution') { toolCallCount+=1; onProgress?.({ summary:'正在核对证据', detail:commandDetail }); }
+          else if (type === 'fileChange') onProgress?.({ summary:'Codex 正在处理文件变更', detail:fileChangeDetail });
           continue;
         }
 

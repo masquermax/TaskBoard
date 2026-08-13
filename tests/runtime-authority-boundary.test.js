@@ -3,13 +3,15 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { GovernanceCompiler } from '../src/governance/governance-compiler.js';
+import { GovernanceCompiler, inferTaskMode } from '../src/governance/governance-compiler.js';
 import { AnalysisResultValidator } from '../src/governance/analysis-validator.js';
 import { ValidatorRuntime } from '../src/governance/validator-runtime.js';
 import { CodexExecutor } from '../src/extensions/executors/codex/codex-executor.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
 import { ModelRouter } from '../src/core/model-router.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
+import { JsonTaskDatabase, JsonTaskRepository } from '../src/core/json-repository.js';
+import { TaskService } from '../src/core/task-service.js';
 
 const rootDir=process.cwd();
 
@@ -31,6 +33,31 @@ function analysisTask(projects=[]){return{
 };}
 
 function analysisValidatorRuntime(){return new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()});}
+
+
+test('taskMode inference does not turn noun-like current implementation analysis into write authority',()=>{
+  assert.equal(inferTaskMode({title:'架构审查',instruction:'分析当前实现并定位根因'}),'analysis');
+  assert.equal(inferTaskMode({title:'功能开发',instruction:'请实现这个功能并修改代码'}),'execution');
+});
+
+test('completed Work Unit result survives process/session boundaries without becoming public Task context',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'taskboard-work-receipt-'));const db=new JsonTaskDatabase(join(dir,'db.json'));const repo=new JsonTaskRepository(db);const service=new TaskService(repo);
+  try{
+    const task=repo.createTask({title:'receipt',instruction:'分析当前实现',attachments:[{id:'A-1',name:'private.txt',mimeType:'text/plain',size:1,path:join(dir,'private.txt')}]});
+    const receipt={id:'WU-1',signature:'sig-1',workUnit:{id:'WU-1',title:'scan',goal:'scan',expectedOutput:'result',stopCondition:'done',projectAccess:'read',networkAccess:false,skillId:null,dependsOn:[],inputRefs:['project:0']},result:{delegationId:'WU-1',result:'done',evidence:[],findings:[],discoveries:[],blocker:null,uncertainty:null},completed_at:'2026-08-13T00:00:00.000Z'};
+    repo.commitWorkReceipt(task.id,receipt);
+    repo.commitWorkReceipt(task.id,{...receipt,id:'WU-other'});
+    let stored=repo.getTask(task.id).workReceipts;
+    assert.equal(stored.length,1,'same semantic work remains one durable receipt even if a new id is proposed');
+    assert.equal(stored[0].consumed_at,null);
+    const publicTask=service.getTask(task.id);
+    for(const key of ['analysisState','analysis_state','workReceipts','work_receipts','execution_state'])assert.equal(key in publicTask,false,key+' is internal Task control/context');
+    assert.equal('path' in publicTask.attachments[0],false,'attachment local path is not a public Task field');
+    repo.commitCertifiedTurn(task.id,{analysisState:{version:0,current:{resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[]},turns:[]},workReceiptIds:['WU-1']});
+    stored=repo.getTask(task.id).workReceipts;
+    assert.ok(stored[0].consumed_at,'Root consumption is durable and atomic with the certified boundary');
+  }finally{db.close();rmSync(dir,{recursive:true,force:true});}
+});
 
 test('Capability Contract compiles into one typed executionGrant for Root, Subagent and Validator',()=>{
   const compiler=new GovernanceCompiler({rootDir});
@@ -64,7 +91,10 @@ test('CodexExecutor consumes executionGrant and projects it to an explicit runti
     await executor.runRoot({task,subagentResults:[],humanGatewayHistory:[],modelPolicy:{},policyContext});
     assert.equal(client.calls.length,1);
     const call=client.calls[0];
-    assert.equal(call.permissionProfile,':read-only');
+    assert.equal(call.permissionProfile,'taskboard_runtime');
+    assert.equal(call.runtimeConfig.permissions.taskboard_runtime.filesystem[':workspace_roots']['.'],'read');
+    assert.equal(call.runtimeConfig.permissions.taskboard_runtime.network.enabled,false);
+    assert.deepEqual(call.environments,[]);
     assert.deepEqual(call.runtimeWorkspaceRoots,[call.cwd]);
     assert.equal(call.runtimeWorkspaceRoots.includes(project),false,'Root runtime roots must not include Project Scope');
     assert.equal(call.networkAccess,false);
@@ -87,13 +117,13 @@ test('source-backed analysis cannot complete on the initial Root turn without de
   };
   const router=new ModelRouter();
   const subagent=new SubagentRuntime({executor,modelRouter:router});
-  const runtime=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:analysisValidatorRuntime()});
+  const runtime=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:analysisValidatorRuntime(),governanceCompiler:new GovernanceCompiler({rootDir})});
   try{
     await assert.rejects(
       runtime.execute(analysisTask([project])),
-      /SOURCE_ANALYSIS_REQUIRES_DELEGATED_EVIDENCE/,
+      /ROOT_INVALID_COMPLETION_PLAN: SOURCE_ANALYSIS_REQUIRES_DELEGATED_EVIDENCE/,
     );
-    assert.equal(rootTurns,1);
+    assert.equal(rootTurns,2,'one bounded planning repair is allowed before fail-closed rejection');
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
 

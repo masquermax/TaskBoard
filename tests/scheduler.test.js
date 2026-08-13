@@ -342,30 +342,32 @@ test('Subagent local result reaches Root once without semantic Validator takeove
   }finally{scheduler.stop();db.close();rmSync(dir,{recursive:true,force:true});}
 });
 
-test('certified Root convergence stops obsolete read-only sibling work instead of recreating a whole-stage tail barrier',async()=>{
-  let slowStarted=false,slowAborted=false;
+test('Root may synthesize an early Work Unit result while final completion still waits for every issued obligation',async()=>{
+  let slowStarted=false,releaseSlow;const deliveries=[];
   const executor={
     async runRoot({subagentResults,onExecutionStarted}){
-      onExecutionStarted?.();
+      onExecutionStarted?.();deliveries.push(subagentResults.map(item=>item.delegationId));
       if(!subagentResults.length)return{kind:'delegate',summary:'split',stageResult:null,finalResult:null,confirmed:[],recommendations:[],openQuestions:[],gateway:null,delegations:[
-        {id:'fast',title:'关键证据',goal:'取得足以闭合任务的关键证据',expectedOutput:'返回关键证据',stopCondition:'证据取得后停止',projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[]},
-        {id:'slow',title:'补充证据',goal:'补充非必要证据',expectedOutput:'返回补充证据',stopCondition:'补充结束后停止',projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[]},
+        {id:'fast',title:'关键证据',goal:'取得关键证据',expectedOutput:'返回关键证据',stopCondition:'证据取得后停止',projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[]},
+        {id:'slow',title:'补充证据',goal:'完成已签发的补充核对',expectedOutput:'返回补充证据',stopCondition:'补充结束后停止',projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[]},
       ]};
-      return complete('关键证据已足够，任务收敛');
+      return complete('当前结果已可综合');
     },
-    async runSubagent({delegation,signal,onExecutionStarted}){
+    async runSubagent({delegation,onExecutionStarted}){
       onExecutionStarted?.();
       if(delegation.id==='fast')return{delegationId:'fast',result:'足够',evidence:[],claims:[],gaps:[],recommendations:[],discoveries:[],blocker:null,uncertainty:null};
-      slowStarted=true;
-      return new Promise((resolve,reject)=>signal.addEventListener('abort',()=>{slowAborted=true;const error=new Error('aborted');error.interrupted=true;reject(error);},{once:true}));
+      slowStarted=true;return new Promise(resolve=>{releaseSlow=()=>resolve({delegationId:'slow',result:'补充完成',evidence:[],claims:[],gaps:[],recommendations:[],discoveries:[],blocker:null,uncertainty:null});});
     },
   };
   const x=rig(executor,{maxConcurrentSubagents:2});
   try{
-    const task=x.scheduler.createTask({title:'局部收敛',instruction:'执行到证据足够即可'});
-    await x.scheduler.tick();
-    assert.equal(slowStarted,true,'independent sibling should have started in parallel');
-    assert.equal(slowAborted,true,'once Root converges, obsolete read-only sibling should not hold the Task open');
+    const task=x.scheduler.createTask({title:'局部收敛',instruction:'执行到证据足够即可'});const ticking=x.scheduler.tick();
+    for(let i=0;i<100&&!slowStarted;i++)await new Promise(r=>setTimeout(r,2));
+    assert.equal(slowStarted,true,'independent sibling starts in parallel');
+    for(let i=0;i<100&&!deliveries.some(ids=>ids.includes('fast'));i++)await new Promise(r=>setTimeout(r,2));
+    assert.equal(deliveries.some(ids=>ids.includes('fast')),true,'Root receives the early result without waiting for the whole stage');
+    assert.equal(x.service.getTask(task.id).status,TaskStatus.RUNNING,'complete candidate cannot silently cancel an issued sibling');
+    releaseSlow();await ticking;
     assert.equal(x.service.getTask(task.id).status,TaskStatus.COMPLETED);
   }finally{x.close();}
 });
