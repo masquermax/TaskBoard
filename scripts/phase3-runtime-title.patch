@@ -1,0 +1,6 @@
+diff --git a/tests/runtime-authority-boundary.test.js b/tests/runtime-authority-boundary.test.js
+--- a/tests/runtime-authority-boundary.test.js
++++ b/tests/runtime-authority-boundary.test.js
+@@ -59,1 +59,1 @@
+-test('Capability Contract compiles into one typed executionGrant for Root, Subagent and Validator',()=>{
++test('GovernanceCompiler compiles one typed AuthorizedGrant for Root, Subagent and Validator',()=>{
