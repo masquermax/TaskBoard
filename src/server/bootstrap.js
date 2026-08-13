@@ -15,6 +15,8 @@ import { AnalysisResultValidator } from '../governance/analysis-validator.js';
 import { ValidatorRuntime } from '../governance/validator-runtime.js';
 import { SemanticProofVerifier } from '../governance/semantic-proof-verifier.js';
 import { TaskContractFidelityVerifier } from '../governance/task-contract-fidelity.js';
+import { CompletionAssessmentVerifier } from '../governance/completion-assessment-verifier.js';
+import { CompletionEvaluator } from '../governance/completion-evaluator.js';
 import { RuntimeSettingsStore, executionLimitsFromCapability, resolveEffectiveRuntimeSettings } from '../core/runtime-settings.js';
 
 const packageRoot=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
@@ -49,9 +51,11 @@ export function bootstrap({rootDir,dbFile=null,executorName=process.env.TASKBOAR
   const semanticVerifier=new SemanticProofVerifier({executor,modelRouter});
   const validatorRuntime=new ValidatorRuntime({analysisValidator,semanticVerifier});
   const taskContractFidelityVerifier=new TaskContractFidelityVerifier({executor,modelRouter});
+  const completionAssessmentVerifier=new CompletionAssessmentVerifier({executor,modelRouter});
+  const completionEvaluator=new CompletionEvaluator();
   const subagentRuntime=new SubagentRuntime({executor,modelRouter});
   const currentLimits=()=>executionLimitsFromCapability(capabilityProvider?.snapshot?.()||null);
-  const rootRuntime=new RootRuntime({executor,modelRouter,subagentRuntime,governanceCompiler,validatorRuntime,taskContractFidelityVerifier,maxConcurrentSubagents:runtimeSettings.taskMaxSubagents,capabilityLimits:currentLimits});
+  const rootRuntime=new RootRuntime({executor,modelRouter,subagentRuntime,governanceCompiler,validatorRuntime,taskContractFidelityVerifier,completionAssessmentVerifier,completionEvaluator,maxConcurrentSubagents:runtimeSettings.taskMaxSubagents,capabilityLimits:currentLimits});
   const scheduler=new Scheduler({repository,taskService,rootRuntime,maxConcurrentTasks:runtimeSettings.taskConcurrency,capabilityLimits:currentLimits});
   const runtimeSettingsState=()=>resolveEffectiveRuntimeSettings(settingsStore.get(),capabilityProvider?.snapshot?.()||null);
   const applyRuntimeSettings=next=>{const value=settingsStore.update(next);rootRuntime.setConcurrency?.(value.taskMaxSubagents);scheduler.setConcurrency?.(value.taskConcurrency);return runtimeSettingsState();};
