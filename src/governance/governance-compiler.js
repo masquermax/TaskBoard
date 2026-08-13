@@ -12,6 +12,7 @@ function deepFreeze(value) {
 
 function compactRule(rule) { return `[${rule.id}] ${rule.title}: ${rule.text}`; }
 function hashPolicy(parts) { return createHash('sha256').update(parts.join('\n')).digest('hex').slice(0,16); }
+function strings(values){return [...new Set((Array.isArray(values)?values:[]).map(value=>String(value||'').trim()).filter(Boolean))];}
 
 const ROLE_CONTRACT = Object.freeze({ root:'ROOT', subagent:'SUBAGENT', validator:'VALIDATOR' });
 
@@ -23,6 +24,23 @@ export function inferTaskMode(task) {
   if (explicitExecution) return 'execution';
   if (explicitAnalysis) return 'analysis';
   return 'auto';
+}
+
+export function compileExecutionGrant({role,taskMode,workUnit=null}={}){
+  if(role==='root')return{role:'root',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'none'};
+  if(role==='validator')return{role:'validator',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'proof-only'};
+  if(role!=='subagent')return{role:String(role||'unknown'),projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'none'};
+  const requested=String(workUnit?.projectAccess||'none').trim().toLowerCase();
+  const projectAccess=['none','read','write'].includes(requested) ? requested : 'none';
+  const effectiveProjectAccess=projectAccess==='write'&&taskMode!=='execution' ? 'none' : projectAccess;
+  const inputRefs=strings(workUnit?.inputRefs);
+  return{
+    role:'subagent',
+    projectAccess:effectiveProjectAccess,
+    networkAccess:workUnit?.networkAccess===true,
+    inputRefs,
+    sourceAccess:inputRefs.length?'selected':'none',
+  };
 }
 
 export class GovernanceCompiler {
@@ -44,6 +62,7 @@ export class GovernanceCompiler {
     return deepFreeze({
       fingerprint:this.fingerprint,
       taskMode,
+      executionGrant:compileExecutionGrant({role:'root',taskMode}),
       skillCatalog:this.skills.list(),
       prompt:this.compilePrompt({taskMode,role:'root'}),
     });
@@ -62,7 +81,7 @@ export class GovernanceCompiler {
     return parts.join('\n');
   }
 
-  compileForRole(task, role, {skillId=null}={}) {
+  compileForRole(task, role, {skillId=null,workUnit=null}={}) {
     const taskMode=inferTaskMode(task);
     const contractId=ROLE_CONTRACT[role] || String(role||'').toUpperCase();
     const contract=this.contracts[contractId] || null;
@@ -72,6 +91,7 @@ export class GovernanceCompiler {
       taskMode,
       role,
       contract:contract ? {...contract} : null,
+      executionGrant:compileExecutionGrant({role,taskMode,workUnit}),
       selectedSkill:skill ? {id:skill.id,purpose:[...skill.purpose]} : null,
       skillCatalog: role==='root' ? this.skills.list() : [],
       prompt:this.compilePrompt({taskMode,role,skillId:skill?.id||null}),
