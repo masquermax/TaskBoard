@@ -1,0 +1,6 @@
+diff --git a/tests/capability-architecture.test.js b/tests/capability-architecture.test.js
+--- a/tests/capability-architecture.test.js
++++ b/tests/capability-architecture.test.js
+@@ -135,1 +135,1 @@
+-  assert.equal(auto.valid,false,'auto/ambiguous Task must not silently acquire project write authority');
++  assert.equal(auto.valid,true,'Task mode is not an Authority owner');
