@@ -170,13 +170,15 @@ export function validateDelegationPlan(delegations, { knownWorkIds = [], availab
 }
 
 export class RootRuntime {
-  constructor({ executor, modelRouter, subagentRuntime, governanceCompiler = null, validatorRuntime = null, taskContractFidelityVerifier = null, maxConcurrentSubagents = 3, capabilityLimits = null, retryDelaysMs = null }) {
+  constructor({ executor, modelRouter, subagentRuntime, governanceCompiler = null, validatorRuntime = null, taskContractFidelityVerifier = null, completionAssessmentVerifier = null, completionEvaluator = null, maxConcurrentSubagents = 3, capabilityLimits = null, retryDelaysMs = null }) {
     this.executor = executor;
     this.modelRouter = modelRouter;
     this.subagentRuntime = subagentRuntime;
     this.governanceCompiler = governanceCompiler;
     this.validatorRuntime = validatorRuntime;
     this.taskContractFidelityVerifier = taskContractFidelityVerifier;
+    this.completionAssessmentVerifier = completionAssessmentVerifier;
+    this.completionEvaluator = completionEvaluator;
     this.maxConcurrentSubagents = Math.max(1, Math.min(5, Number(maxConcurrentSubagents) || 1));
     this.capabilityLimits = typeof capabilityLimits === 'function' ? capabilityLimits : null;
     this.retryDelaysMs = retryDelaysMs;
@@ -305,6 +307,9 @@ export class RootRuntime {
       planningFeedback: null,
       planningRepairCount: 0,
       planningTriggerRefs: [],
+      completionFeedback: null,
+      completionRepairCount: 0,
+      completionTriggerRefs: [],
       committedProgressKeys: new Set(),
       lastCommittedStageResult: task.last_stage_result || null,
       analysisState: restoredAnalysisState,
@@ -861,8 +866,11 @@ export class RootRuntime {
           throw error;
         }
       } else {
+        if(rootInputs.length){session.completionFeedback=null;session.completionRepairCount=0;session.completionTriggerRefs=[];}
         if(!rootInputs.length){
-          if(session.planningFeedback?.length&&session.planningTriggerRefs?.length){
+          if(session.completionFeedback?.length&&session.completionTriggerRefs?.length){
+            rootTriggerRefs=[...session.completionTriggerRefs];
+          }else if(session.planningFeedback?.length&&session.planningTriggerRefs?.length){
             // Capability-contract repair is a bounded sub-loop of the same Root
             // turn. It reuses the original trigger; it does not manufacture a
             // new business/event trigger merely because the plan was invalid.
@@ -878,7 +886,7 @@ export class RootRuntime {
           }
         }
         try {
-          decision = await this.runRootTurn(task, session, callbacks, { humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs), rootInputs });
+          decision = await this.runRootTurn(task, session, callbacks, { humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs), rootInputs, validationFeedback:session.completionFeedback?.length?session.completionFeedback:null });
         } catch (error) {
           if (isCapacityUnavailable(error) && (rootInputs.length || session.currentStage)) {
             const outcome = await capacityWait({ title:'Root 综合分析', detail:'已认证的局部结果已保留，等待 Root 资源后继续综合；其他独立 Work Unit 不受影响。', reason:'等待 Root 综合资源恢复' });
@@ -945,6 +953,7 @@ export class RootRuntime {
         continue;
       }
       if (decision.kind === 'cancelled') return { kind:'cancelled', quiescent:this.isQuiescent(task.id) };
+      if(decision.kind!=='complete'){session.completionFeedback=null;session.completionRepairCount=0;session.completionTriggerRefs=[];}
       if (session.policyContext?.taskMode !== 'analysis' && decision.stageResult) onStageResult?.(decision.stageResult);
 
       // A Root result may be valuable even while sibling Work Units are still
@@ -1021,8 +1030,23 @@ export class RootRuntime {
         const finalResult = finalView ? renderAnalysisResult(finalView) : composeExecutionResult(decision);
         const finalSummary = finalView ? canonicalAnalysisSummary(finalView) : decision.summary;
         const stageResult = session.lastCommittedStageResult || decision.stageResult || null;
-        this.discardSession(task.id);
-        return { kind:'completion_proposed', proposal:{ finalResult, summary:finalSummary, stageResult }, quiescent:true };
+        const proposal={ finalResult, summary:finalSummary, stageResult };
+        if(!this.completionEvaluator){const error=new Error('COMPLETION_EVALUATOR_REQUIRED');error.nonRetryable=true;throw error;}
+        let assessments=[];
+        if(this.completionAssessmentVerifier){
+          const verified=await this.completionAssessmentVerifier.review({task,proposal,policyContext:this.governanceCompiler?.compileForRole?.(task,'validator')||session.policyContext,certifiedContext:session.certifiedContext,onExecutionStarted:()=>callbacks.onExecutionStarted?.({role:'validator'}),onProgress:progress=>{session.actor={title:'Completion Validator 认证',status:WorkUnitStatus.RUNNING,detail:progress?.detail||progress?.summary||'正在逐项核对 governed obligations。',updatedAt:nowIso(),owner:'validator'};this.emit(session,callbacks);}});
+          assessments=Array.isArray(verified?.assessments)?verified.assessments:[];
+        }
+        const evaluated=this.completionEvaluator.evaluate({taskContract:task.taskContract,certifiedAssessments:assessments});
+        if(evaluated?.goalState==='satisfied'){session.completionFeedback=null;session.completionRepairCount=0;session.completionTriggerRefs=[];this.discardSession(task.id);return{kind:'goal_satisfied',goalState:evaluated.goalState,proposal,assessments,quiescent:true};}
+        const unsatisfied=Array.isArray(evaluated?.unsatisfiedObligationIds)?evaluated.unsatisfiedObligationIds:[];
+        if(session.completionRepairCount>=1){const error=new Error(`ROOT_COMPLETION_NON_CONVERGENCE: governed obligations remain unsatisfied${unsatisfied.length?`: ${unsatisfied.join(', ')}`:''}`);error.nonRetryable=true;throw error;}
+        session.completionRepairCount=1;
+        session.completionFeedback=[{ruleId:'D-018',target:'completion',reason:`CompletionEvaluator reports unsatisfied obligations${unsatisfied.length?`: ${unsatisfied.join(', ')}`:''}.`,action:'REVISE_CONTROL_DECISION'}];
+        session.completionTriggerRefs=[...rootTriggerRefs];
+        session.actor={title:'Completion Contract 校验',status:WorkUnitStatus.COMPLETED,detail:'Root completion proposal 未满足 governed obligations；使用同一触发仅允许一次受限控制修正。',updatedAt:nowIso(),owner:'root'};
+        this.emit(session,callbacks);
+        continue;
       }
 
       const error = new Error('ROOT_INVALID_DECISION');
