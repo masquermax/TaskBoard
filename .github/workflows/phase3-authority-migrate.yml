@@ -1,22 +1,17 @@
-name: Phase 3 authority migration
+name: Phase 3 authority final hygiene
 
 on:
   push:
     branches: [agent/authority-single-owner-phase3]
     paths:
-      - scripts/phase3-authority-migrate.mjs
-      - scripts/phase3-*.patch
+      - scripts/phase3-final-*.patch
       - .github/workflows/phase3-authority-migrate.yml
-      - tests/**
-      - src/governance/task-contract-fidelity.js
-      - src/governance/governance-compiler.js
-      - src/governance/role-capability-contract.js
 
 permissions:
   contents: write
 
 jobs:
-  migrate-verify:
+  verify-final-hygiene:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,37 +21,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node scripts/phase3-authority-migrate.mjs
-      - name: Apply transparent Phase 3 regression migrations
+      - name: Apply final Authority hygiene
         run: |
-          for patch in scripts/phase3-*.patch; do
-            echo "Applying $patch"
-            git apply --recount --unidiff-zero "$patch"
-          done
+          git apply scripts/phase3-final-executor.patch
+          git apply scripts/phase3-final-role-guide.patch
       - run: git diff --check
-      - name: Run full verify
-        id: verify
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          npm run verify 2>&1 | tee verify.log
-      - name: Preserve failed verify log
-        if: steps.verify.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: phase3-verify-failure
-          path: verify.log
-          if-no-files-found: error
-      - name: Stop on verify failure
-        if: steps.verify.outcome == 'failure'
-        run: exit 1
-      - name: Commit verified Phase 3 source and regression changes
-        if: steps.verify.outcome == 'success'
+      - run: npm run verify
+      - name: Commit verified product and documentation hygiene
         run: |
           git config user.name "taskboard-phase3-bot"
           git config user.email "taskboard-phase3-bot@users.noreply.github.com"
-          git add src tests
+          git add src docs
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m "refactor: complete single-owner authority runtime path"
+          git commit -m "docs: close remaining authority source ambiguity"
           git push origin HEAD:agent/authority-single-owner-phase3
