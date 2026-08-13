@@ -1,10 +1,20 @@
 name: Phase 3 authority migration
+
 on:
   push:
     branches: [agent/authority-single-owner-phase3]
-    paths: [scripts/phase3-authority-migrate.mjs, .github/workflows/phase3-authority-migrate.yml]
+    paths:
+      - scripts/phase3-authority-migrate.mjs
+      - scripts/phase3-*.patch
+      - .github/workflows/phase3-authority-migrate.yml
+      - tests/**
+      - src/governance/task-contract-fidelity.js
+      - src/governance/governance-compiler.js
+      - src/governance/role-capability-contract.js
+
 permissions:
   contents: write
+
 jobs:
   migrate-verify:
     runs-on: ubuntu-latest
@@ -17,13 +27,15 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/phase3-authority-migrate.mjs
+      - name: Apply transparent Phase 3 regression migrations
+        run: git apply scripts/phase3-*.patch
       - run: git diff --check
       - run: npm run verify
-      - name: Commit verified Phase 3 product changes
+      - name: Commit verified Phase 3 source and regression changes
         run: |
           git config user.name "taskboard-phase3-bot"
           git config user.email "taskboard-phase3-bot@users.noreply.github.com"
-          git add src
+          git add src tests
           if git diff --cached --quiet; then exit 0; fi
           git commit -m "refactor: complete single-owner authority runtime path"
           git push origin HEAD:agent/authority-single-owner-phase3
