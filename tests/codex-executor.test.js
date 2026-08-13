@@ -5,9 +5,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { CodexExecutor } from '../src/extensions/executors/codex/codex-executor.js';
 
-
-const rootPolicy=(taskMode='analysis')=>({taskMode,prompt:'POLICY',executionGrant:{role:'root',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'none'}});
-const subPolicy=({taskMode='analysis',projectAccess='none',networkAccess=false,inputRefs=[]}={})=>({taskMode,prompt:'POLICY',executionGrant:{role:'subagent',projectAccess,networkAccess,inputRefs,sourceAccess:inputRefs.length?'selected':'none'}});
+const rootPolicy=(taskMode='analysis')=>({taskMode,prompt:'POLICY',authorizedGrant:{role:'root',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'none',environmentAccess:'none'}});
+const subPolicy=({taskMode='analysis',projectAccess='none',networkAccess=false,inputRefs=[]}={})=>({taskMode,prompt:'POLICY',authorizedGrant:{role:'subagent',projectAccess,networkAccess,inputRefs,sourceAccess:inputRefs.length?'selected':'none',environmentAccess:'default'}});
 
 class CaptureClient {
   constructor(){ this.calls = []; }
@@ -17,8 +16,6 @@ class CaptureClient {
   }
   async health(){ return { available:true, connected:true, authenticated:true }; }
 }
-
-
 
 test('Codex executor health exposes Capability Provider refresh state without inventing UI-local status', async()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-codex-health-refresh-'));
@@ -65,7 +62,6 @@ test('Root receives attachment metadata only: no localImage/path and no network 
     rmSync(dir, { recursive:true, force:true });
   }
 });
-
 
 test('Project access belongs only to explicit Subagent Work Units; Root has none',()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-codex-scope-'));
@@ -135,7 +131,7 @@ test('Subagent receives one Executor-owned environment snapshot and does not nee
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
-test('Subagent network capability is granted only when both Work Unit and Executor allow it',async()=>{
+test('Executor can only reduce network capability already present in AuthorizedGrant',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-codex-network-cap-'));
   try{
     const task={id:'T-NET',title:'network',instruction:'x',projectScopes:[],attachments:[],references:[]};
@@ -145,12 +141,12 @@ test('Subagent network capability is granted only when both Work Unit and Execut
     const allowed=new CodexExecutor({runtimeRoot:join(dir,'allowed'),client:allowedClient,networkAccess:true});
     await allowed.runSubagent({task,delegation:{...baseDelegation,networkAccess:false},policyContext:subPolicy({taskMode:'analysis',projectAccess:'none',networkAccess:false,inputRefs:[]}),modelPolicy:{}});
     await allowed.runSubagent({task,delegation:{...baseDelegation,networkAccess:true},policyContext:subPolicy({taskMode:'analysis',projectAccess:'none',networkAccess:true,inputRefs:[]}),modelPolicy:{}});
-    assert.equal(allowedClient.calls[0].networkAccess,false,'undeclared network capability stays off');
-    assert.equal(allowedClient.calls[1].networkAccess,true,'declared capability may be granted when Executor allows it');
+    assert.equal(allowedClient.calls[0].networkAccess,false,'ungranted network capability stays off');
+    assert.equal(allowedClient.calls[1].networkAccess,true,'AuthorizedGrant remains effective when Runtime availability permits it');
 
     const deniedClient=new CaptureClient();
     const denied=new CodexExecutor({runtimeRoot:join(dir,'denied'),client:deniedClient,networkAccess:false});
     await denied.runSubagent({task,delegation:{...baseDelegation,networkAccess:true},policyContext:subPolicy({taskMode:'analysis',projectAccess:'none',networkAccess:true,inputRefs:[]}),modelPolicy:{}});
-    assert.equal(deniedClient.calls[0].networkAccess,false,'Executor may reduce but never expand Work Unit capability');
+    assert.equal(deniedClient.calls[0].networkAccess,false,'Executor may reduce but never expand AuthorizedGrant');
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
