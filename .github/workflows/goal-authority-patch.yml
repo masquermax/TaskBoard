@@ -7,6 +7,7 @@ on:
     paths:
       - scripts/goal-authority-patch.mjs
       - scripts/goal-authority-patch-2.mjs
+      - scripts/goal-authority-patch-4.mjs
       - .github/workflows/goal-authority-patch.yml
 
 permissions:
@@ -25,6 +26,7 @@ jobs:
           node-version: 22
       - run: node scripts/goal-authority-patch.mjs
       - run: node scripts/goal-authority-patch-2.mjs
+      - run: node scripts/goal-authority-patch-4.mjs
       - run: git diff --check
       - run: npm run verify
       - name: Commit verified source and regression changes
