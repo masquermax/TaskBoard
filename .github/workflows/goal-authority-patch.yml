@@ -11,6 +11,7 @@ on:
       - scripts/run-goal-authority-patch-4.mjs
       - scripts/goal-authority-patch-5.mjs
       - scripts/goal-authority-patch-6.mjs
+      - scripts/goal-authority-patch-7.mjs
       - .github/workflows/goal-authority-patch.yml
 
 permissions:
@@ -32,6 +33,7 @@ jobs:
       - run: node scripts/run-goal-authority-patch-4.mjs
       - run: node scripts/goal-authority-patch-5.mjs
       - run: node scripts/goal-authority-patch-6.mjs
+      - run: node scripts/goal-authority-patch-7.mjs
       - name: Remove cloud patch scaffolding before product verification
         run: rm -f scripts/goal-authority-patch*.mjs scripts/run-goal-authority-patch-4.mjs
       - run: git diff --check
@@ -45,5 +47,5 @@ jobs:
           git config user.name "taskboard-goal-bot"
           git config user.email "taskboard-goal-bot@users.noreply.github.com"
           git add src tests
-          git commit -m "fix: enforce compiled runtime authority boundaries"
+          git commit -m "fix: close side-effect and ambient capability bypasses"
           git push origin HEAD:agent/main-authority-root-cause
