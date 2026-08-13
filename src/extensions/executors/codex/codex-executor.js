@@ -134,18 +134,18 @@ export class CodexExecutor extends ExecutorPort {
   workUnitWorkspace(task,workUnitId='work'){const safe=String(workUnitId||'work').replace(/[^A-Za-z0-9._-]/g,'_');const dir=resolve(this.taskWorkspace(task),'work-units',safe);mkdirSync(dir,{recursive:true});return dir;}
   cleanupTaskWorkspace(taskId){try{rmSync(resolve(this.runtimeRoot,String(taskId)),{recursive:true,force:true});return true;}catch{return false;}}
   executionScope(task,policyContext=null,{workUnitId=null}={}){
-    const grant=policyContext?.executionGrant;
-    if(!grant){const error=new Error('EXECUTION_GRANT_REQUIRED: role Capability Contract was not compiled into a Runtime execution grant.');error.nonRetryable=true;throw error;}
+    const grant=policyContext?.authorizedGrant;
+    if(!grant){const error=new Error('AUTHORIZED_GRANT_REQUIRED: GovernanceCompiler did not provide Runtime authority.');error.nonRetryable=true;throw error;}
     const role=String(grant.role||'');
-    if(!['root','subagent','validator'].includes(role)){const error=new Error(`EXECUTION_GRANT_ROLE_INVALID: ${role||'missing'}`);error.nonRetryable=true;throw error;}
+    if(!['root','subagent','validator'].includes(role)){const error=new Error(`AUTHORIZED_GRANT_ROLE_INVALID: ${role||'missing'}`);error.nonRetryable=true;throw error;}
     const paths=(task.projectScopes||[]).map(s=>s.path).filter(Boolean).map(p=>resolve(p));
     const scratch=role==='subagent'?this.workUnitWorkspace(task,workUnitId):(resolve(this.taskWorkspace(task),role));mkdirSync(scratch,{recursive:true});
-    const projectAccess=role==='subagent'?String(grant.projectAccess||'none'):'none';
+    const projectAccess=String(grant.projectAccess||'none');
+    if(!['none','read','write'].includes(projectAccess)){const error=new Error(`AUTHORIZED_GRANT_PROJECT_ACCESS_INVALID: ${projectAccess}`);error.nonRetryable=true;throw error;}
     if(projectAccess!=='none'&&!paths.length){const error=new Error('EXECUTION_GRANT_SCOPE_MISMATCH: Project access was granted without a selected Project input.');error.nonRetryable=true;throw error;}
-    if(projectAccess==='none'&&paths.length&&role==='subagent'){const error=new Error('EXECUTION_GRANT_SCOPE_MISMATCH: scoped Task contains Project input while projectAccess=none.');error.nonRetryable=true;throw error;}
-    const runtimeWorkspaceRoots=[scratch,...(role==='subagent'&&projectAccess!=='none'?paths:[])];
-    const fileAccess=role==='subagent'&&projectAccess==='write'?'write':'read';
-    const networkAccess=role==='subagent'&&grant.networkAccess===true&&this.networkAccess===true;
+    const runtimeWorkspaceRoots=[scratch,...(projectAccess!=='none'?paths:[])];
+    const fileAccess=projectAccess==='write'?'write':'read';
+    const networkAccess=grant.networkAccess===true&&this.networkAccess===true;
     const permissionProfile='taskboard_runtime';
     const runtimeConfig={
       permissions:{taskboard_runtime:{filesystem:{':minimal':'read',':workspace_roots':{'.':fileAccess}},network:{enabled:networkAccess}}},
@@ -155,7 +155,7 @@ export class CodexExecutor extends ExecutorPort {
       include_apps_instructions:false,
       allow_login_shell:false,
     };
-    return{cwd:scratch,writableRoots:fileAccess==='write'?runtimeWorkspaceRoots:[],scratch,projectAccess,permissionProfile,runtimeWorkspaceRoots,environments:role==='subagent'?null:[],runtimeConfig,networkAccess};
+    return{cwd:scratch,writableRoots:fileAccess==='write'?runtimeWorkspaceRoots:[],scratch,projectAccess,permissionProfile,runtimeWorkspaceRoots,environments:grant.environmentAccess==='default'?null:[],runtimeConfig,networkAccess};
   }
   stageSelectedAttachments(task,scratch,attachments=task.attachments||[]){
     const selected=(Array.isArray(attachments)?attachments:[]).filter(item=>item?.path&&existsSync(item.path));
@@ -233,6 +233,8 @@ Semantic proof obligation:
 For each candidate, certify only the exact proof relation described by candidateType.
 - candidateType=claim: verdict=supported only when the FULL Claim follows from the cited ORIGINAL source material within the declared scope/coverage.
 - candidateType=gap_resolution: verdict=supported only when the exact Human Gateway question + answer actually resolves gapQuestion. Permission to continue under uncertainty does NOT mean the user selected a different scope, supplied a missing business fact, or authorized an unrelated assumption unless the answer explicitly says so.
+- proofKind=requirement_fidelity_support: supported only when the immutable Requirement excerpt explicitly supports the semantic value; ambiguity is not authorization.
+- proofKind=requirement_fidelity_contradiction: supported only when the Requirement explicitly contradicts the semantic value; absence is not contradiction.
 - verdict=overreach means at least one required proof relation is missing; state that missing relation briefly.
 - Evaluate only the supplied locator/observation and system-resolved sourceContext or cited visual attachment. Do not investigate or plan.
 
@@ -267,9 +269,9 @@ Return only the structured Subagent result.`;
   }
 
 
-  async runRoot(request){const scope=this.executionScope(request.task,request.policyContext,{role:'root'});const text=await this.client.runTurn({...scope,prompt:this.rootPrompt({...request,scratchPath:scope.scratch||null}),inputItems:[],outputSchema:rootSchema,model:request.modelPolicy?.model||null,reasoningEffort:request.modelPolicy?.reasoningEffort||null,networkAccess:false,onProgress:request.onProgress||null,onExecutionStarted:request.onExecutionStarted||null,signal:request.signal||null,diagnosticContext:{taskId:request.task?.id||null,workUnitId:null,role:'root',routeReason:request.modelPolicy?.routeReason||null,configuredDefaultModel:request.modelPolicy?.configuredDefaultModel||null}});return safeParse(text);}
+  async runRoot(request){const scope=this.executionScope(request.task,request.policyContext,{role:'root'});const text=await this.client.runTurn({...scope,prompt:this.rootPrompt({...request,scratchPath:scope.scratch||null}),inputItems:[],outputSchema:rootSchema,model:request.modelPolicy?.model||null,reasoningEffort:request.modelPolicy?.reasoningEffort||null,networkAccess:scope.networkAccess,onProgress:request.onProgress||null,onExecutionStarted:request.onExecutionStarted||null,signal:request.signal||null,diagnosticContext:{taskId:request.task?.id||null,workUnitId:null,role:'root',routeReason:request.modelPolicy?.routeReason||null,configuredDefaultModel:request.modelPolicy?.configuredDefaultModel||null}});return safeParse(text);}
   async runSubagent(request){const scope=this.executionScope(request.task,request.policyContext,{workUnitId:request.delegation?.id});const stagedTask=this.stageSelectedAttachments(request.task,scope.scratch);const text=await this.client.runTurn({...scope,prompt:this.subagentPrompt({...request,task:stagedTask}),inputItems:this.attachmentInputs(stagedTask),outputSchema:subagentSchema,model:request.modelPolicy?.model||null,reasoningEffort:request.modelPolicy?.reasoningEffort||null,onProgress:request.onProgress||null,onExecutionStarted:request.onExecutionStarted||null,signal:request.signal||null,stopCondition:request.delegation?.stopCondition||null,diagnosticContext:{taskId:request.task?.id||null,workUnitId:request.delegation?.id||null,role:'subagent',projectAccess:scope.projectAccess,networkAccess:scope.networkAccess,routeReason:request.modelPolicy?.routeReason||null,configuredDefaultModel:request.modelPolicy?.configuredDefaultModel||null}});return safeParse(text);}
-  async runValidator(request){const scope=this.executionScope(request.task,request.policyContext,{workUnitId:null});const cited=this.validatorAttachmentInputs(request.task,request.candidates).map(item=>(request.task.attachments||[]).find(attachment=>attachment.path===item.path)).filter(Boolean);const stagedTask=this.stageSelectedAttachments(request.task,scope.scratch,cited);const text=await this.client.runTurn({...scope,prompt:this.validatorPrompt({...request,task:stagedTask}),inputItems:this.attachmentInputs(stagedTask),outputSchema:validatorSchema,model:request.modelPolicy?.model||null,reasoningEffort:request.modelPolicy?.reasoningEffort||null,onProgress:request.onProgress||null,onExecutionStarted:request.onExecutionStarted||null,signal:request.signal||null,diagnosticContext:{taskId:request.task?.id||null,workUnitId:null,role:'validator',projectAccess:'none',networkAccess:false,routeReason:request.modelPolicy?.routeReason||null,configuredDefaultModel:request.modelPolicy?.configuredDefaultModel||null}});return safeParse(text);}
+  async runValidator(request){const scope=this.executionScope(request.task,request.policyContext,{workUnitId:null});const cited=this.validatorAttachmentInputs(request.task,request.candidates).map(item=>(request.task.attachments||[]).find(attachment=>attachment.path===item.path)).filter(Boolean);const stagedTask=this.stageSelectedAttachments(request.task,scope.scratch,cited);const text=await this.client.runTurn({...scope,prompt:this.validatorPrompt({...request,task:stagedTask}),inputItems:this.attachmentInputs(stagedTask),outputSchema:validatorSchema,model:request.modelPolicy?.model||null,reasoningEffort:request.modelPolicy?.reasoningEffort||null,onProgress:request.onProgress||null,onExecutionStarted:request.onExecutionStarted||null,signal:request.signal||null,diagnosticContext:{taskId:request.task?.id||null,workUnitId:null,role:'validator',projectAccess:scope.projectAccess,networkAccess:scope.networkAccess,routeReason:request.modelPolicy?.routeReason||null,configuredDefaultModel:request.modelPolicy?.configuredDefaultModel||null}});return safeParse(text);}
 }
 
 export { rootSchema, subagentSchema, validatorSchema };

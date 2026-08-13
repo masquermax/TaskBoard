@@ -101,7 +101,7 @@ test('completed analysis publishes only Subagent-collected certified source fact
     },
   };
   const router=new ModelRouter();const subagent=new SubagentRuntime({executor,modelRouter:router});
-  const root=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()}),maxConcurrentSubagents:2});
+  const root=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()}),governanceCompiler:new GovernanceCompiler({rootDir:resolve('.')}),maxConcurrentSubagents:2});
   try{
     const outcome=await root.execute({id:'T-1',title:'分析',instruction:'分析',projectScopes:[{label:'OA',path:project}],attachments:[{id:'A-1',name:'requirements.txt',mimeType:'text/plain',path:attachment}],references:[],last_stage_result:null});
     assert.equal(outcome.kind,'complete');

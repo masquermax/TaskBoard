@@ -5,6 +5,7 @@ import { canonicalAnalysisSummary, renderAnalysisResult } from '../governance/an
 import { applyCertifiedDelta, decisionFromCertifiedState, deriveHistoryFromTurn, knowledgeKeysFromState, normalizeCertifiedState } from '../governance/certified-state.js';
 import { taskInputRefs } from './task-input-scope.js';
 import { humanGatewayTransitionCandidate } from '../governance/human-gateway-evidence.js';
+import { applyAuthorityFidelity, defaultAuthoritySemanticCandidates } from '../governance/task-contract-fidelity.js';
 import { recordTaskDiagnostic } from './runtime-diagnostic.js';
 
 function nowIso() { return new Date().toISOString(); }
@@ -99,7 +100,7 @@ function validationError(violations = []) {
   return error;
 }
 
-export function validateDelegationPlan(delegations, { knownWorkIds = [], taskMode = 'auto', availableInputRefs = null } = {}) {
+export function validateDelegationPlan(delegations, { knownWorkIds = [], availableInputRefs = null } = {}) {
   const raw = Array.isArray(delegations) ? delegations : [];
   const issues = [];
   const selected = raw.map((item, index) => {
@@ -132,7 +133,6 @@ export function validateDelegationPlan(delegations, { knownWorkIds = [], taskMod
     if (!item.expectedOutput) issues.push(`工作 ${item.id || item.__index + 1} 缺少 expectedOutput。`);
     if (!item.stopCondition) issues.push(`工作 ${item.id || item.__index + 1} 缺少 stopCondition。`);
     if (!['none','read','write'].includes(item.projectAccess)) issues.push(`工作 ${item.id || item.__index + 1} 的 projectAccess 必须是 none、read 或 write。`);
-    if (taskMode !== 'execution' && item.projectAccess === 'write') issues.push(`只有明确 execution Task 的工作 ${item.id || item.__index + 1} 才能取得 Project Scope 写权限。`);
     if (allowedInputs) for (const ref of item.inputRefs) if (!allowedInputs.has(ref)) issues.push(`工作 ${item.id || item.__index + 1} 引用了不存在的 Task Input：${ref}。`);
     const hasProjectInput=item.inputRefs.some(ref=>ref.startsWith('project:'));
     if (item.projectAccess !== 'none' && !hasProjectInput) issues.push(`工作 ${item.id || item.__index + 1} 申请 Project 访问时必须通过 inputRefs 显式选择至少一个项目。`);
@@ -170,12 +170,13 @@ export function validateDelegationPlan(delegations, { knownWorkIds = [], taskMod
 }
 
 export class RootRuntime {
-  constructor({ executor, modelRouter, subagentRuntime, governanceCompiler = null, validatorRuntime = null, maxConcurrentSubagents = 3, capabilityLimits = null, retryDelaysMs = null }) {
+  constructor({ executor, modelRouter, subagentRuntime, governanceCompiler = null, validatorRuntime = null, taskContractFidelityVerifier = null, maxConcurrentSubagents = 3, capabilityLimits = null, retryDelaysMs = null }) {
     this.executor = executor;
     this.modelRouter = modelRouter;
     this.subagentRuntime = subagentRuntime;
     this.governanceCompiler = governanceCompiler;
     this.validatorRuntime = validatorRuntime;
+    this.taskContractFidelityVerifier = taskContractFidelityVerifier;
     this.maxConcurrentSubagents = Math.max(1, Math.min(5, Number(maxConcurrentSubagents) || 1));
     this.capabilityLimits = typeof capabilityLimits === 'function' ? capabilityLimits : null;
     this.retryDelaysMs = retryDelaysMs;
@@ -279,6 +280,8 @@ export class RootRuntime {
   cleanupTaskWorkspace(taskId) {
     return this.executor.cleanupTaskWorkspace?.(taskId) ?? false;
   }
+
+  async ensureTaskAuthority(task,session,callbacks){const candidates=defaultAuthoritySemanticCandidates(task);if(!candidates.length)return task;session.actor={title:'Requirement Authority 认证',status:WorkUnitStatus.WAITING_RESOURCE,detail:'等待 Validator 核对 Requirement Authority。',updatedAt:nowIso(),owner:'validator'};this.emit(session,callbacks);let reviews=[];if(this.taskContractFidelityVerifier){const result=await this.taskContractFidelityVerifier.review({task,candidates,policyContext:this.governanceCompiler?.compileForRole?.(task,'validator')||session.policyContext,onExecutionStarted:()=>{session.actor.status=WorkUnitStatus.RUNNING;callbacks.onExecutionStarted?.({role:'validator'});this.emit(session,callbacks);},onProgress:p=>{session.actor.detail=p?.detail||p?.summary||session.actor.detail;this.emit(session,callbacks);}});reviews=Array.isArray(result?.reviews)?result.reviews:[];}const nextContract=applyAuthorityFidelity(task.taskContract,candidates,reviews);callbacks.onTaskContractAuthority?.(nextContract.authority);const next={...task,taskContract:nextContract};session.policyContext=this.governanceCompiler?.compileForTask?.(next)||session.policyContext;return next;}
 
   createSession(task) {
     const restoredAnalysisState = normalizeCertifiedState(task.analysisState);
@@ -754,10 +757,11 @@ export class RootRuntime {
 
 
 
-  async execute(task, { humanGatewayHistory = [], onProgress = null, onStageCompleted = null, onStageResult = null, onProgressCommit = null, onCertifiedTurn = null, onWorkReceipt = null, onWorkReceiptsConsumed = null, onExecutionStarted = null } = {}) {
+  async execute(task, { humanGatewayHistory = [], onProgress = null, onStageCompleted = null, onStageResult = null, onProgressCommit = null, onCertifiedTurn = null, onTaskContractAuthority = null, onWorkReceipt = null, onWorkReceiptsConsumed = null, onExecutionStarted = null } = {}) {
     const session = this.sessions.get(task.id) || this.createSession(task);
     session.cancelRequested = false;
-    const callbacks = { onProgress, onStageCompleted, onStageResult, onProgressCommit, onCertifiedTurn, onWorkReceipt, onWorkReceiptsConsumed, onExecutionStarted };
+    const callbacks = { onProgress, onStageCompleted, onStageResult, onProgressCommit, onCertifiedTurn, onTaskContractAuthority, onWorkReceipt, onWorkReceiptsConsumed, onExecutionStarted };
+    try{task=await this.ensureTaskAuthority(task,session,callbacks);}catch(error){if(isCapacityUnavailable(error)){const delay=capacityRetryDelayMs(this.retryDelaysMs);return{kind:'waiting_resource',retryAt:Date.now()+delay,snapshot:this.makeSnapshot(session),reason:'等待 Requirement Authority Validator 资源恢复'};}throw error;}
     const newlyResolvedHuman=(Array.isArray(humanGatewayHistory)?humanGatewayHistory:[]).filter(g=>g?.status==='RESOLVED'&&String(g?.id||'').trim()&&!session.consumedHumanGatewayIds.has(String(g.id).trim()));
     let invocationTriggerRefs=newlyResolvedHuman.map(g=>`human:${String(g.id).trim()}`);
     if(!invocationTriggerRefs.length){
@@ -960,7 +964,8 @@ export class RootRuntime {
           throw error;
         }
         const knownWorkIds = session.currentStage?.workUnits?.map(unit=>unit.id) || [];
-        const plan = validateDelegationPlan(decision.delegations, { knownWorkIds, taskMode:session.policyContext?.taskMode || 'auto', availableInputRefs:taskInputRefs(task) });
+        const plan = validateDelegationPlan(decision.delegations, { knownWorkIds, availableInputRefs:taskInputRefs(task) });
+        if(plan.valid){if(this.governanceCompiler?.compileForRole){plan.delegations=plan.delegations.map(item=>{const grant=this.governanceCompiler.compileForRole(task,'subagent',{skillId:item.skillId,workUnit:item})?.authorizedGrant;if(!grant){plan.issues.push(`工作 ${item.id} 缺少 AuthorizedGrant。`);plan.valid=false;return item;}return{...item,projectAccess:String(grant.projectAccess||'none'),networkAccess:grant.networkAccess===true,inputRefs:Array.isArray(grant.inputRefs)?[...grant.inputRefs]:[]};});}else for(const item of plan.delegations)if(item.projectAccess!=='none'||item.networkAccess===true||item.inputRefs.length){plan.issues.push(`工作 ${item.id} 请求受治理能力但没有 GovernanceCompiler。`);plan.valid=false;}}
         const batchSignatures = new Set();
         for (const item of plan.delegations) {
           const signature = workSemanticSignature(item);
