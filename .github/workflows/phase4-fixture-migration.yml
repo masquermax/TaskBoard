@@ -40,6 +40,9 @@ jobs:
           tests/task-service.test.js
           tests/turn-learning.test.js
           tests/validator-resource-resume.test.js
+      - name: Observe remaining full-suite RED without turning it into an acceptance gate
+        continue-on-error: true
+        run: npm run verify
       - name: Commit verified fixture migration
         run: |
           git config user.name "taskboard-phase4-bot"
