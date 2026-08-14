@@ -43,7 +43,10 @@ rl.on('line', line => {
     }
     const answered = prompt.includes('基础办公');
     const hasProjectResult=prompt.includes('project-scan');
-    const payload = !hasProjectResult
+    const authorityHandoff=prompt.includes('CONTROL HANDOFF');
+    const payload = authorityHandoff
+      ? {kind:'complete',summary:'完成',stageResult:'本次 OA 范围为基础办公',finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[{order:1,text:'本次 OA 范围为基础办公',kind:'confirmed',sourceIds:['C-1']}],gapResolutions:[],gateway:null,delegations:[]}
+      : !hasProjectResult
       ? {kind:'delegate',summary:'先核对项目范围',stageResult:null,finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[],gateway:null,delegations:[{id:'project-scan',title:'核对项目范围',goal:'核对项目中与 OA 范围相关的现有事实',expectedOutput:'返回项目范围核对结果',stopCondition:'完成有限核对后停止',projectAccess:'read',networkAccess:false,skillId:null,dependsOn:[],inputRefs:['project:0']}]}
       : answered
       ? { kind:'complete', summary:'完成', stageResult:'本次 OA 范围为基础办公', progressCommits:[{title:'需求范围已确认',detail:'本次 OA 范围为基础办公',sourceIds:['C-1']}], finalResult:null, resultMode:'analysis', evidence:[{id:'E-1',strength:'direct',kind:'requirement',sourceType:'human',coverage:'system',statement:'基础办公',basis:'Human Gateway 回答：基础办公',locator:'Human Gateway answer',observation:'基础办公'}], claims:[{id:'C-1',statement:'本次 OA 范围为基础办公',level:'confirmed',evidenceIds:['E-1'],scope:'single_system',coverage:'system',hops:[]}], gaps:[], recommendations:[], steps:[{order:1,text:'本次 OA 范围为基础办公',kind:'confirmed',sourceIds:['C-1']}], gapResolutions:[{gapId:'G-1',reason:'用户已确认范围为基础办公',evidenceIds:['E-1']}], gateway:null, delegations:[] }
