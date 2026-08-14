@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { RootRuntime, validateDelegationPlan } from '../src/core/root-runtime.js';
+import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
 import { ModelRouter } from '../src/core/model-router.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { AttachmentStore } from '../src/core/attachment-store.js';
@@ -14,7 +15,7 @@ import { MockExecutor } from '../src/extensions/executors/mock/mock-executor.js'
 import { createApp } from '../src/server/app.js';
 import { AnalysisResultValidator } from '../src/governance/analysis-validator.js';
 
-function runtime(executor={}){const router=new ModelRouter();const subagent=new SubagentRuntime({executor,modelRouter:router});return new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent});}
+function runtime(executor={}){const router=new ModelRouter();const subagent=new SubagentRuntime({executor,modelRouter:router});return new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:subagent});}
 
 test('delegation plan validates work identity and dependencies without confusing Work Unit count with Subagent concurrency',()=>{
   const many=validateDelegationPlan([
@@ -103,8 +104,8 @@ test('invalid Root delegation graph is repaired internally without creating a Ta
   };
   const root=runtime(executor);
   const outcome=await root.execute({id:'T-plan',title:'执行',instruction:'执行任务',projectScopes:[],attachments:[],references:[]});
-  assert.equal(outcome.kind,'complete');
-  assert.equal(outcome.finalResult,'完成');
+  assert.equal(outcome.kind,'goal_satisfied');
+  assert.equal(outcome.proposal.finalResult,'完成');
   assert.equal(turns,2);
 });
 

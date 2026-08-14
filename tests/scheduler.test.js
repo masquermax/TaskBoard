@@ -7,12 +7,13 @@ import { JsonTaskDatabase, JsonTaskRepository } from '../src/core/json-repositor
 import { TaskService } from '../src/core/task-service.js';
 import { ModelRouter } from '../src/core/model-router.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
+import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { Scheduler } from '../src/core/scheduler.js';
 import { MockExecutor } from '../src/extensions/executors/mock/mock-executor.js';
 import { TaskStatus, ReadyReason, CompletionReason, WorkUnitStatus } from '../src/core/types.js';
 
-function rig(executor=new MockExecutor(),{maxConcurrentSubagents=4,retryDelaysMs=[0,0,0,0]}={}){const dir=mkdtempSync(join(tmpdir(),'taskboard-scheduler-'));const db=new JsonTaskDatabase(join(dir,'db.json'));const repo=new JsonTaskRepository(db);const service=new TaskService(repo);const router=new ModelRouter();const subagent=new SubagentRuntime({executor,modelRouter:router});const root=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,maxConcurrentSubagents,retryDelaysMs});const scheduler=new Scheduler({repository:repo,taskService:service,rootRuntime:root,intervalMs:999999,retryDelaysMs});return{dir,db,repo,service,root,scheduler,close(){scheduler.stop();db.close();rmSync(dir,{recursive:true,force:true});}};}
+function rig(executor=new MockExecutor(),{maxConcurrentSubagents=4,retryDelaysMs=[0,0,0,0]}={}){const dir=mkdtempSync(join(tmpdir(),'taskboard-scheduler-'));const db=new JsonTaskDatabase(join(dir,'db.json'));const repo=new JsonTaskRepository(db);const service=new TaskService(repo);const router=new ModelRouter();const subagent=new SubagentRuntime({executor,modelRouter:router});const root=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:subagent,maxConcurrentSubagents,retryDelaysMs});const scheduler=new Scheduler({repository:repo,taskService:service,rootRuntime:root,intervalMs:999999,retryDelaysMs});return{dir,db,repo,service,root,scheduler,close(){scheduler.stop();db.close();rmSync(dir,{recursive:true,force:true});}};}
 const complete=(result='done')=>({kind:'complete',summary:'ok',stageResult:'ok',finalResult:result,confirmed:[],recommendations:[],openQuestions:[],gateway:null,delegations:[]});
 
 test('Scheduler owns Human Gateway state transition and resumes only after answer',async()=>{const x=rig();try{const task=x.scheduler.createTask({title:'做一个 OA 系统',instruction:'你帮我做了吧'});await x.scheduler.tick();assert.equal(x.service.getTask(task.id).status,TaskStatus.WAITING_HUMAN);x.scheduler.answerHumanGateway(task.id,'基础办公');assert.equal(x.service.getTask(task.id).status,TaskStatus.READY);await x.scheduler.tick();assert.equal(x.service.getTask(task.id).status,TaskStatus.COMPLETED);}finally{x.close();}});
@@ -275,7 +276,7 @@ test('Validator-certified Root knowledge is persisted to History before delegate
   const db=new JsonTaskDatabase(join(dir,'db.json'));const repo=new JsonTaskRepository(db);const service=new TaskService(repo);const router=new ModelRouter();
   const compiler=new GovernanceCompiler({rootDir:resolve('.')});const structural=new AnalysisResultValidator();const validatorRuntime=new ValidatorRuntime({analysisValidator:structural,sourceTraceVerifier:{enforce:({evidence})=>({evidence:Array.isArray(evidence)?evidence:[],actions:[],verifications:[]})}});
   const subagent=new SubagentRuntime({executor,modelRouter:router});
-  const root=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,governanceCompiler:compiler,validatorRuntime});
+  const root=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:subagent,governanceCompiler:compiler,validatorRuntime});
   const scheduler=new Scheduler({repository:repo,taskService:service,rootRuntime:root,intervalMs:999999});
   try{
     const task=scheduler.createTask({title:'OA需求分析',instruction:'根据附件与项目告知具体步骤'});
@@ -320,7 +321,7 @@ test('Subagent local result reaches Root once without semantic Validator takeove
   const dir=mkdtempSync(join(tmpdir(),'taskboard-subagent-local-'));const db=new JsonTaskDatabase(join(dir,'db.json'));const repo=new JsonTaskRepository(db);const service=new TaskService(repo);const router=new ModelRouter();
   const compiler=new GovernanceCompiler({rootDir:resolve('.')});const structural=new AnalysisResultValidator();const validatorRuntime=new ValidatorRuntime({analysisValidator:structural});
   const subagent=new SubagentRuntime({executor,modelRouter:router});
-  const root=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,governanceCompiler:compiler,validatorRuntime,maxConcurrentSubagents:2});
+  const root=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:subagent,governanceCompiler:compiler,validatorRuntime,maxConcurrentSubagents:2});
   const scheduler=new Scheduler({repository:repo,taskService:service,rootRuntime:root,intervalMs:999999});
   try{
     const task=scheduler.createTask({title:'并行证据分析',instruction:'根据项目核对事实'});const ticking=scheduler.tick();

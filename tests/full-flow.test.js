@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { installSuccessfulCompletionFixture } from './helpers/completion-fixture.js';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
@@ -20,7 +21,7 @@ test('full task flow: project -> attachment task -> Human Gateway -> completion 
   const otherProjectDir = join(rootDir, 'other-project');
   mkdirSync(projectDir, { recursive:true });
   mkdirSync(otherProjectDir, { recursive:true });
-  const runtime = bootstrap({ rootDir, executorName:'mock', startScheduler:false });
+  const runtime = bootstrap({ rootDir, executorName:'mock', startScheduler:false });installSuccessfulCompletionFixture(runtime.rootRuntime);
   const server = createServer(createApp({
     taskService: runtime.taskService,
     executor: runtime.executor,

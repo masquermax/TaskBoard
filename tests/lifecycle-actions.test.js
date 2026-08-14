@@ -7,6 +7,7 @@ import { JsonTaskDatabase, JsonTaskRepository } from '../src/core/json-repositor
 import { TaskService } from '../src/core/task-service.js';
 import { Scheduler } from '../src/core/scheduler.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
+import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { ModelRouter } from '../src/core/model-router.js';
 import { TaskStatus, CompletionReason } from '../src/core/types.js';
@@ -20,18 +21,18 @@ function rig(executor={ async runRoot({onExecutionStarted}={}){ onExecutionStart
   const service = new TaskService(repo);
   const router = new ModelRouter();
   const subagent = new SubagentRuntime({ executor, modelRouter:router });
-  const root = new RootRuntime({ executor, modelRouter:router, subagentRuntime:subagent, maxConcurrentSubagents:2, retryDelaysMs:[0,0,0,0] });
+  const root = new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(), executor, modelRouter:router, subagentRuntime:subagent, maxConcurrentSubagents:2, retryDelaysMs:[0,0,0,0] });
   const scheduler = new Scheduler({ repository:repo, taskService:service, rootRuntime:root, maxConcurrentTasks:options.maxConcurrentTasks || 1, intervalMs:999999, retryDelaysMs:[0,0,0,0] });
   return { dir,db,repo,service,root,scheduler,close(){ scheduler.stop(); db.close(); rmSync(dir,{recursive:true,force:true}); } };
 }
 
-test('Root Runtime can decide execution is complete but cannot change Task lifecycle state by itself', async () => {
+test('Root Runtime may surface evaluator-derived goal satisfaction but cannot change Task lifecycle state by itself', async () => {
   const x = rig();
   try {
     const task = x.scheduler.createTask({ title:'Owner boundary', instruction:'verify lifecycle owner' });
     assert.equal(x.service.getTask(task.id).status, TaskStatus.READY);
     const outcome = await x.root.execute(x.service.getTask(task.id));
-    assert.equal(outcome.kind, 'complete');
+    assert.equal(outcome.kind, 'goal_satisfied');
     assert.equal(x.service.getTask(task.id).status, TaskStatus.READY, 'only Scheduler may perform lifecycle transition');
   } finally { x.close(); }
 });

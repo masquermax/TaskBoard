@@ -8,6 +8,7 @@ import { TaskService } from '../src/core/task-service.js';
 import { ModelRouter } from '../src/core/model-router.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
+import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
 import { Scheduler } from '../src/core/scheduler.js';
 import { GovernanceCompiler } from '../src/governance/governance-compiler.js';
 import { AnalysisResultValidator } from '../src/governance/analysis-validator.js';
@@ -31,7 +32,7 @@ function rig(executor,{taskConcurrency=2,taskMaxSubagents=3,retryDelaysMs=[1,1,1
   const analysisValidator=governance?new AnalysisResultValidator():null;
   const validatorRuntime=analysisValidator?new ValidatorRuntime({analysisValidator}):null;
   const subagent=new SubagentRuntime({executor,modelRouter:router});
-  const root=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime,governanceCompiler:governance?new GovernanceCompiler({rootDir:resolve('.')}):null,maxConcurrentSubagents:taskMaxSubagents,retryDelaysMs});
+  const root=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime,governanceCompiler:governance?new GovernanceCompiler({rootDir:resolve('.')}):null,maxConcurrentSubagents:taskMaxSubagents,retryDelaysMs});
   const scheduler=new Scheduler({repository:repo,taskService:service,rootRuntime:root,maxConcurrentTasks:taskConcurrency,retryDelaysMs,intervalMs:999999});
   return {dir,db,repo,service,root,scheduler,close(){scheduler.stop();db.close();rmSync(dir,{recursive:true,force:true});}};
 }
@@ -179,7 +180,7 @@ test('validated analysis knowledge creates History even when Root returns no pro
   const x=rig(executor,{governance:true});const commits=[];
   try{
     const outcome=await x.root.execute({id:'H-1',title:'OA需求分析',instruction:'根据附件分析',projectScopes:[],attachments:[],references:[{source_task_id:'REF-1',title:'已确认需求',final_result:'附件规定 OA→ERP 为现有逻辑'}]},{onProgressCommit:c=>commits.push(c)});
-    assert.equal(outcome.kind,'complete');
+    assert.equal(outcome.kind,'goal_satisfied');
     assert.deepEqual(commits,[{title:'阶段事实已确认',detail:'附件规定 OA→ERP 为现有逻辑',completedAt:commits[0].completedAt}]);
   }finally{x.close();rmSync(dir,{recursive:true,force:true});}
 });
@@ -202,7 +203,7 @@ test('analysis publication does not invoke a second model grounding turn',async(
   const x=rig(executor,{governance:true});
   try{
     const outcome=await x.root.execute({id:'NO-GROUNDING',title:'analysis',instruction:'analyze',projectScopes:[],attachments:[],references:[]});
-    assert.equal(outcome.kind,'complete');
+    assert.equal(outcome.kind,'goal_satisfied');
     assert.equal(rootCalls,1);
     assert.equal(groundingCalls,0,'publication must not add a second semantic-review model turn');
   }finally{x.close();}
@@ -233,11 +234,11 @@ test('direct attachment requirement collected by Subagent is not downgraded by a
   const x=rig(executor,{governance:true});
   try{
     const outcome=await x.root.execute({id:'REQ-1',title:'需求分析',instruction:'根据附件给出步骤',projectScopes:[],attachments:[{id:'A-1',name:'requirements.txt',path:attachment}],references:[]});
-    assert.equal(outcome.kind,'complete');
+    assert.equal(outcome.kind,'goal_satisfied');
     assert.equal(rootCalls,2);
     assert.equal(groundingCalls,0);
-    assert.match(outcome.finalResult,/^1\. 步骤1要求/m);
-    assert.doesNotMatch(outcome.finalResult,/请确认：步骤1要求/);
+    assert.match(outcome.proposal.finalResult,/^1\. 步骤1要求/m);
+    assert.doesNotMatch(outcome.proposal.finalResult,/请确认：步骤1要求/);
   }finally{x.close();rmSync(dir,{recursive:true,force:true});}
 });
 

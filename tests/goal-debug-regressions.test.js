@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { applyCertifiedDelta } from '../src/governance/certified-state.js';
 import { SourceTraceVerifier } from '../src/governance/source-trace-verifier.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
+import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
 import { ModelRouter } from '../src/core/model-router.js';
 
 function analysisStateWithBlockingGap(){
@@ -58,7 +59,7 @@ test('one certified state cannot recursively manufacture unlimited Root control 
     reviewRoot({decision}){return{outcome:'pass',decision,feedback:[],actions:[],requiresRootDecision:true};},
     async semanticReviewRoot({reviewed}){return reviewed;},
   };
-  const runtime=new RootRuntime({executor,modelRouter:new ModelRouter(),subagentRuntime:{},validatorRuntime});
+  const runtime=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:new ModelRouter(),subagentRuntime:{},validatorRuntime});
   const task={id:'T-LOOP',title:'control loop',instruction:'test',projectScopes:[],attachments:[],references:[],analysisState:null};
   await assert.rejects(runtime.execute(task),/ROOT_CONTROL_NON_CONVERGENCE/);
   assert.equal(rootCalls,2,'initial Root turn + one bounded control handoff only');
@@ -82,7 +83,7 @@ test('blocking business decision cannot be converted into another investigation 
   const router=new ModelRouter();
   const validatorRuntime=new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()});
   const subagent=new SubagentRuntime({executor,modelRouter:router});
-  const runtime=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime});
+  const runtime=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime});
   const outcome=await runtime.execute({id:'T-SCOPE',title:'范围测试',instruction:'分析原任务',projectScopes:[],attachments:[],references:[]});
   assert.equal(outcome.kind,'needs_human');
   assert.equal(outcome.gateway.targetGapId,'G-SCOPE');
@@ -108,7 +109,7 @@ test('any certified blocking Gap prevents further investigation delegation, rega
   const router=new ModelRouter();
   const validatorRuntime=new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()});
   const subagent=new SubagentRuntime({executor,modelRouter:router});
-  const runtime=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime});
+  const runtime=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime});
   const outcome=await runtime.execute({id:'T-BLOCKING-ANY',title:'阻塞缺口',instruction:'分析',projectScopes:[],attachments:[],references:[]});
   assert.equal(outcome.kind,'needs_human');
   assert.equal(outcome.gateway.targetGapId,'G-MISSING');
@@ -122,7 +123,7 @@ test('Current Certified State cannot be used as a synthetic trigger for a new du
     reviewRoot({decision}){return{outcome:'pass',decision,feedback:[],actions:[],commits:[],sourceVerifications:[]};},
     async semanticReviewRoot({reviewed}){return reviewed;},
   };
-  const runtime=new RootRuntime({executor:{},modelRouter:new ModelRouter(),subagentRuntime:{},validatorRuntime});
+  const runtime=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor:{},modelRouter:new ModelRouter(),subagentRuntime:{},validatorRuntime});
   const task={id:'T-NO-TRIGGER',title:'x',instruction:'x',projectScopes:[],attachments:[],references:[],analysisState:analysisStateWithBlockingGap()};
   const session=runtime.createSession(task);
   const decision={kind:'delegate',summary:'no delta',stageResult:null,finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[],gateway:null,delegations:[]};
@@ -168,7 +169,7 @@ test('"continue with current information" cannot change Task scope, close the sc
   const semanticVerifier=new SemanticProofVerifier({executor,modelRouter:router});
   const validatorRuntime=new ValidatorRuntime({analysisValidator:new AnalysisResultValidator(),semanticVerifier});
   const subagent=new SubagentRuntime({executor,modelRouter:router});
-  const runtime=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime});
+  const runtime=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime});
   const task={id:'T-OA-SCOPE',title:'OA备件入库需求分析',instruction:'根据附件与项目告知我具体步骤',projectScopes:[],attachments:[],references:[],analysisState:existing};
   const humanGatewayHistory=[{id:'HG-SCOPE',status:'RESOLVED',question:gapQuestion,answer:'按照当前信息继续推断',targetGapId:'G-SCOPE'}];
 
@@ -189,14 +190,14 @@ test('Root sees only the Human Gateway answers that trigger this turn; older res
   const state={version:1,current:{resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[]},turns:[{id:'TN-OLD',triggerRefs:['human:HG-OLD'],committedAt:'2026-08-11T00:00:00.000Z'}]};
   let visible=[];
   const executor={async runRoot({humanGatewayHistory,onExecutionStarted}){visible=humanGatewayHistory;onExecutionStarted?.();return{kind:'complete',summary:'done',stageResult:null,finalResult:'done',resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[],gateway:null,delegations:[]};}};
-  const runtime=new RootRuntime({executor,modelRouter:new ModelRouter(),subagentRuntime:{}});
+  const runtime=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:new ModelRouter(),subagentRuntime:{}});
   const task={id:'T-HUMAN-CONTEXT',title:'x',instruction:'x',projectScopes:[],attachments:[],references:[],analysisState:state};
   const history=[
     {id:'HG-OLD',status:'RESOLVED',question:'旧问题',answer:'旧回答',targetGapId:'G-OLD'},
     {id:'HG-NEW',status:'RESOLVED',question:'新问题',answer:'新回答',targetGapId:'G-NEW'},
   ];
   const outcome=await runtime.execute(task,{humanGatewayHistory:history});
-  assert.equal(outcome.kind,'complete');
+  assert.equal(outcome.kind,'goal_satisfied');
   assert.deepEqual(visible.map(item=>item.id),['HG-NEW']);
 });
 
@@ -208,12 +209,12 @@ test('a Human trigger is consumed only after certification so a transport failur
     if(calls===1)throw new Error('stream disconnected before completion');
     return{kind:'complete',summary:'done',stageResult:null,finalResult:'done',resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[],gateway:null,delegations:[]};
   }};
-  const runtime=new RootRuntime({executor,modelRouter:new ModelRouter(),subagentRuntime:{}});
+  const runtime=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:new ModelRouter(),subagentRuntime:{}});
   const task={id:'T-HUMAN-RETRY',title:'x',instruction:'x',projectScopes:[],attachments:[],references:[],analysisState:null};
   const history=[{id:'HG-RETRY',status:'RESOLVED',question:'问题',answer:'按照当前信息继续推断',targetGapId:'G-X'}];
   await assert.rejects(runtime.execute(task,{humanGatewayHistory:history}),/stream disconnected/);
   const outcome=await runtime.execute(task,{humanGatewayHistory:history});
-  assert.equal(outcome.kind,'complete');
+  assert.equal(outcome.kind,'goal_satisfied');
   assert.deepEqual(seen,[['HG-RETRY'],['HG-RETRY']]);
 });
 
@@ -280,12 +281,12 @@ test('an explicit Human Gateway choice is submitted for the bound Gap even when 
   const router=new ModelRouter();
   const semanticVerifier=new SemanticProofVerifier({executor,modelRouter:router});
   const validatorRuntime=new ValidatorRuntime({analysisValidator:new AnalysisResultValidator(),semanticVerifier});
-  const runtime=new RootRuntime({executor,modelRouter:router,subagentRuntime:{},validatorRuntime});
+  const runtime=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:{},validatorRuntime});
   const task={id:'T-HUMAN-EXPLICIT',title:'OA备件入库需求分析',instruction:'根据附件与项目告知我具体步骤',projectScopes:[],attachments:[],references:[],analysisState:existing};
   const history=[{id:'HG-EXPLICIT',status:'RESOLVED',question:gapQuestion,answer:selected,targetGapId:'G-SCOPE'}];
 
   const outcome=await runtime.execute(task,{humanGatewayHistory:history,onCertifiedTurn:payload=>{latestAnalysisState=payload.analysisState;}});
-  assert.equal(outcome.kind,'complete','a certified explicit choice must not reopen the same Human Gateway');
+  assert.equal(outcome.kind,'goal_satisfied','a certified explicit choice must not reopen the same Human Gateway');
   assert.ok(!latestAnalysisState.current.gaps.some(gap=>gap.id==='G-SCOPE'),'the Gateway-bound Gap must be closed after semantic certification');
   assert.ok(latestAnalysisState.current.evidence.some(item=>item.id==='E-HUMAN-HG-EXPLICIT'&&item.sourceType==='human'),'the raw Human answer must become system-owned DIRECT Evidence');
   assert.equal(rootCalls,2,'one ordinary Root decision + one bounded control handoff after the stale gateway is invalidated');
@@ -322,7 +323,7 @@ test('an ambiguous first Gateway answer may re-ask once, but a later explicit op
   const router=new ModelRouter();
   const semanticVerifier=new SemanticProofVerifier({executor,modelRouter:router});
   const validatorRuntime=new ValidatorRuntime({analysisValidator:new AnalysisResultValidator(),semanticVerifier});
-  const runtime=new RootRuntime({executor,modelRouter:router,subagentRuntime:{},validatorRuntime});
+  const runtime=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:{},validatorRuntime});
   const taskBase={id:'T-HUMAN-SEQUENCE',title:'OA备件入库需求分析',instruction:'根据附件与项目告知我具体步骤',projectScopes:[],attachments:[],references:[]};
 
   let stateAfterFirst=base;
@@ -342,7 +343,7 @@ test('an ambiguous first Gateway answer may re-ask once, but a later explicit op
     ],
     onCertifiedTurn:payload=>{stateAfterSecond=payload.analysisState;},
   });
-  assert.equal(second.kind,'complete','the explicit second answer must converge instead of creating a third identical Gateway');
+  assert.equal(second.kind,'goal_satisfied','the explicit second answer must converge instead of creating a third identical Gateway');
   assert.ok(!stateAfterSecond.current.gaps.some(g=>g.id==='G-SCOPE'));
   assert.ok(stateAfterSecond.turns.some(turn=>turn.triggerRefs.includes('human:HG-2')),'the explicit second Human trigger is committed as the resolving transition');
   assert.ok(stateAfterSecond.current.evidence.some(e=>e.id==='E-HUMAN-HG-2'));
