@@ -28,6 +28,7 @@ jobs:
           node --test
           tests/cleanup-controller.test.js
           tests/code-audit-regressions.test.js
+          tests/codex-full-flow.test.js
           tests/evidence-boundary.test.js
           tests/full-flow.test.js
           tests/goal-debug-regressions.test.js
