@@ -12,3 +12,18 @@ function runtimeWith(assessmentFactory){let rootTurns=0;const executor={async ru
 test('certified obligation satisfaction is aggregated only by CompletionEvaluator into goal_satisfied',async()=>{const {runtime}=runtimeWith(()=>({id:'ASSESS:GOAL',certification:'supported',obligationRefs:['OBL-T-COMP-GOAL'],coverage:'covered',outcome:'succeeded',evidenceRefs:['E-1']}));const outcome=await runtime.execute(task());assert.equal(outcome.kind,'goal_satisfied');assert.equal(outcome.goalState,'satisfied');assert.equal(outcome.proposal.finalResult,'done');});
 
 test('unresolved obligation assessment cannot become terminal success and repeated complete proposal fails closed',async()=>{const {runtime,rootTurns}=runtimeWith(()=>({id:'ASSESS:GOAL',certification:'unresolved',obligationRefs:['OBL-T-COMP-GOAL'],coverage:'uncovered',outcome:'unresolved',evidenceRefs:[]}));await assert.rejects(runtime.execute(task()),/ROOT_COMPLETION_NON_CONVERGENCE/);assert.equal(rootTurns(),2,'one bounded completion-contract repair is allowed before fail-closed rejection');});
+
+test('VALIDATOR_UNAVAILABLE fails closed without being misreported as Root completion non-convergence',async()=>{
+  let rootTurns=0;
+  const executor={async runRoot(){rootTurns+=1;return rootDecision();},async runSubagent(){throw new Error('unexpected subagent');}};
+  const modelRouter=new ModelRouter();
+  const subagentRuntime=new SubagentRuntime({executor,modelRouter});
+  const completionAssessmentVerifier={available(){return false;},async review(){throw new Error('review must not run when Validator is unavailable');}};
+  const runtime=new RootRuntime({executor,modelRouter,subagentRuntime,completionAssessmentVerifier,completionEvaluator:new CompletionEvaluator()});
+  await assert.rejects(runtime.execute(task()),error=>{
+    assert.match(String(error?.message||error),/VALIDATOR_UNAVAILABLE/);
+    assert.doesNotMatch(String(error?.message||error),/ROOT_COMPLETION_NON_CONVERGENCE/);
+    return true;
+  });
+  assert.equal(rootTurns,1,'Validator availability failure must not consume a fake Root completion repair turn');
+});
