@@ -95,7 +95,9 @@ test('CodexExecutor enforces AuthorizedGrant and projects it to an explicit runt
     assert.equal(call.permissionProfile,'taskboard_runtime');
     assert.equal(call.runtimeConfig.permissions.taskboard_runtime.filesystem[':workspace_roots']['.'],'read');
     assert.equal(call.runtimeConfig.permissions.taskboard_runtime.network.enabled,false);
-    assert.deepEqual(call.environments,[]);
+    assert.equal(call.environments,null,'TaskBoard environmentAccess:none is narrowed through transport config, not Codex environments:[]');
+    assert.equal(call.runtimeConfig.include_environment_context,false);
+    assert.equal(call.runtimeConfig.project_doc_max_bytes,0);
     assert.deepEqual(call.runtimeWorkspaceRoots,[call.cwd]);
     assert.equal(call.runtimeWorkspaceRoots.includes(project),false,'Root runtime roots must not include Project Scope');
     assert.equal(call.networkAccess,false);
