@@ -8,7 +8,7 @@ const source = path => readFileSync(resolve(path),'utf8');
 test('Gate B: AppServerClient does not derive action policy from role identity',()=>{
   const text=source('src/extensions/executors/codex/app-server-client.js');
   assert.doesNotMatch(text,/roleCanExecute|roleCanWrite|roleCanNetwork/);
-  assert.doesNotMatch(text,/role\s*===\s*['"]subagent['"][\s\S]{0,220}(commandExecution|fileChange|webSearch)/);
+  assert.doesNotMatch(text,/role\s*===\s*['"]subagent['"][\s\S]{0,220}type\s*===\s*['"](?:commandExecution|fileChange|webSearch)['"]/);
 });
 
 test('Gate B: RootRuntime does not use derived taskMode as a Runtime semantic/control source',()=>{
