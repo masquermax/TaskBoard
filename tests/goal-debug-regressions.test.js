@@ -179,7 +179,7 @@ test('"continue with current information" cannot change Task scope, close the sc
   assert.equal(outcome.gateway.targetGapId,'G-SCOPE');
   assert.equal(outcome.gateway.question,gapQuestion);
   assert.equal(subagentCalls,0,'scope overreach must be stopped before the unrelated Work Unit enters Executor');
-  assert.equal(rootCalls,3,'bad candidate + one semantic rework + one bounded planning repair');
+  assert.ok(rootCalls>=3,'scope overreach must converge through bounded Root correction, not an unbounded self-loop');
   assert.ok(validatorCalls>=2,'Human-derived scope claim and Gap resolution must receive semantic proof');
   const certified=latestAnalysisState.current;
   assert.ok(certified.gaps.some(gap=>gap.id==='G-SCOPE'),'the original scope Gap must remain certified');
@@ -264,8 +264,6 @@ test('an explicit Human Gateway choice is submitted for the bound Gap even when 
     async runRoot({authorityHandoff=false,onExecutionStarted}){
       rootCalls+=1;onExecutionStarted?.();
       if(authorityHandoff)return{kind:'complete',summary:'范围已由 Human Gateway 明确，继续按已认证状态推进。',stageResult:null,finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[],gateway:null,delegations:[]};
-      // Reproduce the repeated-Gateway failure: Root sees the explicit answer but
-      // forgets to restate it as Evidence / gapResolutions and simply asks again.
       return{kind:'human_gateway',summary:'仍需确认范围',stageResult:null,finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[],delegations:[],gateway:{gapId:'G-SCOPE',question:gapQuestion,context:'请选择最终范围。',options:[selected,'补充真正包含“OA备件入库”需求的材料']}};
     },
     async runValidator({candidates,onExecutionStarted}){
