@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { JsonTaskDatabase, JsonTaskRepository } from '../src/core/json-repository.js';
 import { DailyCleanupController } from '../src/core/cleanup-controller.js';
 import { AttachmentStore } from '../src/core/attachment-store.js';
-import { TaskStatus } from '../src/core/types.js';
+import { CompletionReason, TaskStatus } from '../src/core/types.js';
 
 function rig() {
   const dir=mkdtempSync(join(tmpdir(),'taskboard-cleanup-'));
@@ -17,7 +17,7 @@ function rig() {
 function daysBefore(today,days){const d=new Date(today);d.setDate(d.getDate()-days);return d;}
 function completedAt(repo,{title,at,locked=false,referenceTaskIds=[]}){
   const task=repo.createTask({title,instruction:title,referenceTaskIds});
-  repo.transitionTask(task.id,TaskStatus.COMPLETED,{finalResult:'done'});
+  repo.transitionTask(task.id,TaskStatus.COMPLETED,{completionReason:CompletionReason.SUCCESS,finalResult:'done'});
   repo.store.transaction(()=>{
     const row=repo.state.tasks.find(x=>x.id===task.id);
     row.completed_at=at.toISOString();row.status_entered_at=at.toISOString();row.locked=locked;
@@ -149,7 +149,7 @@ test('cleanup restores staged attachment files when database deletion fails befo
   try{
     const staged=store.persist([{name:'proof.txt',type:'text/plain',data:Buffer.from('evidence')}]);
     const task=x.repo.createTask({title:'old with attachment',instruction:'old',attachments:staged.attachments});
-    x.repo.transitionTask(task.id,TaskStatus.COMPLETED,{finalResult:'done'});
+    x.repo.transitionTask(task.id,TaskStatus.COMPLETED,{completionReason:CompletionReason.SUCCESS,finalResult:'done'});
     x.repo.store.transaction(()=>{const row=x.repo.state.tasks.find(t=>t.id===task.id);row.completed_at=old.toISOString();row.status_entered_at=old.toISOString();});
     const path=x.repo.getTask(task.id).attachments[0].path;
     const realDelete=x.repo.hardDeleteCompletedTask.bind(x.repo);
