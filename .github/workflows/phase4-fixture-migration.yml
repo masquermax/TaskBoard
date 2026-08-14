@@ -1,4 +1,4 @@
-name: Phase 4 UI projection acceptance
+name: Phase 4 pre-clean acceptance
 
 on:
   push:
@@ -66,3 +66,18 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m "fix: project completion lifecycle reason in UI"
           git push origin HEAD:agent/completion-single-owner-phase4
+
+  full-platform-verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/completion-single-owner-phase4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run verify
