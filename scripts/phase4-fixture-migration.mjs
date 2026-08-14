@@ -34,16 +34,17 @@ for (const path of rootRuntimeFixtureFiles) {
   console.log(`migrated direct RootRuntime fixtures: ${path}`);
 }
 
-for (const path of ['tests/full-flow.test.js']) {
+{
+  const path = 'tests/full-flow.test.js';
   let source = readFileSync(path, 'utf8');
   const importLine = "import { installSuccessfulCompletionFixture } from './helpers/completion-fixture.js';";
   if (!source.includes(importLine)) {
     const firstLineEnd = source.indexOf('\n');
     source = source.slice(0, firstLineEnd + 1) + importLine + '\n' + source.slice(firstLineEnd + 1);
   }
-  const anchor = "const runtime=bootstrap({rootDir,executorName:'mock',startScheduler:false});";
-  const replacement = anchor + "installSuccessfulCompletionFixture(runtime.rootRuntime);";
-  if (source.includes(anchor) && !source.includes(replacement)) source = source.replaceAll(anchor, replacement);
+  source = source.replace(/(const runtime\s*=\s*bootstrap\(\{\s*rootDir\s*,\s*executorName\s*:\s*'mock'\s*,\s*startScheduler\s*:\s*false\s*\}\);)(?!\s*installSuccessfulCompletionFixture\(runtime\.rootRuntime\);)/g,
+    '$1installSuccessfulCompletionFixture(runtime.rootRuntime);');
+  if (!source.includes('installSuccessfulCompletionFixture(runtime.rootRuntime);')) throw new Error('FULL_FLOW_COMPLETION_FIXTURE_NOT_INSTALLED');
   writeFileSync(path, source, 'utf8');
   console.log(`migrated bootstrap completion fixture: ${path}`);
 }
