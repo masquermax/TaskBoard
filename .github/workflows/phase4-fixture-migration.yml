@@ -5,6 +5,7 @@ on:
     branches: [agent/completion-single-owner-phase4]
     paths:
       - scripts/phase4-fixture-migration.mjs
+      - tests/codex-full-flow.test.js
       - .github/workflows/phase4-fixture-migration.yml
 
 permissions:
