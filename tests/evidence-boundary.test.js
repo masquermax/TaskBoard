@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { CodexExecutor, rootSchema, subagentSchema, validatorSchema } from '../src/extensions/executors/codex/codex-executor.js';
 import { RootRuntime, validateDelegationPlan } from '../src/core/root-runtime.js';
+import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { ModelRouter } from '../src/core/model-router.js';
 import { AnalysisResultValidator } from '../src/governance/analysis-validator.js';
@@ -101,20 +102,20 @@ test('completed analysis publishes only Subagent-collected certified source fact
     },
   };
   const router=new ModelRouter();const subagent=new SubagentRuntime({executor,modelRouter:router});
-  const root=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()}),governanceCompiler:new GovernanceCompiler({rootDir:resolve('.')}),maxConcurrentSubagents:2});
+  const root=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()}),governanceCompiler:new GovernanceCompiler({rootDir:resolve('.')}),maxConcurrentSubagents:2});
   try{
     const outcome=await root.execute({id:'T-1',title:'分析',instruction:'分析',projectScopes:[{label:'OA',path:project}],attachments:[{id:'A-1',name:'requirements.txt',mimeType:'text/plain',path:attachment}],references:[],last_stage_result:null});
-    assert.equal(outcome.kind,'complete');
-    assert.doesNotMatch(outcome.finalResult,/自由文本/);
-    assert.match(outcome.finalResult,/1\. ERP→MWMS 两备注是新增逻辑/);
-    assert.match(outcome.finalResult,/【建议】/);
-    assert.match(outcome.finalResult,/【待确认】/);
+    assert.equal(outcome.kind,'goal_satisfied');
+    assert.doesNotMatch(outcome.proposal.finalResult,/自由文本/);
+    assert.match(outcome.proposal.finalResult,/1\. ERP→MWMS 两备注是新增逻辑/);
+    assert.match(outcome.proposal.finalResult,/【建议】/);
+    assert.match(outcome.proposal.finalResult,/【待确认】/);
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
 
 test('analysis Candidate fails closed when ValidatorRuntime is absent',async()=>{
-  const root=new RootRuntime({executor:{},modelRouter:new ModelRouter(),subagentRuntime:{}});
+  const root=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor:{},modelRouter:new ModelRouter(),subagentRuntime:{}});
   const task={id:'T-NO-VALIDATOR',title:'分析',instruction:'分析',projectScopes:[],attachments:[],references:[]};
   const session=root.createSession(task);
   session.policyContext={taskMode:'analysis'};

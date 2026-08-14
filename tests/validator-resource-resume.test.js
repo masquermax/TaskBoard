@@ -7,6 +7,7 @@ import { JsonTaskDatabase, JsonTaskRepository } from '../src/core/json-repositor
 import { TaskService } from '../src/core/task-service.js';
 import { ModelRouter } from '../src/core/model-router.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
+import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { Scheduler } from '../src/core/scheduler.js';
 import { GovernanceCompiler } from '../src/governance/governance-compiler.js';
@@ -33,7 +34,7 @@ function createRig(executor,semanticVerifier,{maxConcurrentSubagents=2}={}){
   const structural=new AnalysisResultValidator();
   const validatorRuntime=new ValidatorRuntime({analysisValidator:structural,sourceTraceVerifier:policySourceVerifier,semanticVerifier});
   const subagent=new SubagentRuntime({executor,modelRouter:router});
-  const root=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,governanceCompiler:compiler,validatorRuntime,maxConcurrentSubagents,retryDelaysMs:[0,0,0,0]});
+  const root=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:subagent,governanceCompiler:compiler,validatorRuntime,maxConcurrentSubagents,retryDelaysMs:[0,0,0,0]});
   const scheduler=new Scheduler({repository:repo,taskService:service,rootRuntime:root,intervalMs:999999,retryDelaysMs:[0,0,0,0]});
   return{dir,db,repo,service,root,scheduler,close(){scheduler.stop();db.close();rmSync(dir,{recursive:true,force:true});}};
 }

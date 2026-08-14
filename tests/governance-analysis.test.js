@@ -5,6 +5,7 @@ import { GovernanceCompiler, inferTaskMode } from '../src/governance/governance-
 import { AnalysisResultValidator, renderAnalysisResult } from '../src/governance/analysis-validator.js';
 import { ValidatorRuntime } from '../src/governance/validator-runtime.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
+import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { ModelRouter } from '../src/core/model-router.js';
 
@@ -196,7 +197,7 @@ test('Validator owns certification but hands a blocking certified state back to 
     async runSubagent(){throw new Error('unused');},
   };
   const router=new ModelRouter();const subagent=new SubagentRuntime({executor,modelRouter:router});
-  const root=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()})});
+  const root=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()})});
   const outcome=await root.execute({id:'T-1',title:'分析需求',instruction:'根据附件分析',projectScopes:[],attachments:[],references:[]});
   assert.equal(rootCalls,3,'initial candidate + one certification rework + Root control handoff');
   assert.deepEqual(handoffs,[false,false,true]);
@@ -208,21 +209,21 @@ test('Root content that still cannot be certified after one targeted rework beco
   let rootCalls=0;
   const executor={async runRoot(){rootCalls+=1;return baseAnalysis();},async runSubagent(){throw new Error('unused');}};
   const router=new ModelRouter();const subagent=new SubagentRuntime({executor,modelRouter:router});
-  const root=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()})});
+  const root=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()})});
   const outcome=await root.execute({id:'T-2',title:'分析需求',instruction:'分析',projectScopes:[],attachments:[],references:[]});
   assert.equal(rootCalls,2);
-  assert.equal(outcome.kind,'complete');
-  assert.match(outcome.finalResult,/【待确认】/);
-  assert.doesNotMatch(outcome.finalResult,/Validator|Subagent/,'internal role labels must not become user-facing pending items');
+  assert.equal(outcome.kind,'goal_satisfied');
+  assert.match(outcome.proposal.finalResult,/【待确认】/);
+  assert.doesNotMatch(outcome.proposal.finalResult,/Validator|Subagent/,'internal role labels must not become user-facing pending items');
 });
 
 test('Root Validator rework is one bounded Root turn and does not restart Subagents by itself',async()=>{
   let rootCalls=0,workers=0;
   const executor={async runRoot(){rootCalls+=1;return baseAnalysis();},async runSubagent(){workers+=1;throw new Error('unexpected');}};
   const router=new ModelRouter();const subagent=new SubagentRuntime({executor,modelRouter:router});
-  const root=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()})});
+  const root=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()})});
   const outcome=await root.execute({id:'T-3',title:'分析需求',instruction:'分析',projectScopes:[],attachments:[],references:[]});
-  assert.equal(outcome.kind,'complete');
+  assert.equal(outcome.kind,'goal_satisfied');
   assert.equal(rootCalls,2);
   assert.equal(workers,0);
 });

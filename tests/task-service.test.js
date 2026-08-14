@@ -8,6 +8,7 @@ import { TaskService } from '../src/core/task-service.js';
 import { TaskStatus } from '../src/core/types.js';
 import { Scheduler } from '../src/core/scheduler.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
+import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { ModelRouter } from '../src/core/model-router.js';
 import { MockExecutor } from '../src/extensions/executors/mock/mock-executor.js';
@@ -19,7 +20,7 @@ function setup() {
   const service = new TaskService(repo);
   const executor = new MockExecutor(); const router = new ModelRouter();
   const subagentRuntime = new SubagentRuntime({ executor, modelRouter:router });
-  const rootRuntime = new RootRuntime({ executor, modelRouter:router, subagentRuntime });
+  const rootRuntime = new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(), executor, modelRouter:router, subagentRuntime });
   const scheduler = new Scheduler({ repository:repo, taskService:service, rootRuntime, intervalMs:999999 });
   return { dir, db, repo, service, scheduler, close(){ scheduler.stop(); db.close(); rmSync(dir,{recursive:true,force:true}); } };
 }

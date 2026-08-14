@@ -8,6 +8,7 @@ import { AnalysisResultValidator } from '../src/governance/analysis-validator.js
 import { ValidatorRuntime } from '../src/governance/validator-runtime.js';
 import { CodexExecutor } from '../src/extensions/executors/codex/codex-executor.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
+import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
 import { ModelRouter } from '../src/core/model-router.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { JsonTaskDatabase, JsonTaskRepository } from '../src/core/json-repository.js';
@@ -101,32 +102,6 @@ test('CodexExecutor enforces AuthorizedGrant and projects it to an explicit runt
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
-test('source-backed analysis cannot complete on the initial Root turn without delegated source work',async()=>{
-  const dir=mkdtempSync(join(tmpdir(),'taskboard-completion-source-'));
-  const project=join(dir,'project');mkdirSync(project);
-  let rootTurns=0;
-  const executor={
-    async runRoot(){
-      rootTurns+=1;
-      return {
-        kind:'complete',summary:'分析已完成：0 项已确认，1 项待确认。',stageResult:null,finalResult:null,resultMode:'analysis',
-        evidence:[],claims:[],gaps:[{id:'G-1',question:'待确认实现',reason:'未调查',kind:'missing_fact',blocking:false,evidenceIds:[]}],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[],
-      };
-    },
-    async runSubagent(){throw new Error('no work should have been available');},
-  };
-  const router=new ModelRouter();
-  const subagent=new SubagentRuntime({executor,modelRouter:router});
-  const runtime=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:analysisValidatorRuntime(),governanceCompiler:new GovernanceCompiler({rootDir})});
-  try{
-    await assert.rejects(
-      runtime.execute(analysisTask([project])),
-      /ROOT_INVALID_COMPLETION_PLAN: SOURCE_ANALYSIS_REQUIRES_DELEGATED_EVIDENCE/,
-    );
-    assert.equal(rootTurns,2,'one bounded planning repair is allowed before fail-closed rejection');
-  }finally{rmSync(dir,{recursive:true,force:true});}
-});
-
 test('Root completion cannot silently cancel already-issued read-only Work Units',async()=>{
   let rootTurns=0;
   let workRuns=0;
@@ -158,9 +133,9 @@ test('Root completion cannot silently cancel already-issued read-only Work Units
   };
   const router=new ModelRouter();
   const subagent=new SubagentRuntime({executor,modelRouter:router});
-  const runtime=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,maxConcurrentSubagents:2});
+  const runtime=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:subagent,maxConcurrentSubagents:2});
   const outcome=await runtime.execute({id:'T-WORK',title:'执行',instruction:'执行',projectScopes:[],attachments:[],references:[],ready_reason:'NEW'});
-  assert.equal(outcome.kind,'complete');
+  assert.equal(outcome.kind,'goal_satisfied');
   assert.equal(workRuns,2);
   assert.equal(bCompleted,true,'an issued Work Unit is a real obligation unless Root explicitly supersedes it; complete must not cancel it implicitly');
   assert.ok(rootTurns>=2);

@@ -7,6 +7,7 @@ import { applyCertifiedDelta, decisionFromCertifiedState, emptyCertifiedState, n
 import { AnalysisResultValidator } from '../src/governance/analysis-validator.js';
 import { ValidatorRuntime } from '../src/governance/validator-runtime.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
+import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { ModelRouter } from '../src/core/model-router.js';
 import { JsonTaskDatabase, JsonTaskRepository } from '../src/core/json-repository.js';
@@ -93,7 +94,7 @@ test('Root next Turn receives committed state and final result is rendered from 
   const router=new ModelRouter();
   const subagent=new SubagentRuntime({executor,modelRouter:router});
   const validator=new ValidatorRuntime({analysisValidator:new AnalysisResultValidator(),sourceTraceVerifier:{enforce:({evidence})=>({evidence,actions:[],verifications:[]})}});
-  const root=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:validator,maxConcurrentSubagents:1});
+  const root=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:validator,maxConcurrentSubagents:1});
   const commits=[];
   const outcome=await root.execute({id:'T-LEARN',title:'需求分析',instruction:'分析附件',projectScopes:[],attachments:[],references:[],analysisState:null},{onCertifiedTurn:commit=>commits.push(commit)});
   assert.equal(rootCalls,2);
@@ -101,9 +102,9 @@ test('Root next Turn receives committed state and final result is rendered from 
   assert.equal(commits[0].turnNode.id,'TURN-0001');
   assert.equal(seenStates[0].claims.length,0);
   assert.equal(seenStates[1].claims[0].statement,'外部备注不可修改');
-  assert.equal(outcome.kind,'complete');
-  assert.match(outcome.finalResult,/外部备注不可修改/);
-  assert.match(outcome.summary,/1 项已确认/);
+  assert.equal(outcome.kind,'goal_satisfied');
+  assert.match(outcome.proposal.finalResult,/外部备注不可修改/);
+  assert.match(outcome.proposal.summary,/1 项已确认/);
 });
 
 
@@ -118,10 +119,10 @@ test('A new Root Runtime after restart continues from durable Current Certified 
   const router=new ModelRouter();
   const subagent=new SubagentRuntime({executor,modelRouter:router});
   const validator=new ValidatorRuntime({analysisValidator:new AnalysisResultValidator(),sourceTraceVerifier:{enforce:({evidence})=>({evidence,actions:[],verifications:[]})}});
-  const root=new RootRuntime({executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:validator});
+  const root=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:subagent,validatorRuntime:validator});
   const outcome=await root.execute({id:'T-RECOVER',title:'需求分析',instruction:'继续分析',projectScopes:[],attachments:[],references:[],analysisState:learned.state});
   assert.equal(seen.claims[0].statement,'外部备注不可修改');
-  assert.match(outcome.finalResult,/外部备注不可修改/);
+  assert.match(outcome.proposal.finalResult,/外部备注不可修改/);
 });
 
 test('Gap space only shrinks through an evidence-backed certified resolution',()=>{
