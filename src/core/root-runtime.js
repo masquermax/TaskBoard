@@ -1018,6 +1018,7 @@ export class RootRuntime {
         const finalSummary = finalView ? canonicalAnalysisSummary(finalView) : decision.summary;
         const stageResult = session.lastCommittedStageResult || decision.stageResult || null;
         const proposal={ finalResult, summary:finalSummary, stageResult };
+        if(this.completionAssessmentVerifier?.available?.()===false){const error=new Error('VALIDATOR_UNAVAILABLE: Completion Validator semantic certification is unavailable.');error.nonRetryable=true;throw error;}
         if(!this.completionEvaluator){const error=new Error('COMPLETION_EVALUATOR_REQUIRED');error.nonRetryable=true;throw error;}
         let assessments=[];
         if(this.completionAssessmentVerifier){
