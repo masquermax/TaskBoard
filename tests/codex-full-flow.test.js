@@ -32,7 +32,10 @@ rl.on('line', line => {
       return setTimeout(()=>{send({method:'item/completed',params:{threadId,turnId,item:{id:'agent_'+turnNo,type:'agentMessage',text:JSON.stringify(payload)}}});send({method:'turn/completed',params:{threadId,turn:{id:turnId,status:'completed',items:[],error:null}}});},5);
     }
     if (prompt.includes('Semantic proof obligation:')) {
-      const payload={reviews:[{id:'C-1',verdict:'supported',reason:'fake source proof supports the test claim'},{id:'gap_resolution:G-1',verdict:'supported',reason:'the answer explicitly supplies the requested scope'}]};
+      const completionCandidate = prompt.match(/"id"\s*:\s*"(completion:[^"]+)"/);
+      const payload = completionCandidate
+        ? {reviews:[{id:completionCandidate[1],verdict:'supported',reason:'the supplied certified Human fact proves the governed completion criterion in this integration fixture'}]}
+        : {reviews:[{id:'C-1',verdict:'supported',reason:'fake source proof supports the test claim'},{id:'gap_resolution:G-1',verdict:'supported',reason:'the answer explicitly supplies the requested scope'}]};
       return setTimeout(() => {
         send({ method:'item/completed', params:{ threadId, turnId, item:{ id:'agent_' + turnNo, type:'agentMessage', text:JSON.stringify(payload) } } });
         send({ method:'turn/completed', params:{ threadId, turn:{ id:turnId, status:'completed', items:[], error:null } } });
