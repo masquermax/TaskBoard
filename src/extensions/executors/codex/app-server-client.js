@@ -361,6 +361,12 @@ export class CodexAppServerClient {
       inputBytes:Buffer.byteLength(String(prompt||''),'utf8'),
     };
     const executionGrant=this.validateExecutionGrant({permissionProfile,runtimeWorkspaceRoots});
+    const runtimeProfile=runtimeConfig?.permissions?.[executionGrant.profile]||null;
+    const executionSurface={
+      commandExecution:true,
+      fileChange:runtimeProfile?.filesystem?.[':workspace_roots']?.['.']==='write',
+      webSearch:runtimeProfile?.network?.enabled===true,
+    };
     this.recordDiagnostic('turn-route',{...routeMeta,permissionProfile:executionGrant.profile,runtimeWorkspaceRootCount:executionGrant.roots.length});
     await this.connect();
     onProgress?.({ summary:'Codex 已连接', detail:'正在建立本轮执行上下文。' });
@@ -487,14 +493,13 @@ export class CodexAppServerClient {
         if (event.method === 'item/started') {
           const item = event.params?.item;
           const type=String(item?.type||'');
-          const roleCanExecute=role==='subagent';
-          const roleCanWrite=roleCanExecute&&diagnosticContext?.projectAccess==='write';
-          const roleCanNetwork=roleCanExecute&&diagnosticContext?.networkAccess===true;
+          // This is enforcement against the already-projected Codex runtime
+          // profile. Role remains diagnostic metadata and must not derive policy.
           const forbiddenAmbient=new Set(['mcpToolCall','collabToolCall','dynamicToolCall']);
-          const actionViolation=forbiddenAmbient.has(type)||(type==='commandExecution'&&!roleCanExecute)||(type==='fileChange'&&!roleCanWrite)||(type==='webSearch'&&!roleCanNetwork);
+          const actionViolation=forbiddenAmbient.has(type)||(type==='fileChange'&&!executionSurface.fileChange)||(type==='webSearch'&&!executionSurface.webSearch)||(type==='commandExecution'&&!executionSurface.commandExecution);
           if(actionViolation){
             interrupt();
-            const error=new Error(`ROLE_EXECUTION_SURFACE_VIOLATION: ${role} cannot execute ${type||'unknown'} under the current Execution Grant.`);error.nonRetryable=true;error.authorityViolation=true;throw error;
+            const error=new Error(`EXECUTION_SURFACE_VIOLATION: ${type||'unknown'} exceeds the projected Runtime execution surface.`);error.nonRetryable=true;error.authorityViolation=true;throw error;
           }
           if (type === 'commandExecution') { toolCallCount+=1; onProgress?.({ summary:'正在核对证据', detail:commandDetail }); }
           else if (type === 'fileChange') onProgress?.({ summary:'Codex 正在处理文件变更', detail:fileChangeDetail });
