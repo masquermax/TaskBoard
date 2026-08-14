@@ -70,9 +70,9 @@ test('blocking business decision cannot be converted into another investigation 
   let rootCalls=0,subagentCalls=0;
   const gap={id:'G-SCOPE',question:'继续原任务范围还是切换到附件范围？',reason:'这是范围选择',kind:'business_decision',blocking:true,evidenceIds:[]};
   const executor={
-    async runRoot({authorityHandoff=false,onExecutionStarted}){
+    async runRoot({authorityHandoff=false,planningFeedback=null,onExecutionStarted}){
       rootCalls+=1;onExecutionStarted?.();
-      if(authorityHandoff)return{kind:'human_gateway',summary:'需要用户决定范围',stageResult:null,finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[],gateway:{gapId:'G-SCOPE',question:gap.question,context:'范围选择属于用户决定',options:['继续原范围','切换附件范围']},delegations:[]};
+      if(authorityHandoff||planningFeedback?.length)return{kind:'human_gateway',summary:'需要用户决定范围',stageResult:null,finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[],gateway:{gapId:'G-SCOPE',question:gap.question,context:'范围选择属于用户决定',options:['继续原范围','切换附件范围']},delegations:[]};
       return{kind:'delegate',summary:'继续调查新范围',stageResult:null,finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[gap],recommendations:[],steps:[],gapResolutions:[],gateway:null,delegations:[{id:'WU-WRONG',title:'调查附件范围',goal:'调查另一个业务范围',expectedOutput:'完整实现分析',stopCondition:'找到所有实现',projectAccess:'read',skillId:null,dependsOn:[],inputRefs:[]}]};
     },
     async runSubagent(){subagentCalls+=1;throw new Error('WRONG_WORK_STARTED');},
@@ -87,21 +87,21 @@ test('blocking business decision cannot be converted into another investigation 
   const outcome=await runtime.execute({id:'T-SCOPE',title:'范围测试',instruction:'分析原任务',projectScopes:[],attachments:[],references:[]});
   assert.equal(outcome.kind,'needs_human');
   assert.equal(outcome.gateway.targetGapId,'G-SCOPE');
-  assert.equal(subagentCalls,0,'Human-owned blocking decision must not be investigated by a Subagent');
-  assert.equal(rootCalls,2,'initial candidate + one bounded control handoff');
+  assert.equal(subagentCalls,0,'invalid Project Work Unit must be rejected before it enters Executor');
+  assert.equal(rootCalls,2,'initial invalid plan + one bounded planning repair');
 });
 
 
-test('any certified blocking Gap prevents further investigation delegation, regardless of Gap kind',async()=>{
+test('invalid Project investigation is rejected by Work Unit Contract even when a blocking Gap exists',async()=>{
   let rootCalls=0,subagentCalls=0;
   const gap={id:'G-MISSING',question:'必须由外部资料确认的关键字段是什么？',reason:'没有该字段无法完成结论',kind:'missing_fact',blocking:true,evidenceIds:[]};
   const executor={
-    async runRoot({authorityHandoff=false,onExecutionStarted}){
+    async runRoot({authorityHandoff=false,planningFeedback=null,onExecutionStarted}){
       rootCalls+=1;onExecutionStarted?.();
-      if(authorityHandoff)return{kind:'human_gateway',summary:'需要补充关键字段',stageResult:null,finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[],gateway:{gapId:'G-MISSING',question:gap.question,context:gap.reason,options:[]},delegations:[]};
+      if(authorityHandoff||planningFeedback?.length)return{kind:'human_gateway',summary:'需要补充关键字段',stageResult:null,finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[],gateway:{gapId:'G-MISSING',question:gap.question,context:gap.reason,options:[]},delegations:[]};
       return{kind:'delegate',summary:'继续搜项目碰碰运气',stageResult:null,finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[gap],recommendations:[],steps:[],gapResolutions:[],gateway:null,delegations:[{id:'WU-SEARCH-AGAIN',title:'再次搜索',goal:'继续扩大搜索以猜字段',expectedOutput:'字段值',stopCondition:'找到字段或无法找到即停止',projectAccess:'read',skillId:null,dependsOn:[],inputRefs:[]}]};
     },
-    async runSubagent(){subagentCalls+=1;throw new Error('BLOCKING_GAP_MUST_NOT_REINVESTIGATE');},
+    async runSubagent(){subagentCalls+=1;throw new Error('INVALID_WORK_MUST_NOT_START');},
   };
   const { SubagentRuntime }=await import('../src/core/subagent-runtime.js');
   const { ValidatorRuntime }=await import('../src/governance/validator-runtime.js');
@@ -113,8 +113,8 @@ test('any certified blocking Gap prevents further investigation delegation, rega
   const outcome=await runtime.execute({id:'T-BLOCKING-ANY',title:'阻塞缺口',instruction:'分析',projectScopes:[],attachments:[],references:[]});
   assert.equal(outcome.kind,'needs_human');
   assert.equal(outcome.gateway.targetGapId,'G-MISSING');
-  assert.equal(subagentCalls,0);
-  assert.equal(rootCalls,2);
+  assert.equal(subagentCalls,0,'missing Project input must fail through the Work Unit contract, not through blocking-Gap authority');
+  assert.equal(rootCalls,2,'initial invalid plan + one bounded planning repair');
 });
 
 
@@ -150,9 +150,9 @@ test('"continue with current information" cannot change Task scope, close the sc
     delegations:[{id:'WU-WRONG-EAM',title:'核查OA外发维修取消与财务冲销实现',goal:'调查EAM外发维修取消与财务冲销现有实现',expectedOutput:'完整实现差异',stopCondition:'找到所有相关实现后停止',projectAccess:'read',skillId:null,dependsOn:[],inputRefs:[]}],
   });
   const executor={
-    async runRoot({authorityHandoff=false,onExecutionStarted}){
+    async runRoot({authorityHandoff=false,planningFeedback=null,onExecutionStarted}){
       rootCalls+=1;onExecutionStarted?.();
-      if(authorityHandoff)return{
+      if(authorityHandoff||planningFeedback?.length)return{
         kind:'human_gateway',summary:'任务范围仍需用户明确选择',stageResult:null,finalResult:null,resultMode:'analysis',
         evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[],delegations:[],
         gateway:{gapId:'G-SCOPE',question:gapQuestion,context:'“继续推断”只允许在现有信息下继续，不等于选择另一个任务范围。',options:['继续分析备件入库','改为分析EAM外发维修取消及财务冲销']},
@@ -179,7 +179,7 @@ test('"continue with current information" cannot change Task scope, close the sc
   assert.equal(outcome.gateway.targetGapId,'G-SCOPE');
   assert.equal(outcome.gateway.question,gapQuestion);
   assert.equal(subagentCalls,0,'scope overreach must be stopped before the unrelated Work Unit enters Executor');
-  assert.equal(rootCalls,3,'bad candidate + one semantic rework + one bounded Root control handoff');
+  assert.equal(rootCalls,3,'bad candidate + one semantic rework + one bounded planning repair');
   assert.ok(validatorCalls>=2,'Human-derived scope claim and Gap resolution must receive semantic proof');
   const certified=latestAnalysisState.current;
   assert.ok(certified.gaps.some(gap=>gap.id==='G-SCOPE'),'the original scope Gap must remain certified');
