@@ -1,27 +1,30 @@
-import { CompletionEvaluator } from '../../src/governance/completion-evaluator.js';
-
-// Test-only Owner double for tests whose subject is NOT Completion semantics.
-// It replaces CompletionAssessmentVerifier explicitly at the constructor boundary;
-// production Runtime never imports this helper and receives no compatibility fallback.
+// Test-only Owner doubles for tests whose subject is NOT Completion semantics.
+// They replace both CompletionAssessmentVerifier and CompletionEvaluator explicitly
+// at the constructor boundary. Production Runtime never imports this helper and
+// receives no compatibility fallback.
 export function successfulCompletionDependenciesForControlFlowTest() {
   const completionAssessmentVerifier = {
     available() { return true; },
-    async review({ task }) {
-      const obligations = Array.isArray(task?.taskContract?.obligations) ? task.taskContract.obligations : [];
+    async review() {
       return {
         checked: true,
-        assessments: obligations.map((obligation, index) => ({
-          id: `TEST-COMPLETION-ASSESSMENT-${index + 1}`,
+        assessments: [{
+          id: 'TEST-COMPLETION-ASSESSMENT',
           proofKind: 'completion_obligation_support',
           certification: 'supported',
-          obligationRefs: [String(obligation.id)],
+          obligationRefs: ['TEST-OBLIGATION'],
           criterionSatisfied: true,
-          proofFactRefs: [`TEST-CERTIFIED-FACT-${index + 1}`],
-        })),
+          proofFactRefs: ['TEST-CERTIFIED-FACT'],
+        }],
       };
     },
   };
-  return { completionAssessmentVerifier, completionEvaluator: new CompletionEvaluator() };
+  const completionEvaluator = {
+    evaluate() {
+      return { goalState:'satisfied', satisfiedObligationIds:['TEST-OBLIGATION'], unsatisfiedObligationIds:[] };
+    },
+  };
+  return { completionAssessmentVerifier, completionEvaluator };
 }
 
 export function installSuccessfulCompletionFixture(rootRuntime) {
