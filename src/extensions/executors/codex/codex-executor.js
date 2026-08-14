@@ -147,6 +147,7 @@ export class CodexExecutor extends ExecutorPort {
     const fileAccess=projectAccess==='write'?'write':'read';
     const networkAccess=grant.networkAccess===true&&this.networkAccess===true;
     const permissionProfile='taskboard_runtime';
+    const suppressEnvironmentContext=grant.environmentAccess==='none';
     const runtimeConfig={
       permissions:{taskboard_runtime:{filesystem:{':minimal':'read',':workspace_roots':{'.':fileAccess}},network:{enabled:networkAccess}}},
       features:{plugins:false,connectors:false,apps:false},
@@ -154,8 +155,9 @@ export class CodexExecutor extends ExecutorPort {
       web_search:networkAccess?'live':'disabled',
       include_apps_instructions:false,
       allow_login_shell:false,
+      ...(suppressEnvironmentContext?{include_environment_context:false,project_doc_max_bytes:0}:{}),
     };
-    return{cwd:scratch,writableRoots:fileAccess==='write'?runtimeWorkspaceRoots:[],scratch,projectAccess,permissionProfile,runtimeWorkspaceRoots,environments:grant.environmentAccess==='default'?null:[],runtimeConfig,networkAccess};
+    return{cwd:scratch,writableRoots:fileAccess==='write'?runtimeWorkspaceRoots:[],scratch,projectAccess,permissionProfile,runtimeWorkspaceRoots,environments:null,runtimeConfig,networkAccess};
   }
   stageSelectedAttachments(task,scratch,attachments=task.attachments||[]){
     const selected=(Array.isArray(attachments)?attachments:[]).filter(item=>item?.path&&existsSync(item.path));
