@@ -41,8 +41,14 @@ jobs:
           tests/turn-learning.test.js
           tests/validator-resource-resume.test.js
       - name: Observe remaining full-suite RED without turning it into an acceptance gate
-        continue-on-error: true
-        run: npm run verify
+        shell: bash
+        run: |
+          set +e
+          npm run verify > "$RUNNER_TEMP/phase4-full-suite.log" 2>&1
+          status=$?
+          echo "FULL_SUITE_EXIT=$status"
+          grep -E '^not ok |^# (tests|pass|fail|cancelled|skipped|todo) ' "$RUNNER_TEMP/phase4-full-suite.log" || true
+          exit 0
       - name: Commit verified fixture migration
         run: |
           git config user.name "taskboard-phase4-bot"
