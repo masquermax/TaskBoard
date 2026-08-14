@@ -1,0 +1,50 @@
+name: Phase 4 fixture migration
+
+on:
+  push:
+    branches: [agent/completion-single-owner-phase4]
+    paths:
+      - scripts/phase4-fixture-migration.mjs
+      - .github/workflows/phase4-fixture-migration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  migrate-fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/completion-single-owner-phase4
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/phase4-fixture-migration.mjs
+      - run: git diff --check
+      - name: Verify migrated fixture families
+        run: >-
+          node --test
+          tests/cleanup-controller.test.js
+          tests/code-audit-regressions.test.js
+          tests/evidence-boundary.test.js
+          tests/full-flow.test.js
+          tests/goal-debug-regressions.test.js
+          tests/governance-analysis.test.js
+          tests/lifecycle-actions.test.js
+          tests/queue-runtime.test.js
+          tests/runtime-authority-boundary.test.js
+          tests/runtime-regressions.test.js
+          tests/scheduler.test.js
+          tests/task-service.test.js
+          tests/turn-learning.test.js
+          tests/validator-resource-resume.test.js
+      - name: Commit verified fixture migration
+        run: |
+          git config user.name "taskboard-phase4-bot"
+          git config user.email "taskboard-phase4-bot@users.noreply.github.com"
+          git add tests
+          git diff --cached --quiet && exit 0
+          git commit -m "test: migrate fixtures to completion owner contract"
+          git push origin HEAD:agent/completion-single-owner-phase4
