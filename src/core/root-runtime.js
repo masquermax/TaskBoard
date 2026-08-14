@@ -898,19 +898,6 @@ export class RootRuntime {
       }
       if (decision.kind === 'cancelled') return { kind:'cancelled', quiescent:this.isQuiescent(task.id) };
 
-      const sourceBackedAnalysis=session.policyContext?.taskMode==='analysis'&&Boolean((task.projectScopes||[]).length||(task.attachments||[]).length);
-      const hasCertifiedWorkTrigger=(session.analysisState?.turns||[]).some(turn=>(turn?.triggerRefs||[]).some(ref=>String(ref||'').startsWith('work:')));
-      const hasIssuedSourceWork=session.issuedWorkSignatures.size>0||session.completedWorkUnits.length>0||rootInputs.length>0||hasCertifiedWorkTrigger;
-      if(sourceBackedAnalysis&&decision.kind==='complete'&&!hasIssuedSourceWork){
-        const issue='SOURCE_ANALYSIS_REQUIRES_DELEGATED_EVIDENCE: Root does not own Project/Attachment investigation; source-backed analysis must first obtain bounded Work Unit evidence.';
-        session.planningRepairCount+=1;
-        session.planningFeedback=[issue];
-        session.planningTriggerRefs=[...rootTriggerRefs];
-        session.actor={title:'Completion Contract 校验',status:WorkUnitStatus.COMPLETED,detail:'Root 试图在没有 delegated source evidence 时完成 source-backed analysis；已返回同一 Root 触发做一次受限规划修正。',updatedAt:nowIso(),owner:'root'};
-        this.emit(session,callbacks);
-        if(session.planningRepairCount>=2){const error=new Error(`ROOT_INVALID_COMPLETION_PLAN: ${issue}`);error.nonRetryable=true;throw error;}
-        continue;
-      }
 
       let reviewed;
       try {
