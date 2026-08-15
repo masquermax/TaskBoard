@@ -56,7 +56,7 @@ test('retryable transport failure is RETRY_WAIT and remains visibly distinct fro
     assert.equal(current.status,TaskStatus.READY);
     assert.equal(current.ready_reason,ReadyReason.RETRY_WAIT);
     assert.equal(current.executionState.snapshot.stage.workUnits[0].status,WorkUnitStatus.RETRY_WAIT);
-    x.scheduler.activities.delete(task.id); // simulate process/activity-memory loss while durable state remains
+    x.scheduler.activities.delete(task.id);
     const activity=x.scheduler.getTaskActivity(task.id);
     assert.equal(activity.summary,'等待自动重试');
     assert.match(activity.detail,/Codex 流式连接中断|第 1 次执行未成功/);
@@ -68,8 +68,6 @@ test('current stage keeps all Work Units visible while Subagent activity and Roo
 test('dependency wait is distinct from resource wait',async()=>{let release;const executor={async runRoot({subagentResults,onExecutionStarted}){onExecutionStarted?.();if(!subagentResults.length)return{kind:'delegate',summary:'deps',stageResult:null,finalResult:null,confirmed:[],recommendations:[],openQuestions:[],gateway:null,delegations:[{id:'a',title:'附件事实',instruction:'A',goal:'A',expectedOutput:'返回当前工作单的可验证局部结果',stopCondition:'当前目标完成或形成明确 Gap 后停止',skillId:null,dependsOn:[]},{id:'b',title:'实施步骤',instruction:'B',goal:'B',expectedOutput:'返回当前工作单的可验证局部结果',stopCondition:'当前目标完成或形成明确 Gap 后停止',skillId:null,dependsOn:['a']}]};return complete();},async runSubagent({delegation,onExecutionStarted}){onExecutionStarted?.();if(delegation.id==='a')return new Promise(resolve=>{release=()=>resolve({delegationId:'a',result:'A done',findings:[],recommendations:[],openQuestions:[],blocker:null,uncertainty:null});});return{delegationId:'b',result:'B done',findings:[],recommendations:[],openQuestions:[],blocker:null,uncertainty:null};}};const x=rig(executor,{maxConcurrentSubagents:2});try{const task=x.scheduler.createTask({title:'依赖',instruction:'测试'});const tick=x.scheduler.tick();for(let i=0;i<50;i++){const units=x.scheduler.getTaskActivity(task.id)?.current?.stage?.workUnits||[];if(units.length){assert.equal(units.find(u=>u.id==='a').status,'RUNNING');assert.equal(units.find(u=>u.id==='b').status,'WAITING_DEPENDENCY');break;}await new Promise(r=>setTimeout(r,5));}release();await tick;assert.equal(x.service.getTask(task.id).status,TaskStatus.COMPLETED);}finally{x.close();}});
 
 test('cancel of RUNNING is an intent; Root quiesces first and only Scheduler moves Task to COMPLETED/CANCELLED',async()=>{let started=false;const executor={async runRoot({signal,onExecutionStarted}){started=true;onExecutionStarted?.();return new Promise((resolve,reject)=>{signal.addEventListener('abort',()=>{const e=new Error('interrupted');e.interrupted=true;reject(e);},{once:true});});},async runSubagent(){throw new Error('unused');}};const x=rig(executor);try{const task=x.scheduler.createTask({title:'取消运行',instruction:'执行'});const tick=x.scheduler.tick();for(let i=0;i<50&&!started;i++)await new Promise(r=>setTimeout(r,5));assert.equal(x.service.getTask(task.id).status,TaskStatus.RUNNING);const requested=x.scheduler.requestCancel(task.id);assert.equal(requested.pending,true);await tick;const done=x.service.getTask(task.id);assert.equal(done.status,TaskStatus.COMPLETED);assert.equal(done.completion_reason,CompletionReason.CANCELLED);assert.equal(done.cancel_requested_at,null);}finally{x.close();}});
-
-
 
 test('cancel waits for an active Subagent promise to settle before Scheduler marks the Task completed',async()=>{
   let workerStarted=false;let workerSettled=false;
@@ -121,8 +119,6 @@ test('manual retry of a suspended work unit starts a fresh 1/5 failure cycle',as
     const suspended=x.service.getTask(task.id);
     assert.equal(subagentCalls,5);assert.equal(suspended.ready_reason,ReadyReason.SUSPENDED);
     const before=x.root.snapshot(task.id);assert.equal(before.stage.workUnits[0].failureCount,5);assert.equal(before.stage.workUnits[0].status,'SUSPENDED');
-    // Keep this test focused on resetting the retry cycle; do not let the
-    // scheduler immediately claim the task again in the background.
     x.scheduler.tick=async()=>{};
     const retried=x.scheduler.retryTask(task.id,'evidence');
     assert.equal(retried.ready_reason,ReadyReason.WAITING_RESOURCE);
@@ -130,7 +126,7 @@ test('manual retry of a suspended work unit starts a fresh 1/5 failure cycle',as
   }finally{x.close();}
 });
 
-test('process shutdown interrupts execution without converting the Task into user cancellation or writing retry state',async()=>{
+test('process shutdown persists observation without fabricating failure state, then safely recovers Root-only work',async()=>{
   let started=false;
   const executor={
     async runRoot({signal,onExecutionStarted}){
@@ -155,7 +151,8 @@ test('process shutdown interrupts execution without converting the Task into use
     assert.equal(persisted.status,TaskStatus.RUNNING,'shutdown must leave lifecycle state for startup recovery');
     assert.equal(persisted.completion_reason,null);
     assert.equal(persisted.cancel_requested_at,null);
-    assert.equal(persisted.executionState,null,'shutdown must not fabricate an execution failure/retry cycle');
+    assert.equal(persisted.executionState?.snapshot?.actor?.owner,'root','controlled shutdown records the actor reality it actually observed');
+    assert.equal(persisted.executionState?.retry,undefined,'shutdown observation is not a fabricated execution failure/retry cycle');
     const recovered=x.scheduler.recoverStaleRunningTasks();
     assert.equal(recovered,1);
     assert.equal(x.service.getTask(task.id).status,TaskStatus.READY);
@@ -163,7 +160,7 @@ test('process shutdown interrupts execution without converting the Task into use
   }finally{x.close();}
 });
 
-test('bounded shutdown remains safe when an executor ignores abort and resolves after the shutdown wait expires',async()=>{
+test('bounded shutdown keeps its durable snapshot unchanged when an executor ignores abort and resolves late',async()=>{
   let started=false;let resolveRoot;
   const executor={
     async runRoot({onExecutionStarted}){
@@ -190,7 +187,8 @@ test('bounded shutdown remains safe when an executor ignores abort and resolves 
     assert.equal(after.status,TaskStatus.RUNNING,'a late executor result must not complete the Task after shutdown begins');
     assert.equal(after.final_result,before.final_result);
     assert.equal(after.last_stage_result,before.last_stage_result);
-    assert.equal(after.executionState,before.executionState);
+    assert.deepEqual(after.executionState,before.executionState,'late result must not rewrite the durable shutdown observation');
+    assert.equal(after.executionState?.retry,undefined);
     assert.equal(x.service.progressHistory(task.id).length,beforeHistory,'late stage callbacks must not persist after shutdown starts');
     assert.equal(x.scheduler.activeTasks.size,0);
   }finally{x.close();}
@@ -251,9 +249,6 @@ test('Root history hints on delegation and completion never bypass Validator/Tas
   finally{x.close();}
 });
 
-// Governance/runtime regression: History is produced from any certified Root
-// knowledge boundary; no special checkpoint kind exists. A Root may certify new
-// Task knowledge and delegate the next bounded Work Unit in the same decision.
 test('Validator-certified Root knowledge is persisted to History before delegated follow-up work finishes',async()=>{
   const { resolve } = await import('node:path');
   const { GovernanceCompiler } = await import('../src/governance/governance-compiler.js');
