@@ -373,7 +373,7 @@ export class Scheduler {
     const task=this.repository.getTask(taskId);if(!task||task.deleted_at)throw new Error('TASK_NOT_FOUND');
     if(this.claimedTasks.has(taskId)||task.status===TaskStatus.RUNNING)throw new Error('TASK_DELETE_BECAME_RUNNING');
     if(![TaskStatus.READY,TaskStatus.COMPLETED].includes(task.status))throw new Error('TASK_DELETE_NOT_ALLOWED');
-    if(task.status===TaskStatus.COMPLETED&&task.locked)throw new Error('TASK_LOCK_NOT_ALLOWED');
+    if(task.status===TaskStatus.COMPLETED&&task.locked)throw new Error('TASK_LOCKED');
     this.repository.setDeleted(taskId,true);this.activities.delete(taskId);this.rootRuntime.discardSession(taskId);this.rootRuntime.cleanupTaskWorkspace?.(taskId);return {deleted:true};
   }
 
