@@ -41,6 +41,13 @@ export function pendingAnalysisItems(decision) {
   ];
 }
 
+export function hasGovernedCandidateDelta(decision = {}) {
+  const normalized=normalizeAnalysisFields(decision);
+  return ['evidence','claims','gaps','recommendations','steps']
+    .some(key=>Array.isArray(normalized[key])&&normalized[key].length>0)
+    || (Array.isArray(decision?.gapResolutions)&&decision.gapResolutions.length>0);
+}
+
 export function canonicalAnalysisSummary(decision) {
   const confirmed=(decision?.claims||[]).filter(c=>c?.level===ClaimLevel.CONFIRMED).length;
   const pending=pendingAnalysisItems(decision).length;
@@ -89,14 +96,13 @@ function analysisViewAfterCandidateResolutions(decision, evidenceById) {
 }
 
 export class AnalysisResultValidator {
-  validate(decision, policyContext = null) {
+  validate(decision, _policyContext = null) {
     const normalized = { ...decision, ...normalizeAnalysisFields(decision) };
     const violations = [];
-    const strictBoundaries = normalized.resultMode === 'analysis';
-    if (policyContext?.taskMode === 'analysis' && normalized.resultMode !== 'analysis') {
-      violations.push(violation('C-003','resultMode','Task is classified as analysis, but resultMode is execution.','SET_ANALYSIS_MODE'));
-    }
-    if (normalized.resultMode !== 'analysis') return { valid:violations.length === 0, violations, decision:normalized };
+    // C-003 is a Candidate-content boundary, not a task/result mode boundary.
+    // Any Candidate that carries governed knowledge must preserve strict source
+    // anchors. resultMode remains presentation-only below.
+    const strictBoundaries = true;
 
     const evidenceIds = new Set();
     for (const evidence of normalized.evidence) {
@@ -212,24 +218,24 @@ export class AnalysisResultValidator {
       }
     }
 
-    if(normalized.kind==='complete'){
+    // resultMode may shape the final analysis serialization, but never whether the
+    // Candidate receives structural certification.
+    if(normalized.resultMode==='analysis'&&normalized.kind==='complete'){
       const expectedSummary=canonicalAnalysisSummary(analysisViewAfterCandidateResolutions(normalized,evidenceById));
       if(text(normalized.summary)!==expectedSummary) violations.push(principleViolation('C-003','summary','User-visible analysis completion summary must be derived from the validated structured result, not free Root wording.','CANONICALIZE_SUMMARY'));
     }
 
-    if (normalized.kind === 'complete' && !normalized.evidence.length && !normalized.claims.length && !normalized.gaps.length && !normalized.recommendations.length && !normalized.steps.length) {
+    if (normalized.resultMode==='analysis' && normalized.kind === 'complete' && !normalized.evidence.length && !normalized.claims.length && !normalized.gaps.length && !normalized.recommendations.length && !normalized.steps.length) {
       violations.push(violation('C-004','analysis','A complete analysis result contains no traceable facts, gaps, recommendations, or steps.','MODEL_REPAIR',false));
     }
     return { valid:violations.length === 0, violations, decision:normalized };
   }
 
-  repair(decision, policyContext = null) {
+  repair(decision, _policyContext = null) {
     const d = clone({ ...decision, ...normalizeAnalysisFields(decision) });
-    if (policyContext?.taskMode === 'analysis') d.resultMode = 'analysis';
-    const strictBoundaries = d.resultMode === 'analysis';
-    if (d.resultMode !== 'analysis') return { decision:d, actions:[] };
-    d.finalResult = null;
+    const strictBoundaries = true;
     const actions = [];
+    if(d.resultMode==='analysis')d.finalResult = null;
 
     d.evidence = uniqueById(d.evidence).map(evidence=>{
       // Traceable source addresses are evidence, not prose repair material. Under
@@ -366,7 +372,7 @@ export class AnalysisResultValidator {
     // Root proposes Task knowledge; ValidatorRuntime alone decides durable History.
     if(text(d.stageResult))actions.push({action:'DROP_AGENT_STAGE_RESULT',target:'stageResult'});
     d.stageResult = null;
-    if (d.kind === 'complete') {
+    if (d.resultMode==='analysis' && d.kind === 'complete') {
       const summary=canonicalAnalysisSummary(analysisViewAfterCandidateResolutions(d,evidenceById));
       if (text(d.summary)!==summary) actions.push({action:'CANONICALIZE_SUMMARY',target:'summary'});
       d.summary=summary;
@@ -381,10 +387,6 @@ export class AnalysisResultValidator {
     const after = this.validate(repaired.decision,policyContext);
     return { valid:after.valid, decision:after.decision, violations:after.violations, originalViolations:before.violations, actions:repaired.actions };
   }
-
-
-
-
 }
 
 export function renderAnalysisResult(decision) {
