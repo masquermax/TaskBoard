@@ -1,6 +1,7 @@
 import { TaskStatus, ReadyReason, CompletionReason, WorkUnitStatus } from './types.js';
 import { MAX_TOTAL_ATTEMPTS, capacityRetryDelayMs, capacityWaitingInstruction, classifyRetry, isCapacityUnavailable, retryDelayMs, suspendedInstruction, waitingRetryInstruction, isInterrupted } from './retry-policy.js';
 import { recordTaskDiagnostic } from './runtime-diagnostic.js';
+import { addUnresolvedEffectAttempt, clearUnresolvedEffectAttempt, hasUnresolvedEffectRecovery, recoverStaleEffectState, withPreservedEffectRecovery } from './effect-recovery.js';
 
 function nowIso() { return new Date().toISOString(); }
 
@@ -19,6 +20,9 @@ function snapshotProgressDetail(snapshot) {
   return '当前阶段正在推进。';
 }
 
+function recoveryState(task,nextState={}) {
+  return withPreservedEffectRecovery(task?.executionState,nextState);
+}
 
 export class Scheduler {
   constructor({ repository, taskService, rootRuntime, maxConcurrentTasks = 2, capabilityLimits = null, intervalMs = 1200, retryDelaysMs = null }) {
@@ -49,6 +53,7 @@ export class Scheduler {
     this.timer?.unref?.();
     this.tick().catch(err => console.error('[scheduler]',err));
   }
+
   stop() { if(this.timer)clearInterval(this.timer);this.timer=null; }
 
   beginShutdown() {
@@ -60,9 +65,7 @@ export class Scheduler {
 
   async waitForIdle(timeoutMs = 1200) {
     const deadline = Date.now() + Math.max(0, Number(timeoutMs) || 0);
-    while (this.claimedTasks.size && Date.now() < deadline) {
-      await new Promise(resolveWait => setTimeout(resolveWait, 20));
-    }
+    while (this.claimedTasks.size && Date.now() < deadline) await new Promise(resolveWait => setTimeout(resolveWait, 20));
     return this.claimedTasks.size === 0;
   }
 
@@ -89,6 +92,7 @@ export class Scheduler {
     if(task.status===TaskStatus.READY){
       const suspended=task.ready_reason===ReadyReason.SUSPENDED;
       const retrying=task.ready_reason===ReadyReason.RETRY_WAIT;
+      const recoveryBlocked=hasUnresolvedEffectRecovery(task.executionState);
       const gate=(suspended||retrying)?null:this.executorReadiness();
       const blocked=gate&&gate.ready===false;
       const retryDetail=snapshot?.stage?.workUnits?.find?.(unit=>unit?.status===WorkUnitStatus.RETRY_WAIT)?.detail
@@ -97,29 +101,43 @@ export class Scheduler {
       return {
         taskId,
         state:suspended?'suspended':'queued',
-        summary:suspended?'任务存在挂起项':(retrying?'等待自动重试':(blocked?'等待执行资源':'等待执行')),
-        detail:suspended
-          ? '自动恢复已停止，请在挂起项右上角点击 ↻ 重新尝试。'
-          : (retrying?retryDetail:(blocked?(gate.message||'当前执行资源尚未就绪。'):'Scheduler 会在满足条件后自动开始。')),
+        summary:recoveryBlocked?'现实操作结果待核对':(suspended?'任务存在挂起项':(retrying?'等待自动重试':(blocked?'等待执行资源':'等待执行'))),
+        detail:recoveryBlocked
+          ? '上次现实操作的结果仍不确定；系统已停止自动重放，也不会把未知当成失败。'
+          : (suspended?'自动恢复已停止，请在挂起项右上角点击 ↻ 重新尝试。':(retrying?retryDetail:(blocked?(gate.message||'当前执行资源尚未就绪。'):'Scheduler 会在满足条件后自动开始。'))),
         updatedAt:task.status_entered_at,
         current:snapshot,
         history:this.currentHistory(taskId),
       };
     }
-    if(task.status===TaskStatus.RUNNING){const current=this.rootRuntime.snapshot(taskId);return {taskId,state:'running',summary:'正在执行',detail:snapshotProgressDetail(current),updatedAt:task.status_entered_at,current,history:this.currentHistory(taskId)};}
+    if(task.status===TaskStatus.RUNNING){const runtime=this.rootRuntime.snapshot(taskId);return {taskId,state:'running',summary:'正在执行',detail:snapshotProgressDetail(runtime),updatedAt:task.status_entered_at,current:runtime,history:this.currentHistory(taskId)};}
     if(task.status===TaskStatus.WAITING_HUMAN)return {taskId,state:'waiting',summary:'等待你的必要信息',detail:'当前任务已静止，不会在后台继续消耗 Agent。',updatedAt:task.status_entered_at,current:snapshot,history:this.currentHistory(taskId)};
     const cancelled=task.completion_reason===CompletionReason.CANCELLED;
-    return {taskId,state:'completed',summary:cancelled?'任务已取消':'任务已完成',detail:cancelled?'后续执行已经停止。':'最终结果已经形成。',updatedAt:task.status_entered_at,current:null,history:this.currentHistory(taskId)};
+    const recoveryBlocked=hasUnresolvedEffectRecovery(task.executionState);
+    return {taskId,state:'completed',summary:cancelled?'任务已取消':'任务已完成',detail:recoveryBlocked?'任务生命周期已结束，但仍保留一次未闭合的现实操作恢复事实。':(cancelled?'后续执行已经停止。':'最终结果已经形成。'),updatedAt:task.status_entered_at,current:null,history:this.currentHistory(taskId)};
   }
 
   recoverStaleRunningTasks() {
     const stale=this.repository.listStaleRunningTasks();
     for(const task of stale){
+      const recoveredState=recoverStaleEffectState(task);
+      const unresolved=hasUnresolvedEffectRecovery(recoveredState);
       if(task.cancel_requested_at){
         this.repository.cancelPendingGateway(task.id);
-        this.repository.transitionTask(task.id,TaskStatus.COMPLETED,{completionReason:CompletionReason.CANCELLED,finalResult:task.final_result||'任务已由用户取消。',clearCancel:true,executionState:null});
+        this.repository.transitionTask(task.id,TaskStatus.COMPLETED,{
+          completionReason:CompletionReason.CANCELLED,
+          finalResult:task.final_result||'任务已由用户取消。',
+          clearCancel:true,
+          executionState:unresolved?recoveredState:null,
+        });
+      }else if(unresolved){
+        const state=withPreservedEffectRecovery(recoveredState,{
+          snapshot:recoveredState.snapshot||null,
+          retry:{scope:'effect-recovery',failureCount:0,paused:true,nextAt:null,reason:'现实操作结果未知',error:null},
+        });
+        this.repository.transitionTask(task.id,TaskStatus.READY,{readyReason:ReadyReason.SUSPENDED,executionState:state});
       }else{
-        this.repository.transitionTask(task.id,TaskStatus.READY,{readyReason:ReadyReason.WAITING_RESOURCE,executionState:null});
+        this.repository.transitionTask(task.id,TaskStatus.READY,{readyReason:ReadyReason.WAITING_RESOURCE,executionState:recoveredState});
       }
     }
     return stale.length;
@@ -158,18 +176,30 @@ export class Scheduler {
     return {retry,readyReason,snapshot:{taskId:task.id,actor:null,stage:{id:'root-retry',title:'当前阶段',startedAt:task.status_entered_at,workUnits:[rootUnit]},updatedAt:rootUnit.updatedAt}};
   }
 
+  persistEffectAttempt(taskId,attempt){
+    if(this.shuttingDown){const error=new Error('EFFECT_RECOVERY_PERSISTENCE_UNAVAILABLE_DURING_SHUTDOWN');error.nonRetryable=true;throw error;}
+    const current=this.repository.getTask(taskId);if(!current)throw new Error('TASK_NOT_FOUND');
+    this.repository.setExecutionState(taskId,addUnresolvedEffectAttempt(current.executionState,attempt));
+  }
+
+  clearEffectAttempt(taskId,attemptId){
+    if(this.shuttingDown){const error=new Error('EFFECT_RECOVERY_PERSISTENCE_UNAVAILABLE_DURING_SHUTDOWN');error.nonRetryable=true;throw error;}
+    const current=this.repository.getTask(taskId);if(!current)throw new Error('TASK_NOT_FOUND');
+    this.repository.setExecutionState(taskId,clearUnresolvedEffectAttempt(current.executionState,attemptId));
+  }
+
   async runClaimed(taskId) {
     if(this.shuttingDown||this.claimedTasks.has(taskId))return;
     let task=this.repository.getTask(taskId);if(!task||task.status!==TaskStatus.READY||task.deleted_at)return;
+    if(hasUnresolvedEffectRecovery(task.executionState))return;
     this.claimedTasks.add(taskId);
     let admitted=false;
     const admit=(meta={})=>{
       if(admitted||this.shuttingDown)return;
       const current=this.repository.getTask(taskId);
       if(!current||current.deleted_at)throw new Error('TASK_NOT_FOUND');
-      if(current.status===TaskStatus.READY){
-        task=this.repository.transitionTask(taskId,TaskStatus.RUNNING,{executionState:current.executionState});
-      }else if(current.status===TaskStatus.RUNNING){task=current;}
+      if(current.status===TaskStatus.READY)task=this.repository.transitionTask(taskId,TaskStatus.RUNNING,{executionState:current.executionState});
+      else if(current.status===TaskStatus.RUNNING)task=current;
       else throw new Error('TASK_ADMISSION_STATE_CHANGED');
       admitted=true;this.activeTasks.add(taskId);
       const owner=meta?.role||this.rootRuntime.snapshot(taskId)?.actor?.owner||'root';
@@ -182,103 +212,115 @@ export class Scheduler {
         onProgress:snapshot=>this.setActivity(taskId,admitted?{state:'running',summary:'当前阶段正在推进',detail:snapshotProgressDetail(snapshot),current:snapshot}:{state:'queued',summary:'等待执行资源',detail:'正在等待本轮所需的执行资源；获得真实执行资源前任务仍保持「需执行」。',current:snapshot}),
         onCertifiedTurn:commit=>{if(!this.shuttingDown)this.repository.commitCertifiedTurn(taskId,commit);},
         onTaskContractAuthority:authority=>{if(this.shuttingDown){const error=new Error('TASK_CONTRACT_PERSISTENCE_UNAVAILABLE_DURING_SHUTDOWN');error.nonRetryable=true;throw error;}this.repository.commitTaskContractAuthority(taskId,authority);},
-        onWorkReceipt:receipt=>{if(this.shuttingDown){const error=new Error('WORK_RECEIPT_PERSISTENCE_UNAVAILABLE_DURING_SHUTDOWN');error.nonRetryable=true;throw error;}this.repository.commitWorkReceipt(taskId,receipt);},
+        onEffectAttempt:attempt=>this.persistEffectAttempt(taskId,attempt),
+        onEffectAttemptCleared:attemptId=>this.clearEffectAttempt(taskId,attemptId),
+        onWorkReceipt:receipt=>{
+          if(this.shuttingDown){const error=new Error('WORK_RECEIPT_PERSISTENCE_UNAVAILABLE_DURING_SHUTDOWN');error.nonRetryable=true;throw error;}
+          this.repository.commitWorkReceipt(taskId,receipt);
+          if(receipt?.effectAttemptId)this.clearEffectAttempt(taskId,receipt.effectAttemptId);
+        },
         onWorkReceiptsConsumed:ids=>{if(!this.shuttingDown)this.repository.consumeWorkReceipts(taskId,ids);},
         onProgressCommit:commit=>{if(this.shuttingDown)return;const history=this.repository.getProgressHistory(taskId);if(history.some(item=>item.title===commit.title&&item.detail===commit.detail))return;this.repository.commitProgressHistory(taskId,commit);},
         onStageCompleted:()=>{},
       });
 
-      // Shutdown may close persistence after a bounded wait. If an executor ignores
-      // interruption and resolves later, never touch repository state after that boundary.
       if(this.shuttingDown){this.rootRuntime.discardSession(taskId);return;}
       let current=this.repository.getTask(taskId);if(!current)return;
       if(current.cancel_requested_at||outcome.kind==='cancelled'){
         this.ensureQuiescent(taskId);
         this.rootRuntime.discardSession(taskId);
         this.repository.cancelPendingGateway(taskId);
-        const done=this.repository.transitionTask(taskId,TaskStatus.COMPLETED,{completionReason:CompletionReason.CANCELLED,finalResult:current.final_result||'任务已由用户取消，后续执行已停止。',clearCancel:true,executionState:null});
-        this.setActivity(taskId,{state:'completed',summary:'任务已取消',detail:'Root 已完成收尾，后续执行已停止。',current:null});
+        const unresolved=hasUnresolvedEffectRecovery(current.executionState);
+        const done=this.repository.transitionTask(taskId,TaskStatus.COMPLETED,{completionReason:CompletionReason.CANCELLED,finalResult:current.final_result||'任务已由用户取消，后续执行已停止。',clearCancel:true,executionState:unresolved?current.executionState:null});
+        this.setActivity(taskId,{state:'completed',summary:'任务已取消',detail:unresolved?'任务已取消；未闭合的现实操作恢复事实仍被保留，不会被当成未发生。':'Root 已完成收尾，后续执行已停止。',current:null});
+        if(!unresolved)this.rootRuntime.cleanupTaskWorkspace?.(taskId);
         return done;
       }
 
       if(outcome.kind==='goal_satisfied'){
         if(!admitted){const error=new Error('EXECUTOR_START_NOT_REPORTED');error.nonRetryable=true;throw error;}
         this.ensureQuiescent(taskId);
+        current=this.repository.getTask(taskId);if(!current)return;
+        if(hasUnresolvedEffectRecovery(current.executionState)){
+          const state=recoveryState(current,{snapshot:current.executionState?.snapshot||null,retry:{scope:'effect-recovery',failureCount:0,paused:true,nextAt:null,reason:'现实操作结果未知',error:null}});
+          const ready=this.repository.transitionTask(taskId,TaskStatus.READY,{readyReason:ReadyReason.SUSPENDED,executionState:state});
+          this.setActivity(taskId,{state:'suspended',summary:'现实操作结果待核对',detail:'Completion 已满足，但旧现实操作仍可能继续改变结果；系统不会在恢复事实闭合前宣告执行收尾。',current:state.snapshot||null});
+          this.rootRuntime.discardSession(taskId);
+          return ready;
+        }
         const proposal=outcome.proposal||{};
         const done=this.repository.transitionTask(taskId,TaskStatus.COMPLETED,{completionReason:CompletionReason.SUCCESS,finalResult:proposal.finalResult,lastStageResult:proposal.stageResult,clearCancel:true,executionState:null});
         this.setActivity(taskId,{state:'completed',summary:'任务已完成',detail:proposal.summary||'CompletionEvaluator 已确认 governed obligations 满足。',current:null});
         this.rootRuntime.cleanupTaskWorkspace?.(taskId);
         return done;
       }
+
       if(outcome.kind==='needs_human'){
         if(!admitted){const error=new Error('EXECUTOR_START_NOT_REPORTED');error.nonRetryable=true;throw error;}
         this.ensureQuiescent(taskId);
         const withGateway=this.repository.createGatewayRecord(taskId,outcome.gateway);
         const createdGateway=withGateway?.pendingGateway||null;
         recordTaskDiagnostic('human-gateway-created',{taskId,gatewayId:createdGateway?.id||null,targetGapId:createdGateway?.targetGapId??createdGateway?.target_gap_id??outcome.gateway?.targetGapId??outcome.gateway?.gapId??null,optionCount:Array.isArray(createdGateway?.options)?createdGateway.options.length:Array.isArray(outcome.gateway?.options)?outcome.gateway.options.length:0});
-        const waiting=this.repository.transitionTask(taskId,TaskStatus.WAITING_HUMAN,{lastStageResult:outcome.stageResult,executionState:{snapshot:outcome.snapshot||null}});
+        current=this.repository.getTask(taskId);
+        const state=recoveryState(current,{snapshot:outcome.snapshot||null});
+        const waiting=this.repository.transitionTask(taskId,TaskStatus.WAITING_HUMAN,{lastStageResult:outcome.stageResult,executionState:state});
         this.setActivity(taskId,{state:'waiting',summary:'等待你的必要信息',detail:'Root 已将执行收敛到静止，收到回复前不会继续执行。',current:outcome.snapshot||null});
         return waiting;
       }
-      if(outcome.kind==='waiting_resource'){
+
+      if(outcome.kind==='waiting_resource'||outcome.kind==='retry_wait'){
         this.ensureQuiescent(taskId);
-        const state={snapshot:outcome.snapshot,retry:{scope:'work-unit',failureCount:0,paused:false,nextAt:new Date(outcome.retryAt).toISOString(),reason:outcome.reason,error:null}};
-        const ready=admitted
-          ? this.repository.transitionTask(taskId,TaskStatus.READY,{readyReason:ReadyReason.WAITING_RESOURCE,executionState:state})
-          : this.repository.touchTask(taskId,{readyReason:ReadyReason.WAITING_RESOURCE,executionState:state});
-        this.setActivity(taskId,{state:'queued',summary:'等待执行资源',detail:'当前没有 Agent 在执行；资源可用后 Scheduler 会自动继续。',current:outcome.snapshot});
+        current=this.repository.getTask(taskId);
+        const retrying=outcome.kind==='retry_wait';
+        const state=recoveryState(current,{snapshot:outcome.snapshot,retry:{scope:'work-unit',failureCount:0,paused:false,nextAt:new Date(outcome.retryAt).toISOString(),reason:outcome.reason,error:null}});
+        const readyReason=retrying?ReadyReason.RETRY_WAIT:ReadyReason.WAITING_RESOURCE;
+        const ready=admitted?this.repository.transitionTask(taskId,TaskStatus.READY,{readyReason,executionState:state}):this.repository.touchTask(taskId,{readyReason,executionState:state});
+        this.setActivity(taskId,{state:'queued',summary:retrying?'等待自动重试':'等待执行资源',detail:retrying?'上一轮执行已失败；系统会在错峰等待后自动重试。':'当前没有 Agent 在执行；资源可用后 Scheduler 会自动继续。',current:outcome.snapshot});
         return ready;
       }
-      if(outcome.kind==='retry_wait'){
-        this.ensureQuiescent(taskId);
-        const state={snapshot:outcome.snapshot,retry:{scope:'work-unit',failureCount:0,paused:false,nextAt:new Date(outcome.retryAt).toISOString(),reason:outcome.reason,error:null}};
-        const ready=admitted
-          ? this.repository.transitionTask(taskId,TaskStatus.READY,{readyReason:ReadyReason.RETRY_WAIT,executionState:state})
-          : this.repository.touchTask(taskId,{readyReason:ReadyReason.RETRY_WAIT,executionState:state});
-        this.setActivity(taskId,{state:'queued',summary:'等待自动重试',detail:'上一轮执行已失败；系统会在错峰等待后自动重试。',current:outcome.snapshot});
-        return ready;
-      }
+
       if(outcome.kind==='suspended'){
         this.ensureQuiescent(taskId);
+        current=this.repository.getTask(taskId);
         const suspendedCounts=(outcome.snapshot?.stage?.workUnits||[]).filter(unit=>unit.status===WorkUnitStatus.SUSPENDED).map(unit=>Number(unit.failureCount||0));
         const failureCount=suspendedCounts.length?Math.max(...suspendedCounts):0;
-        const state={snapshot:outcome.snapshot,retry:{scope:'work-unit',failureCount,paused:true,nextAt:null,reason:outcome.reason,error:null}};
-        const ready=admitted
-          ? this.repository.transitionTask(taskId,TaskStatus.READY,{readyReason:ReadyReason.SUSPENDED,executionState:state})
-          : this.repository.touchTask(taskId,{readyReason:ReadyReason.SUSPENDED,executionState:state});
-        this.setActivity(taskId,{state:'suspended',summary:'当前阶段存在挂起项',detail:'自动恢复已经停止，请按卡片正文指引点击右上角 ↻ 重新尝试。',current:outcome.snapshot});
+        const recoveryBlocked=hasUnresolvedEffectRecovery(current.executionState);
+        const state=recoveryState(current,{snapshot:outcome.snapshot,retry:{scope:recoveryBlocked?'effect-recovery':'work-unit',failureCount,paused:true,nextAt:null,reason:recoveryBlocked?'现实操作结果未知':outcome.reason,error:null}});
+        const ready=admitted?this.repository.transitionTask(taskId,TaskStatus.READY,{readyReason:ReadyReason.SUSPENDED,executionState:state}):this.repository.touchTask(taskId,{readyReason:ReadyReason.SUSPENDED,executionState:state});
+        this.setActivity(taskId,{state:'suspended',summary:recoveryBlocked?'现实操作结果待核对':'当前阶段存在挂起项',detail:recoveryBlocked?'上次现实操作可能已经发生；系统已停止自动重放。':'自动恢复已经停止，请按卡片正文指引点击右上角 ↻ 重新尝试。',current:outcome.snapshot});
         return ready;
       }
       throw new Error(`ROOT_OUTCOME_UNSUPPORTED:${outcome.kind}`);
     }catch(error){
-      if(this.shuttingDown){
-        this.rootRuntime.discardSession(taskId);
-        return;
-      }
+      if(this.shuttingDown){this.rootRuntime.discardSession(taskId);return;}
       const current=this.repository.getTask(taskId);
       if(current?.cancel_requested_at&&(isInterrupted(error)||this.rootRuntime.isQuiescent(taskId))){
         this.rootRuntime.discardSession(taskId);
         this.repository.cancelPendingGateway(taskId);
-        this.repository.transitionTask(taskId,TaskStatus.COMPLETED,{completionReason:CompletionReason.CANCELLED,finalResult:current.final_result||'任务已由用户取消，后续执行已停止。',clearCancel:true,executionState:null});
-        this.setActivity(taskId,{state:'completed',summary:'任务已取消',detail:'Root 已完成收尾。',current:null});
-        this.rootRuntime.cleanupTaskWorkspace?.(taskId);
+        const unresolved=hasUnresolvedEffectRecovery(current.executionState);
+        this.repository.transitionTask(taskId,TaskStatus.COMPLETED,{completionReason:CompletionReason.CANCELLED,finalResult:current.final_result||'任务已由用户取消，后续执行已停止。',clearCancel:true,executionState:unresolved?current.executionState:null});
+        this.setActivity(taskId,{state:'completed',summary:'任务已取消',detail:unresolved?'任务已取消；现实恢复事实仍被保留。':'Root 已完成收尾。',current:null});
+        if(!unresolved)this.rootRuntime.cleanupTaskWorkspace?.(taskId);
         return;
       }
       if(current?.status===TaskStatus.READY&&!admitted&&isCapacityUnavailable(error)){
         const delay=capacityRetryDelayMs(this.retryDelaysMs);const nextAt=new Date(Date.now()+delay).toISOString();
-        const snapshot=this.rootRuntime.snapshot(taskId)||{taskId,root:null,stage:null,updatedAt:nowIso()};
-        const state={snapshot,retry:{scope:'root-capacity',failureCount:0,paused:false,nextAt,reason:'等待可用 Root',error:null}};
+        const snapshot=this.rootRuntime.snapshot(taskId)||{taskId,actor:null,stage:null,updatedAt:nowIso()};
+        const state=recoveryState(current,{snapshot,retry:{scope:'root-capacity',failureCount:0,paused:false,nextAt,reason:'等待可用 Root',error:null}});
         this.repository.touchTask(taskId,{readyReason:ReadyReason.WAITING_RESOURCE,executionState:state});
         this.setActivity(taskId,{state:'queued',summary:'等待执行资源',detail:capacityWaitingInstruction(error?.message||''),current:snapshot});
         return;
       }
       if(current?.status===TaskStatus.RUNNING||current?.status===TaskStatus.READY){
+        const recoveryBlocked=hasUnresolvedEffectRecovery(current.executionState);
         const failure=this.retryStateFromFailure(current,error);
         this.rootRuntime.discardSession(taskId);
-        if(current.status===TaskStatus.RUNNING)this.repository.transitionTask(taskId,TaskStatus.READY,{readyReason:failure.readyReason,executionState:{snapshot:failure.snapshot,retry:failure.retry}});
-        else this.repository.touchTask(taskId,{readyReason:failure.readyReason,executionState:{snapshot:failure.snapshot,retry:failure.retry}});
-        if(failure.retry.paused){
-          this.setActivity(taskId,{state:'suspended',summary:'执行已挂起',detail:failure.snapshot.stage.workUnits[0].detail,current:failure.snapshot});
+        const state=recoveryState(current,{snapshot:failure.snapshot,retry:recoveryBlocked?{scope:'effect-recovery',failureCount:failure.retry.failureCount,paused:true,nextAt:null,reason:'现实操作结果未知',error:failure.retry.error}:{...failure.retry}});
+        const readyReason=recoveryBlocked?ReadyReason.SUSPENDED:failure.readyReason;
+        if(current.status===TaskStatus.RUNNING)this.repository.transitionTask(taskId,TaskStatus.READY,{readyReason,executionState:state});
+        else this.repository.touchTask(taskId,{readyReason,executionState:state});
+        if(recoveryBlocked||failure.retry.paused){
+          this.setActivity(taskId,{state:'suspended',summary:recoveryBlocked?'现实操作结果待核对':'执行已挂起',detail:recoveryBlocked?'系统不会把未知结果当成失败重试。':failure.snapshot.stage.workUnits[0].detail,current:failure.snapshot});
           console.error(`[task ${taskId}] execution suspended after ${failure.retry.failureCount} failure(s)`,error);
         }else{
           this.setActivity(taskId,{state:'queued',summary:'等待自动重试',detail:failure.snapshot.stage.workUnits[0].detail,current:failure.snapshot});
@@ -296,7 +338,9 @@ export class Scheduler {
     const pendingGateway=task.pendingGateway||null;
     const gatewayId=this.repository.resolveGatewayRecord(taskId,answer);
     recordTaskDiagnostic('human-gateway-resolved',{taskId,gatewayId,targetGapId:pendingGateway?.targetGapId??pendingGateway?.target_gap_id??null,answerBytes:Buffer.byteLength(answer.trim(),'utf8')});
-    const ready=this.repository.transitionTask(taskId,TaskStatus.READY,{readyReason:ReadyReason.HUMAN_REPLY,executionState:null});
+    const current=this.repository.getTask(taskId);
+    const state=hasUnresolvedEffectRecovery(current?.executionState)?current.executionState:null;
+    const ready=this.repository.transitionTask(taskId,TaskStatus.READY,{readyReason:state?ReadyReason.SUSPENDED:ReadyReason.HUMAN_REPLY,executionState:state});
     this.activities.delete(taskId);
     return ready;
   }
@@ -309,9 +353,10 @@ export class Scheduler {
     const active=this.activeTasks.has(taskId);
     if(!active&&this.rootRuntime.isQuiescent(taskId)){
       this.repository.cancelPendingGateway(taskId);
-      const done=this.repository.transitionTask(taskId,TaskStatus.COMPLETED,{completionReason:CompletionReason.CANCELLED,finalResult:task.final_result||'任务已由用户取消，后续执行已停止。',clearCancel:true,executionState:null});
-      this.setActivity(taskId,{state:'completed',summary:'任务已取消',detail:'任务当前没有执行中的 Agent，已直接结束。',current:null});
-      this.rootRuntime.cleanupTaskWorkspace?.(taskId);
+      const unresolved=hasUnresolvedEffectRecovery(task.executionState);
+      const done=this.repository.transitionTask(taskId,TaskStatus.COMPLETED,{completionReason:CompletionReason.CANCELLED,finalResult:task.final_result||'任务已由用户取消，后续执行已停止。',clearCancel:true,executionState:unresolved?task.executionState:null});
+      this.setActivity(taskId,{state:'completed',summary:'任务已取消',detail:unresolved?'任务生命周期已结束；未闭合的现实操作事实仍保留。':'任务当前没有执行中的 Agent，已直接结束。',current:null});
+      if(!unresolved)this.rootRuntime.cleanupTaskWorkspace?.(taskId);
       return {accepted:true,pending:false,task:done};
     }
     this.rootRuntime.requestQuiesce(taskId);
@@ -335,6 +380,7 @@ export class Scheduler {
 
   retryTask(taskId,workUnitId=null){
     const task=this.repository.getTask(taskId);if(!task||task.deleted_at)throw new Error('TASK_NOT_FOUND');
+    if(hasUnresolvedEffectRecovery(task.executionState))throw new Error('EFFECT_RECOVERY_REQUIRED');
     let reset=false;
     if(workUnitId&&workUnitId!=='root')reset=this.rootRuntime.retryWorkUnit(taskId,workUnitId);
     if(!reset&&task.status===TaskStatus.RUNNING&&workUnitId)throw new Error('RETRY_TARGET_NOT_SUSPENDED');
