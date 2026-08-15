@@ -117,6 +117,7 @@ test('D-023: transport loss after a write effect must not blindly replay the sam
 
 test('D-023: stale effect-capable RUNNING recovery must not authorize fresh actuation before reality is reconciled', async()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-stale-effect-recovery-'));
+  const project=join(dir,'project');mkdirSync(project);
   const db=new JsonTaskDatabase(join(dir,'db.json'));
   const repo=new JsonTaskRepository(db);
   const service=new TaskService(repo);
@@ -135,13 +136,29 @@ test('D-023: stale effect-capable RUNNING recovery must not authorize fresh actu
   };
   const scheduler=new Scheduler({repository:repo,taskService:service,rootRuntime,intervalMs:999999});
   try{
-    const task=repo.createTask({title:'stale write',instruction:'修改项目'});
+    const created=repo.createTask({title:'stale write',instruction:'修改当前项目',temporaryProjectPath:project});
+    const initial=repo.getTask(created.id);
+    const ref=initial.taskContract.requirementRefs[0];
+    repo.commitTaskContractAuthority(created.id,{projectWrite:supportedAuthority(true,ref)});
+    const task=repo.getTask(created.id);
+    const workUnit={
+      id:'WU-WRITE',title:'写入',goal:'修改项目',expectedOutput:'项目已修改',stopCondition:'完成修改后停止',
+      projectAccess:'write',networkAccess:false,skillId:null,dependsOn:[],inputRefs:['project:0'],
+    };
+    const grant=new GovernanceCompiler({rootDir}).compileForRole(task,'subagent',{workUnit}).authorizedGrant;
+    assert.equal(grant.projectAccess,'write','fixture must prove the stale effect-capable Work Unit came through the real D-017 Authority chain');
+    assert.deepEqual(grant.selectedInputRefs,['project:0']);
+
     repo.transitionTask(task.id,TaskStatus.RUNNING,{
       executionState:{
         snapshot:{
           taskId:task.id,
           stage:{id:'stage-1',workUnits:[{
-            id:'WU-WRITE',title:'写入',status:'RUNNING',owner:'subagent',projectAccess:'write',networkAccess:false,
+            ...workUnit,
+            projectAccess:grant.projectAccess,
+            networkAccess:grant.networkAccess,
+            inputRefs:grant.selectedInputRefs,
+            status:'RUNNING',owner:'subagent',
           }]},
         },
       },
