@@ -37,6 +37,22 @@ export function clearUnresolvedEffectAttempt(executionState,attemptId){
   return state;
 }
 
+export function withPreservedEffectRecovery(executionState,nextState={}){
+  const next=stateObject(nextState);
+  const recovery=executionState?.recovery;
+  if(recovery&&typeof recovery==='object')next.recovery=clone(recovery);
+  return next;
+}
+
+export function reconcileEffectReceipts(executionState,workReceipts=[]){
+  let state=stateObject(executionState);
+  const resolvedIds=new Set((Array.isArray(workReceipts)?workReceipts:[])
+    .map(receipt=>text(receipt?.effectAttemptId))
+    .filter(Boolean));
+  for(const id of resolvedIds)state=clearUnresolvedEffectAttempt(state,id);
+  return state;
+}
+
 function recoveredAttempt(task,unit,index){
   const workUnitId=text(unit?.id)||null;
   const knownProject=['none','read','write'].includes(String(unit?.projectAccess||''));
@@ -47,7 +63,7 @@ function recoveredAttempt(task,unit,index){
     signature:null,
     projectAccess:knownProject?String(unit.projectAccess):'unknown',
     networkAccess:knownNetwork?unit.networkAccess:null,
-    inputRefs:[],
+    inputRefs:Array.isArray(unit?.inputRefs)?unit.inputRefs.map(text).filter(Boolean):[],
     admittedAt:text(task?.status_entered_at)||new Date().toISOString(),
     reason:'stale-running-recovery',
     resolved:false,
@@ -56,12 +72,12 @@ function recoveredAttempt(task,unit,index){
 
 /**
  * Reconstruct only the minimum safety fact needed at a process boundary.
- * Existing durable recovery facts win. A clearly Root/Validator or read-only
- * snapshot may resume; a missing/ambiguous snapshot cannot prove that an old
- * effect-capable executor never gained control.
+ * A successful durable WorkReceipt closes its own attempt. Otherwise a clearly
+ * Root/Validator or read-only snapshot may resume; missing/ambiguous state never
+ * proves that an old effect-capable executor failed to obtain control.
  */
 export function recoverStaleEffectState(task){
-  let state=stateObject(task?.executionState);
+  let state=reconcileEffectReceipts(task?.executionState,task?.workReceipts);
   if(hasUnresolvedEffectRecovery(state))return state;
   const snapshot=state?.snapshot;
   if(!snapshot){
@@ -80,9 +96,7 @@ export function recoverStaleEffectState(task){
   }
   if(hasUnresolvedEffectRecovery(state))return state;
   const owner=text(snapshot?.actor?.owner);
-  if((owner==='root'||owner==='validator'||running.length>0))return state;
-  // A stale RUNNING row with a snapshot that proves no current actor/work item is
-  // not evidence of an effect. Anything else remains conservative UNKNOWN.
+  if(owner==='root'||owner==='validator'||running.length>0)return state;
   if(!snapshot?.actor&&!snapshot?.stage)return addUnresolvedEffectAttempt(state,{
     id:`recovered:${text(task?.id)||'task'}:ambiguous`,workUnitId:null,signature:null,
     projectAccess:'unknown',networkAccess:null,inputRefs:[],
