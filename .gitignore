@@ -1,9 +1,12 @@
 node_modules/
 data/taskboard.json
+data/settings.json
 data/*.db
 data/*.db-*
 data/attachments/*
 !data/attachments/.gitkeep
 data/runtime/*
 !data/runtime/.gitkeep
+data/executor-connections/
+*.log
 .DS_Store

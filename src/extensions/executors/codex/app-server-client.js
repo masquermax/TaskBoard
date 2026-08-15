@@ -8,7 +8,7 @@ const DIAGNOSTIC_RPC_METHODS=new Set(['initialize','model/list','account/read','
 function childOptions(extra = {}) {
   return {
     ...extra,
-    env: process.env,
+    env: extra.env ?? process.env,
     windowsHide: true,
     // npm installs Codex as codex.cmd on Windows. cmd/bat shims cannot be
     // launched reliably by child_process without a shell.
@@ -16,8 +16,19 @@ function childOptions(extra = {}) {
   };
 }
 
+function normalizedLaunchProfile(provider) {
+  let value={};
+  try { value=typeof provider==='function' ? (provider()||{}) : {}; } catch { value={}; }
+  return {
+    mode:String(value.mode||'account'),
+    providerId:value.providerId==null ? null : String(value.providerId),
+    args:Array.isArray(value.args) ? value.args.map(String) : [],
+    env:value.env&&typeof value.env==='object' ? value.env : {},
+  };
+}
+
 export class CodexAppServerClient {
-  constructor({ command = process.env.CODEX_COMMAND || process.env.TASKBOARD_CODEX_COMMAND || null, runtimeResolver = null, diagnosticLogger = null, turnEventTimeoutMs = 30 * 60 * 1000, subagentExecutionWindowMs = null } = {}) {
+  constructor({ command = process.env.CODEX_COMMAND || process.env.TASKBOARD_CODEX_COMMAND || null, runtimeResolver = null, diagnosticLogger = null, turnEventTimeoutMs = 30 * 60 * 1000, subagentExecutionWindowMs = null, launchProfileProvider = null } = {}) {
     this.runtimeResolver = runtimeResolver || new CodexRuntimeResolver({ env: process.env });
     if (command) {
       this.runtimeResolver.env = { ...this.runtimeResolver.env, CODEX_COMMAND: command };
@@ -37,6 +48,7 @@ export class CodexAppServerClient {
     this.activeTurnCount = 0;
     this.turnEventTimeoutMs = Math.max(1_000, Number(turnEventTimeoutMs) || 30 * 60 * 1000);
     this.subagentExecutionWindowMs = Math.max(1_000, Number(subagentExecutionWindowMs) || this.turnEventTimeoutMs);
+    this.launchProfileProvider = launchProfileProvider;
   }
 
   recordDiagnostic(event, data = {}) {
@@ -99,13 +111,17 @@ export class CodexAppServerClient {
     const runtime = await this.runtimeResolver.requireReady();
     this.command = runtime.command;
     this.version = runtime.version || null;
+    const launchProfile=normalizedLaunchProfile(this.launchProfileProvider);
+    const launchArgs=[...launchProfile.args,'app-server','--listen','stdio://'];
+    const launchEnv={...process.env,...launchProfile.env};
 
-    this.recordDiagnostic('app-server-spawn',{command:this.command,version:this.version||null,nextGeneration:this.connectionGeneration+1});
+    this.recordDiagnostic('app-server-spawn',{command:this.command,version:this.version||null,nextGeneration:this.connectionGeneration+1,connectionMode:launchProfile.mode,providerId:launchProfile.providerId});
 
-    this.child = spawn(this.command, ['app-server', '--listen', 'stdio://'], childOptions({
+    this.child = spawn(this.command, launchArgs, childOptions({
       stdio: ['pipe', 'pipe', 'pipe'],
+      env: launchEnv,
     }));
-    this.recordDiagnostic('app-server-spawned',{pid:this.child.pid||null,command:this.command,version:this.version||null});
+    this.recordDiagnostic('app-server-spawned',{pid:this.child.pid||null,command:this.command,version:this.version||null,connectionMode:launchProfile.mode,providerId:launchProfile.providerId});
 
     this.child.on('error', error => this.failAll(error));
     this.child.stderr.on('data', chunk => {
@@ -140,7 +156,7 @@ export class CodexAppServerClient {
     this.notify('initialized', {});
     this.initialized = true;
     this.connectionGeneration += 1;
-    this.recordDiagnostic('app-server-ready',{pid:this.child?.pid||null,generation:this.connectionGeneration,version:this.version||null});
+    this.recordDiagnostic('app-server-ready',{pid:this.child?.pid||null,generation:this.connectionGeneration,version:this.version||null,connectionMode:launchProfile.mode,providerId:launchProfile.providerId});
     for (const listener of [...this.generationListeners]) {
       try { listener(this.connectionGeneration); } catch { /* ignore listener errors */ }
     }
