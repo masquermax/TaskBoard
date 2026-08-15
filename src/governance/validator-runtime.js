@@ -1,6 +1,7 @@
 import { ClaimLevel, normalizeAnalysisFields, GapKind, EvidenceSourceType } from './analysis-contract.js';
 import { SourceTraceVerifier } from './source-trace-verifier.js';
 import { hasCertifiedKnowledge, normalizeCertifiedState, normalizeGapResolutions } from './certified-state.js';
+import { hasGovernedCandidateDelta } from './analysis-validator.js';
 
 function text(value) { return String(value == null ? '' : value).trim(); }
 function uniqueStrings(values) { return [...new Set((Array.isArray(values) ? values : []).map(text).filter(Boolean))]; }
@@ -31,8 +32,7 @@ function mergeUniqueById(primary = [], supporting = []) {
   return out;
 }
 function candidateIsEmpty(decision) {
-  const d=copyAnalysis(decision);
-  return !d.evidence.length && !d.claims.length && !d.gaps.length && !d.recommendations.length && !d.steps.length && normalizeGapResolutions(decision?.gapResolutions).length===0;
+  return !hasGovernedCandidateDelta(decision);
 }
 function stateSupportForCandidate(currentState, candidate) {
   const current=normalizeCertifiedState(currentState).current;
@@ -84,10 +84,16 @@ export class ValidatorRuntime {
     this.semanticVerifier = semanticVerifier;
   }
 
-
   reviewRoot({ decision, policyContext = null, attempt = 1, seenKnowledgeKeys = new Set(), task = null, humanGatewayHistory = [], currentState = null, availableEvidence = [] } = {}) {
-    if (!this.analysisValidator || (policyContext?.taskMode !== 'analysis' && decision?.resultMode !== 'analysis')) {
-      return { outcome:'pass', decision, feedback:[], actions:[], commits:[], observedKnowledgeKeys:[] };
+    // Certification ownership is selected by the Candidate content boundary, not
+    // taskMode/resultMode. Pure control/presentation decisions carry no Certified
+    // State delta, but any governed Candidate Delta requires the structural owner.
+    if (!this.analysisValidator) {
+      if (!hasGovernedCandidateDelta(decision)) {
+        return { outcome:'pass', decision, feedback:[], actions:[], commits:[], observedKnowledgeKeys:[] };
+      }
+      const feedback=[{ruleId:'C-003',target:'validator',reason:'Governed Candidate Delta requires Validator structural certification.','action':'REQUIRE_VALIDATOR'}];
+      return { outcome:'reject', decision, feedback, actions:[], commits:[], observedKnowledgeKeys:[] };
     }
     const proposed=copyAnalysis(decision);
     proposed.gapResolutions=normalizeGapResolutions(decision?.gapResolutions);
@@ -186,7 +192,9 @@ export class ValidatorRuntime {
   }
 
   async semanticReviewRoot({ reviewed, policyContext = null, attempt = 1, seenKnowledgeKeys = new Set(), task = null, humanGatewayHistory = [], currentState = null, onProgress = null, onExecutionStarted = null, signal = null } = {}) {
-    if(!this.semanticVerifier||reviewed?.outcome!=='pass'||(policyContext?.taskMode!=='analysis'&&reviewed?.decision?.resultMode!=='analysis'))return reviewed;
+    if(!this.semanticVerifier||reviewed?.outcome!=='pass')return reviewed;
+    // SemanticProofVerifier owns candidate selection. Mode labels never decide
+    // whether a structurally certified Candidate is eligible for semantic proof.
     const semantic=await this.semanticVerifier.review({task,decision:reviewed.decision,policyContext,sourceVerifications:reviewed.sourceVerifications,humanGatewayHistory,currentState,onProgress,onExecutionStarted,signal});
     const feedback=this.semanticFeedback(semantic.reviews);
     if(!feedback.length)return{...reviewed,actions:[...(reviewed.actions||[]),...(semantic.actions||[])]};
