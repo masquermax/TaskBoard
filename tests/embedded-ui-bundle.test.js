@@ -6,16 +6,18 @@ import { buildEmbeddedDocumentExpression, buildEmbeddedTransportExpression, load
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../src/ui');
 
-test('embedded UI bundle reuses the real TaskBoard body/CSS/app without network script tags',()=>{
+test('embedded UI bundle reuses the real TaskBoard body/CSS/app and connection controls without network script tags',()=>{
   const ui=loadEmbeddedTaskboardUi(root);
   assert.match(ui.bodyHtml,/class="app-shell"/);
-  assert.doesNotMatch(ui.bodyHtml,/src=["']\/app\.js/);
+  assert.doesNotMatch(ui.bodyHtml,/src=["']\/(?:app|connection-settings)\.js/);
   assert.match(ui.css,/\.app-shell/);
   assert.doesNotMatch(ui.appExpression,/^\s*import\s/m);
   assert.doesNotMatch(ui.appExpression,/^\s*export\s/m);
   assert.match(ui.appExpression,/function formatTaskTime/);
   assert.match(ui.appExpression,/__TASKBOARD_APP_READY__/);
   assert.match(ui.appExpression,/taskboard-embedded-app\.js/);
+  assert.match(ui.appExpression,/taskboard-embedded-connection-settings\.js/);
+  assert.match(ui.appExpression,/\/api\/executor\/connection/);
 });
 
 test('embedded transport uses CDP binding RPC and chunked file transfer rather than fetch/XHR',()=>{
