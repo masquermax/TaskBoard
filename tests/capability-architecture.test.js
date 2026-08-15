@@ -125,7 +125,7 @@ test('TaskBoard core ships no concrete Skill content; a Skill library is an inje
 });
 
 
-test('Work Unit project write access is explicit and cannot be granted inside an analysis Task',()=>{
+test('Work Unit project write request is structural; taskMode is not an Authority owner',()=>{
   const base={id:'w1',title:'改代码',goal:'修改目标文件',expectedOutput:'返回修改结果',stopCondition:'修改完成并返回后停止',projectAccess:'write',networkAccess:false,skillId:null,dependsOn:[],inputRefs:['project:0']};
   const options={availableInputRefs:['project:0']};
   const analysis=validateDelegationPlan([base],{taskMode:'analysis',...options});
