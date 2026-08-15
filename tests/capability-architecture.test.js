@@ -171,11 +171,10 @@ test('owner-sensitive durable mutations stay behind their declared Capability ow
   assert.deepEqual(callers(/\.repository\.hardDeleteCompletedTask\(/),['src/core/cleanup-controller.js']);
   assert.deepEqual(callers(/\.repository\.setMaintenanceState\(/),['src/core/cleanup-controller.js']);
 
-  // Validator decides History value, but only the Scheduler -> Task Core callback
-  // is allowed to execute the durable History/stage write in the orchestration path.
-  for(const method of ['commitProgressHistory','updateStageResult']){
-    assert.deepEqual(callers(new RegExp(`\\.repository\\.${method}\\(`)),['src/core/scheduler.js'],`${method} must not leak into Agent/Validator code`);
-  }
+  // Validator decides History value, and only Scheduler -> Task Core may persist it.
+  assert.deepEqual(callers(/\.repository\.commitProgressHistory\(/),['src/core/scheduler.js'],'History persistence must remain Scheduler-owned at the call site');
+  // Root-authored stageResult is not a durable knowledge path at all.
+  assert.deepEqual(callers(/\.repository\.updateStageResult\(/),[],'legacy Root stageResult persistence must remain absent');
 });
 
 
