@@ -5,35 +5,25 @@ export function normalizeProjectAccess(value){
   return normalized in ACCESS_RANK?normalized:'none';
 }
 
-export function requestedWorkCapabilities(work={}){
+// A Work Unit must ask only for the minimum capability its authored semantics
+// actually require. Keeping a second "requiredCapabilities" field creates two
+// competing descriptions of the same work and lets them drift apart.
+export function requiredWorkCapabilities(work={}){
   return {
     projectAccess:normalizeProjectAccess(work?.projectAccess),
     networkAccess:work?.networkAccess===true,
   };
 }
 
-export function requiredWorkCapabilities(work={}){
-  const required=work?.requiredCapabilities&&typeof work.requiredCapabilities==='object'?work.requiredCapabilities:null;
-  const requested=requestedWorkCapabilities(work);
-  return {
-    // Fallback preserves pre-D-019 durable/test Work Units. New Codex-authored
-    // Work Units carry requiredCapabilities explicitly in the output schema.
-    projectAccess:normalizeProjectAccess(required?.projectAccess??requested.projectAccess),
-    networkAccess:required?.networkAccess==null?requested.networkAccess:required.networkAccess===true,
-  };
+// Compatibility name for callers/tests that still speak in request terms.
+// Request and required semantics are intentionally the same current contract.
+export function requestedWorkCapabilities(work={}){
+  return requiredWorkCapabilities(work);
 }
 
 export function validateWorkCapabilityContract(work={}){
-  const requested=requestedWorkCapabilities(work);
   const required=requiredWorkCapabilities(work);
-  const issues=[];
-  if(ACCESS_RANK[required.projectAccess]>ACCESS_RANK[requested.projectAccess]){
-    issues.push(`required projectAccess=${required.projectAccess} exceeds requested projectAccess=${requested.projectAccess}`);
-  }
-  if(required.networkAccess&&!requested.networkAccess){
-    issues.push('required networkAccess=true exceeds requested networkAccess=false');
-  }
-  return {requested,required,issues};
+  return {requested:{...required},required,issues:[]};
 }
 
 export function capabilitiesSatisfy(requiredValue={},actualValue={}){
@@ -50,6 +40,6 @@ export function capabilitiesSatisfy(requiredValue={},actualValue={}){
 }
 
 export function workMayMutate(work={}){
-  const actual=requestedWorkCapabilities(work);
-  return actual.projectAccess==='write'||actual.networkAccess===true;
+  const required=requiredWorkCapabilities(work);
+  return required.projectAccess==='write'||required.networkAccess===true;
 }
