@@ -147,7 +147,7 @@ test('D-023: stale effect-capable RUNNING recovery must not authorize fresh actu
     };
     const grant=new GovernanceCompiler({rootDir}).compileForRole(task,'subagent',{workUnit}).authorizedGrant;
     assert.equal(grant.projectAccess,'write','fixture must prove the stale effect-capable Work Unit came through the real D-017 Authority chain');
-    assert.deepEqual(grant.selectedInputRefs,['project:0']);
+    assert.deepEqual(grant.inputRefs,['project:0']);
 
     repo.transitionTask(task.id,TaskStatus.RUNNING,{
       executionState:{
@@ -157,7 +157,7 @@ test('D-023: stale effect-capable RUNNING recovery must not authorize fresh actu
             ...workUnit,
             projectAccess:grant.projectAccess,
             networkAccess:grant.networkAccess,
-            inputRefs:grant.selectedInputRefs,
+            inputRefs:grant.inputRefs,
             status:'RUNNING',owner:'subagent',
           }]},
         },
