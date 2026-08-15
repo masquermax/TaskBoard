@@ -48,7 +48,7 @@ Capabilities:
 - 读取 Task Baseline、Task Input Catalog 的逻辑引用、Current Certified State、新 Subagent Result 与触发当前 Turn 的 Human answer；不取得 Project Scope 文件系统路径、附件本地路径或网络能力。
 - 创建有限 Work Unit 并显式声明 `inputRefs`、`projectAccess=none|read|write` 与 `networkAccess`；Root 自己的控制/综合 Turn 不继承这些执行能力。
 - 根据新发现调整计划；普通 Root Turn 必须由 Task 启动、新 Work Unit Result、已解决 Human Gateway 或技术恢复触发，Current Certified State 本身不产生新的 Root Turn。
-- 当 Current Certified State 仍有 blocking Gap 时，只做受限控制判断：用已有认证证据证明该 Gap 不再阻塞，或为该 Gap 提交 Human Gateway intent；不得继续创建调查 Work Unit。
+- 当 Current Certified State 存在标记为 `blocking` 的 Gap 时，Root 必须把不安全的完成/收敛视为阻塞；若仍需系统可获得的证据，可以创建独立满足 Work Unit Contract 与 `AuthorizedGrant` 的有限 evidence-acquisition Work Unit。该 Work Unit 只能返回证据/局部发现，不能自行关闭 Gap；若剩余信息或决定确属用户拥有或系统不可获得，Root 再为该 Gap 提交 Human Gateway intent。
 - 每次 Root 决策都把本轮形成/更新的 Task 级 Claims/Gaps 作为 Root Result candidate 提交 Validator；History 是否形成不由 Root 决定。
 
 Produces:
