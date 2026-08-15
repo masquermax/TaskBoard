@@ -1,4 +1,4 @@
-# TaskBoard Architecture v0.9.1
+# TaskBoard Architecture v0.9.2
 
 Status: ACTIVE
 

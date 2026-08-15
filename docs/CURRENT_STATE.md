@@ -1,9 +1,9 @@
 # Current State
 
-Status: RECOMPOSITION CANDIDATE
-Release: v0.9.1
+Status: RELEASE CANDIDATE
+Release: v0.9.2
 
-The executable/package identity remains v0.9.1 until the recomposed tree is independently GREEN. This file describes candidate semantics, not a completed v0.9.2 release claim.
+The recomposed tree has passed full Ubuntu/Windows verification plus fresh-unpack proof before release-identity promotion. This candidate is now validating the final v0.9.2 identity set before it may replace `main`.
 
 ## Current truths
 
@@ -33,10 +33,10 @@ Legacy runtime/config names are accepted only at explicit load, error-compatibil
 
 ## Release promotion rule
 
-The candidate may become v0.9.2 only after:
+This candidate may replace `main` only after the final v0.9.2 identity commit passes:
 
-1. cross-platform full verification passes;
-2. fresh-unpack verification passes;
-3. release identity is changed atomically across package/app/release documents;
-4. legacy v0.9.2 Runtime semantics are not reintroduced merely to preserve old branch history;
-5. current-tree slimming removes obsolete process scaffolding without deleting regression proof that protects canonical Owner boundaries.
+1. cross-platform full verification;
+2. fresh-unpack verification;
+3. release-identity consistency;
+4. no reintroduction of legacy v0.9.2 Runtime semantics merely to preserve branch history;
+5. final tree review confirms only intentional recomposition/slimming differences from the previous main.

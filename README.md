@@ -1,4 +1,4 @@
-# TaskBoard Codex v0.9.1
+# TaskBoard Codex v0.9.2
 
 TaskBoard is a local-first AI work board. TaskBoard owns durable Task facts and governed work orchestration; Codex is the first Executor extension.
 
