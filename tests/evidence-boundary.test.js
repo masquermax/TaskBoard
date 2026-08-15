@@ -114,13 +114,13 @@ test('completed analysis publishes only Subagent-collected certified source fact
 });
 
 
-test('analysis Candidate fails closed when ValidatorRuntime is absent',async()=>{
-  const root=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor:{},modelRouter:new ModelRouter(),subagentRuntime:{}});
+test('governed analysis Candidate fails closed when ValidatorRuntime is absent',async()=>{
+  const root=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),validatorRuntime:null,executor:{},modelRouter:new ModelRouter(),subagentRuntime:{}});
   const task={id:'T-NO-VALIDATOR',title:'分析',instruction:'分析',projectScopes:[],attachments:[],references:[]};
   const session=root.createSession(task);
   session.policyContext={taskMode:'analysis'};
   await assert.rejects(
-    root.reviewRootDecision(task,session,{kind:'complete',resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[]},{},{triggerRefs:['task:T-NO-VALIDATOR']}),
+    root.reviewRootDecision(task,session,{kind:'complete',resultMode:'analysis',evidence:[],claims:[],gaps:[{id:'G-1',question:'待确认事实是什么？',reason:'当前缺少证据',kind:'missing_fact',blocking:false,evidenceIds:[]}],recommendations:[],steps:[]},{},{triggerRefs:['task:T-NO-VALIDATOR']}),
     /VALIDATOR_RUNTIME_REQUIRED/
   );
 });
