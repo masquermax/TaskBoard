@@ -1,47 +1,34 @@
-# Verification v0.9.1
+# Verification v0.9.2
 
-Status: RECOMPOSITION CANDIDATE — PENDING
+Status: RELEASE CANDIDATE — FINAL IDENTITY PROOF PENDING
 
-This file records the verification status of the current candidate tree. Git history is the archive for prior release reports and migration/debug process.
+## Verified recomposed tree
 
-## Verified inherited baseline
+The clean v0.9.2 candidate was rebuilt from the current verified Gate B / Provider Connection semantic tree rather than by merging legacy v0.9.2 Runtime history.
 
-The candidate starts from the current Gate B / Provider Connection semantic tree represented by `main @ e286529c184631077fa9e171f7134b5d491509eb`.
+Candidate `acc1b69810fee6ce558bdfddd4ab2856ceb9debe` passed GitHub Actions run `31905306064`:
 
-That baseline was verified on Ubuntu and Windows with **355 / 355 PASS** before recomposition.
+- Ubuntu full `npm run verify`: PASS.
+- Windows full `npm run verify`: PASS.
+- Fresh tracked-files unpack + `npm run verify`: PASS.
 
-The baseline already contains the durable owner/boundary corrections that must not regress:
+The verified candidate includes:
 
-- `GovernanceCompiler` is the single Task-specific Project Authority derivation owner; `taskMode`, role prose, blocking Gap and Executor defaults cannot create write authority.
-- `CompletionEvaluator` is the Goal Satisfaction derivation owner; work occurrence, receipts, UI state and local runtime signals do not become Completion truth.
-- Validator owns Root Candidate certification and the semantic-value decision for History; Task Core owns durable commit.
-- blocking Gaps constrain only their real dependency radius and do not globally revoke separately governed evidence acquisition.
-- Codex connection configuration is rebuilt as extension-local configuration rather than legacy v0.9.2 Runtime ownership.
+- singular `GovernanceCompiler` Project Authority derivation through `AuthorizedGrant`;
+- singular `CompletionEvaluator` Goal Satisfaction derivation;
+- Validator ownership of Candidate certification / History semantic-value decision with Task Core durable commit;
+- blocking Gap constrained to real dependency radius;
+- extension-local Codex connection configuration on the current Gate B architecture;
+- old v0.9.2 UI overflow/spacing safety restored without restoring legacy Runtime ownership;
+- branch-specific goal-regression CI residue removed and replaced by generic cross-platform/fresh-unpack verification;
+- README/current integration docs slimmed and realigned to canonical Owners.
 
-## Candidate recomposition delta
+## Final proof required
 
-This candidate intentionally changes product-tree structure rather than replaying historical commits:
+This commit promotes package/application/document release identity to v0.9.2. It must independently pass the same cross-platform and fresh-unpack verification before it may replace `main`.
 
-- replaces the branch-specific `goal-regression.yml` construction residue with one generic cross-platform Verify workflow plus fresh-unpack proof;
-- restores the old v0.9.2 UI overflow/spacing safety because it is independent product value;
-- keeps current main's newer Completion/UI semantics while adding that layout protection;
-- aligns the documented Codex connection Owner with the extension-owned runtime implementation;
-- reduces README duplication by pointing detailed semantics to canonical Contract/Architecture documents.
-
-Legacy v0.9.2 runtime behavior that conflicts with the current Owner/Authority model is **not** reintroduced. In particular, execution mode does not grant Project authority, blocking Gap does not mean global investigative freeze, and the old stateful first-Root-turn model-routing heuristic is not restored without new evidence.
-
-## Candidate proof required
-
-Before this tree may replace `main` or claim v0.9.2 release status:
-
-1. syntax check passes;
-2. full automated tests pass on Ubuntu and Windows;
-3. fresh-unpack verification passes from a tracked-files archive;
-4. release identity remains internally consistent;
-5. the final v0.9.2 identity change is applied only after the recomposed semantic tree is GREEN.
-
-Until those checks complete, this document does not claim the recomposed candidate is verified.
+Until that final run succeeds, v0.9.2 remains a release candidate rather than a promoted main/release truth.
 
 ## Slimming rule
 
-Slimming removes obsolete/duplicate current-tree responsibility, not proof merely because it looks old. Regression tests that protect canonical Owner boundaries remain valuable even when their originating bug is historical. Temporary migration scripts, branch-specific CI, superseded runtime paths and duplicated prose should not remain in the current tree once their durable semantic consequence has a proper owner and proof surface.
+Slimming removes obsolete or duplicate current-tree responsibility, not proof merely because it originated from an old defect. Regression tests that protect canonical Owner boundaries stay. Temporary migration scripts, branch-specific CI, superseded Runtime paths and duplicated prose do not stay once their durable semantic consequence has a proper Owner and proof surface.

@@ -1,4 +1,4 @@
-# TaskBoard Specification v0.9.1
+# TaskBoard Specification v0.9.2
 
 Status: ACTIVE
 

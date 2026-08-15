@@ -1,4 +1,4 @@
-# Codex Integration v0.9.1
+# Codex Integration v0.9.2
 
 Codex is TaskBoard's first extension implementation. It does not define Task Core architecture and it does not acquire Task authority by exposing operational capability.
 
