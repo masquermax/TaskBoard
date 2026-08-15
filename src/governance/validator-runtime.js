@@ -92,7 +92,7 @@ export class ValidatorRuntime {
       if (!hasGovernedCandidateDelta(decision)) {
         return { outcome:'pass', decision, feedback:[], actions:[], commits:[], observedKnowledgeKeys:[] };
       }
-      const feedback=[{ruleId:'C-003',target:'validator',reason:'Governed Candidate Delta requires Validator structural certification.','action':'REQUIRE_VALIDATOR'}];
+      const feedback=[{ruleId:'C-003',target:'validator',reason:'Governed Candidate Delta requires Validator structural certification.',action:'REQUIRE_VALIDATOR'}];
       return { outcome:'reject', decision, feedback, actions:[], commits:[], observedKnowledgeKeys:[] };
     }
     const proposed=copyAnalysis(decision);
@@ -245,6 +245,7 @@ export class ValidatorRuntime {
     const d = copyAnalysis(decision);
     const unseenClaims = [];
     const unseenGaps = [];
+    const resolutions = normalizeGapResolutions(d.gapResolutions);
 
     for (const claim of d.claims) {
       if (claim?.level !== ClaimLevel.CONFIRMED || !text(claim?.id) || !text(claim?.statement)) continue;
@@ -257,29 +258,39 @@ export class ValidatorRuntime {
       if (!seenKnowledgeKeys.has(key)) unseenGaps.push({ item:gap, key });
     }
 
-    // History is a Root-level knowledge boundary, not an Evidence-source bucket and
-    // not Subagent activity. One certified Root turn yields at most one concise
-    // boundary; no new Task knowledge means no History entry.
-    if (!unseenClaims.length && !unseenGaps.length) return { commits:[], observedKnowledgeKeys:[] };
+    // Validator owns the semantic-value decision for History. Task Core may later
+    // reject an invalid state transition, but no downstream component may derive a
+    // different History sentence from the same Candidate/Turn.
+    if (!unseenClaims.length && !unseenGaps.length && !resolutions.length) {
+      if (decision && typeof decision==='object') delete decision.__historyCommit;
+      return { commits:[], observedKnowledgeKeys:[] };
+    }
 
     const claimTexts = unseenClaims.map(({item})=>text(item.statement)).filter(Boolean);
     const gapTexts = unseenGaps.map(({item})=>text(item.question).replace(/^待确认[：:]\s*/,'')).filter(Boolean);
+    const resolvedTexts = resolutions.map(item=>text(item.reason)).filter(Boolean);
     const detailParts = [];
     if (claimTexts.length) detailParts.push(claimTexts.join('；'));
     if (gapTexts.length) detailParts.push(`待确认：${gapTexts.join('；')}`);
+    if (resolvedTexts.length) detailParts.push(`已闭合：${resolvedTexts.join('；')}`);
     const title = claimTexts.length && gapTexts.length
       ? '阶段结论已收敛'
       : claimTexts.length
         ? '阶段事实已确认'
-        : '待确认边界已收敛';
+        : resolvedTexts.length && !gapTexts.length
+          ? '待确认边界已闭合'
+          : '待确认边界已收敛';
     const sourceIds = [
       ...unseenClaims.map(({item})=>text(item.id)),
       ...unseenGaps.map(({item})=>text(item.id)),
-    ];
+      ...resolutions.map(item=>text(item.gapId)),
+    ].filter(Boolean);
     const observedKnowledgeKeys = [
       ...unseenClaims.map(({key})=>key),
       ...unseenGaps.map(({key})=>key),
     ];
-    return { commits:[{ title, detail:detailParts.join('；'), sourceIds }], observedKnowledgeKeys };
+    const commit={ title, detail:detailParts.join('；'), sourceIds };
+    if (decision && typeof decision==='object') decision.__historyCommit={...commit,sourceIds:[...sourceIds]};
+    return { commits:[commit], observedKnowledgeKeys };
   }
 }

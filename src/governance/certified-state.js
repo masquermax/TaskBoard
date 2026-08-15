@@ -91,6 +91,20 @@ function mergeById(target, incoming, { kind, issues, delta, immutable = false, r
   }
 }
 
+function acceptedHistoryCommit(decision, delta) {
+  const raw=decision?.__historyCommit;
+  if(!raw||typeof raw!=='object')return null;
+  const title=text(raw.title),detail=text(raw.detail),sourceIds=uniqueStrings(raw.sourceIds);
+  if(!title||!detail||!sourceIds.length)return null;
+  const accepted=new Set([
+    ...(delta.claims||[]).map(item=>text(item?.id)),
+    ...(delta.gaps||[]).map(item=>text(item?.id)),
+    ...(delta.gapResolutions||[]).map(item=>text(item?.gapId)),
+  ].filter(Boolean));
+  if(sourceIds.some(id=>!accepted.has(id)))return null;
+  return {title,detail,sourceIds};
+}
+
 export function applyCertifiedDelta(state, decision, { triggerRefs = [], committedAt = new Date().toISOString() } = {}) {
   const base = normalizeCertifiedState(state);
   const current = clone(base.current);
@@ -139,11 +153,13 @@ export function applyCertifiedDelta(state, decision, { triggerRefs = [], committ
   if (!changed) return { state:base, current:base.current, delta, turnNode:null, issues };
 
   const resultVersion = base.version + 1;
+  const historyCommit=acceptedHistoryCommit(decision,delta);
   const turnNode = {
     id:`TURN-${pad(resultVersion)}`,
     baseVersion:base.version,
     triggerRefs:uniqueStrings(triggerRefs),
     delta:clone(delta),
+    ...(historyCommit?{historyCommit:clone(historyCommit)}:{}),
     resultVersion,
     committedAt,
   };
@@ -170,23 +186,10 @@ export function decisionFromCertifiedState(state, control = {}) {
   };
 }
 
+// Compatibility accessor for RootRuntime. History semantic-value derivation belongs
+// to ValidatorRuntime; Task Core only carries the already-owned candidate through
+// the accepted Certified Delta. A Turn without Validator-owned History has none.
 export function deriveHistoryFromTurn(turnNode) {
-  if (!turnNode?.delta) return null;
-  const confirmed = (turnNode.delta.claims || []).filter(item => item?.level === ClaimLevel.CONFIRMED).map(item => text(item?.statement)).filter(Boolean);
-  const gaps = (turnNode.delta.gaps || []).map(item => text(item?.question).replace(/^待确认[：:]\s*/, '')).filter(Boolean);
-  const resolved = (turnNode.delta.gapResolutions || []).map(item => text(item?.reason)).filter(Boolean);
-  if (!confirmed.length && !gaps.length && !resolved.length) return null;
-  const parts = [];
-  if (confirmed.length) parts.push(confirmed.join('；'));
-  if (gaps.length) parts.push(`待确认：${gaps.join('；')}`);
-  if (resolved.length) parts.push(`已闭合：${resolved.join('；')}`);
-  const title = confirmed.length && gaps.length ? '阶段结论已收敛'
-    : confirmed.length ? '阶段事实已确认'
-      : resolved.length && !gaps.length ? '待确认边界已闭合'
-        : '待确认边界已收敛';
-  return { title, detail:parts.join('；'), sourceIds:[
-    ...(turnNode.delta.claims || []).map(item=>text(item?.id)).filter(Boolean),
-    ...(turnNode.delta.gaps || []).map(item=>text(item?.id)).filter(Boolean),
-    ...(turnNode.delta.gapResolutions || []).map(item=>text(item?.gapId)).filter(Boolean),
-  ] };
+  const value=turnNode?.historyCommit;
+  return value&&typeof value==='object'?clone(value):null;
 }
