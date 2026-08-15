@@ -11,9 +11,19 @@ test('Gate B: AppServerClient does not derive action policy from role identity',
   assert.doesNotMatch(text,/role\s*===\s*['"]subagent['"][\s\S]{0,220}type\s*===\s*['"](?:commandExecution|fileChange|webSearch)['"]/);
 });
 
-test('Gate B: RootRuntime does not use derived taskMode as a Runtime semantic/control source',()=>{
-  const text=source('src/core/root-runtime.js');
-  assert.doesNotMatch(text,/policyContext\?\.taskMode|policyContext\.taskMode/);
+test('Gate B: Candidate certification and durable History ownership are mode-independent',()=>{
+  const root=source('src/core/root-runtime.js');
+  const validator=source('src/governance/validator-runtime.js');
+  const analysis=source('src/governance/analysis-validator.js');
+  const scheduler=source('src/core/scheduler.js');
+
+  for(const text of [root,validator,analysis]){
+    assert.doesNotMatch(text,/policyContext\?\.taskMode|policyContext\.taskMode/);
+  }
+  assert.doesNotMatch(validator,/decision\?\.resultMode\s*(?:===|!==)\s*['"]analysis['"]/);
+  assert.doesNotMatch(validator,/reviewed\?\.decision\?\.resultMode\s*(?:===|!==)\s*['"]analysis['"]/);
+  assert.doesNotMatch(root,/onStageResult|lastCommittedStageResult\s*\|\|\s*decision\.stageResult/);
+  assert.doesNotMatch(scheduler,/onStageResult\s*:/);
 });
 
 test('Gate B: construction-only goal-authority patch scaffolding is absent from the active tree',()=>{
