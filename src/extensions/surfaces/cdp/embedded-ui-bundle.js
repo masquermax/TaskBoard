@@ -3,25 +3,34 @@ import { join } from 'node:path';
 
 function extractBody(html){
   const match=/<body[^>]*>([\s\S]*?)<\/body>/i.exec(html);if(!match)throw new Error('TaskBoard UI body not found');
-  return match[1].replace(/<script\b[^>]*\bsrc=["']\/app\.js["'][^>]*><\/script>/i,'');
+  return match[1].replace(/<script\b[^>]*\bsrc=["']\/(?:app|connection-settings)\.js["'][^>]*><\/script>/gi,'');
 }
 function formatTimeSource(source){
   const value=source.trim().replace(/^export\s+/m,'');
   if(!/function\s+formatTaskTime\s*\(/.test(value))throw new Error('TaskBoard time formatter could not be bundled');
   return value;
 }
-function appSource(source,timeSource){
-  const replaced=source.replace(/^import\s+\{\s*formatTaskTime\s+as\s+formatPhaseTime\s*\}\s+from\s+["']\.\/time\.js["'];?\s*/m,`${timeSource}\nconst formatPhaseTime=formatTaskTime;\n`);
-  if(replaced===source)throw new Error('TaskBoard app module import could not be bundled');
-  return `(async()=>{\n${replaced}\n})()\n//# sourceURL=taskboard-embedded-app.js`;
+function moduleExpression(source,{timeSource=null,name='module'}={}){
+  let value=source;
+  if(timeSource){
+    value=source.replace(/^import\s+\{\s*formatTaskTime\s+as\s+formatPhaseTime\s*\}\s+from\s+["']\.\/time\.js["'];?\s*/m,`${timeSource}\nconst formatPhaseTime=formatTaskTime;\n`);
+    if(value===source)throw new Error('TaskBoard app module import could not be bundled');
+  }
+  if(/^\s*(?:import|export)\s/m.test(value))throw new Error(`TaskBoard ${name} module contains an unsupported module boundary`);
+  return `(async()=>{\n${value}\n})()\n//# sourceURL=taskboard-embedded-${name}.js`;
 }
 
 export function loadEmbeddedTaskboardUi(uiRoot){
   const html=readFileSync(join(uiRoot,'index.html'),'utf8');
   const css=readFileSync(join(uiRoot,'app.css'),'utf8');
   const app=readFileSync(join(uiRoot,'app.js'),'utf8');
+  const connection=readFileSync(join(uiRoot,'connection-settings.js'),'utf8');
   const time=readFileSync(join(uiRoot,'time.js'),'utf8');
-  return{bodyHtml:extractBody(html),css,appExpression:appSource(app,formatTimeSource(time))};
+  return{
+    bodyHtml:extractBody(html),
+    css,
+    appExpression:`${moduleExpression(app,{timeSource:formatTimeSource(time),name:'app'})}\n${moduleExpression(connection,{name:'connection-settings'})}`,
+  };
 }
 
 export function buildEmbeddedTransportExpression({host='codex',baseUrl='http://127.0.0.1:4317',bindingName='__taskboardHostRpcV1',rpcToken=''}={}){
