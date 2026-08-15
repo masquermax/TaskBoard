@@ -37,7 +37,6 @@ const rootSchema = {
   additionalProperties:false,
 };
 
-
 const validatorSchema = {
   type:'object',
   properties:{
@@ -72,8 +71,6 @@ const subagentSchema = {
   required:['delegationId','result','evidence','findings','discoveries','blocker','uncertainty'],
   additionalProperties:false,
 };
-
-
 
 function isSupportedLocalImage(attachment){const ext=extname(attachment.name||'').toLowerCase();return ['.png','.jpg','.jpeg','.gif','.webp'].includes(ext)||['image/png','image/jpeg','image/gif','image/webp'].includes(String(attachment.mimeType||'').toLowerCase());}
 function safeParse(text){const parsed=JSON.parse(text);if(!parsed||typeof parsed!=='object')throw new Error('Invalid structured Codex response');return parsed;}
@@ -143,9 +140,15 @@ export class CodexExecutor extends ExecutorPort {
     const projectAccess=String(grant.projectAccess||'none');
     if(!['none','read','write'].includes(projectAccess)){const error=new Error(`AUTHORIZED_GRANT_PROJECT_ACCESS_INVALID: ${projectAccess}`);error.nonRetryable=true;throw error;}
     if(projectAccess!=='none'&&!paths.length){const error=new Error('AUTHORIZED_GRANT_SCOPE_MISMATCH: Project access was granted without a selected Project input.');error.nonRetryable=true;throw error;}
+    if(grant.networkAccess===true&&this.networkAccess!==true){
+      const error=new Error('RUNTIME_CAPABILITY_UNAVAILABLE: this Codex Executor cannot realize the Work Unit network requirement.');
+      error.nonRetryable=true;
+      error.runtimeUnavailable=true;
+      throw error;
+    }
     const runtimeWorkspaceRoots=[scratch,...(projectAccess!=='none'?paths:[])];
     const fileAccess=projectAccess==='write'?'write':'read';
-    const networkAccess=grant.networkAccess===true&&this.networkAccess===true;
+    const networkAccess=grant.networkAccess===true;
     const permissionProfile='taskboard_runtime';
     const suppressEnvironmentContext=grant.environmentAccess==='none';
     const runtimeConfig={
@@ -200,7 +203,7 @@ Turn protocol:
 - When a Work Unit already supplies an Evidence id, cite that id from Claims/Gaps instead of rewriting it. Root evidence[] is only for Human/Reference material already present in Root context; project/attachment/search/runtime Evidence belongs to bounded Subagent work.
 - Recommendations/Steps are current presentation over certified knowledge, not durable memory. On kind=complete return only the concise recommendations/steps that should be shown now.
 - gapResolutions[] closes an existing Gap by id with reason + evidenceIds; omitted committed items remain unchanged. Resolved Human Gateway answers listed below already have system-owned DIRECT evidenceId values: cite those ids from Claims/Gap resolutions and do not copy the Human answer into evidence[]. Runtime will independently submit the bound Gateway Gap for proof even if Root omits that resolution.
-- kind=delegate emits NEW bounded Work Units in delegations[] with goal, expectedOutput, stopCondition, projectAccess, networkAccess, dependsOn, inputRefs and optional skillId. inputRefs selects only the Task inputs needed by that Work Unit from the catalog below; use [] when no Task source is needed. Runtime separately enforces capacity and grants only the declared Project/network capabilities.
+- kind=delegate emits NEW bounded Work Units in delegations[] with goal, expectedOutput, stopCondition, projectAccess, networkAccess, dependsOn, inputRefs and optional skillId. projectAccess/networkAccess must be the minimum capabilities actually required by that Work Unit; Runtime may deny an unrealizable plan but must not silently weaken these semantics. inputRefs selects only the Task inputs needed by that Work Unit from the catalog below; use [] when no Task source is needed.
 - kind=human_gateway is only for one unresolved blocking Gap that truly requires human information/choice. Set gateway.gapId to that exact Gap id and gateway.question to that Gap's exact certified question; context/options may explain choices but may not replace the question with a broader/narrower one. Non-blocking unknowns remain Gaps. kind=complete emits a completion candidate.
 - Work Unit findings are local execution output, not Task truth. Root decides which supported findings become this Turn's Claims/Gaps/Recommendations; any Task-knowledge change must appear in this Turn's candidate delta even when the next control action is delegate.
 
@@ -269,7 +272,6 @@ Work Unit: ${JSON.stringify(delegation,null,2)}
 
 Return only the structured Subagent result.`;
   }
-
 
   async runRoot(request){const scope=this.executionScope(request.task,request.policyContext,{role:'root'});const text=await this.client.runTurn({...scope,prompt:this.rootPrompt({...request,scratchPath:scope.scratch||null}),inputItems:[],outputSchema:rootSchema,model:request.modelPolicy?.model||null,reasoningEffort:request.modelPolicy?.reasoningEffort||null,networkAccess:scope.networkAccess,onProgress:request.onProgress||null,onExecutionStarted:request.onExecutionStarted||null,signal:request.signal||null,diagnosticContext:{taskId:request.task?.id||null,workUnitId:null,role:'root',routeReason:request.modelPolicy?.routeReason||null,configuredDefaultModel:request.modelPolicy?.configuredDefaultModel||null}});return safeParse(text);}
   async runSubagent(request){const scope=this.executionScope(request.task,request.policyContext,{workUnitId:request.delegation?.id});const stagedTask=this.stageSelectedAttachments(request.task,scope.scratch);const text=await this.client.runTurn({...scope,prompt:this.subagentPrompt({...request,task:stagedTask}),inputItems:this.attachmentInputs(stagedTask),outputSchema:subagentSchema,model:request.modelPolicy?.model||null,reasoningEffort:request.modelPolicy?.reasoningEffort||null,onProgress:request.onProgress||null,onExecutionStarted:request.onExecutionStarted||null,signal:request.signal||null,stopCondition:request.delegation?.stopCondition||null,diagnosticContext:{taskId:request.task?.id||null,workUnitId:request.delegation?.id||null,role:'subagent',projectAccess:scope.projectAccess,networkAccess:scope.networkAccess,routeReason:request.modelPolicy?.routeReason||null,configuredDefaultModel:request.modelPolicy?.configuredDefaultModel||null}});return safeParse(text);}
