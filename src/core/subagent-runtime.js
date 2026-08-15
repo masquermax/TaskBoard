@@ -34,9 +34,7 @@ export class SubagentRuntime {
     });
 
     const rawEvidence=Array.isArray(raw?.evidence)?raw.evidence:[];
-    const traced=policyContext?.taskMode==='analysis'
-      ? this.sourceTraceVerifier.enforce({task:scopedTask,evidence:rawEvidence,humanGatewayHistory:[]})
-      : {evidence:rawEvidence};
+    const traced=this.sourceTraceVerifier.enforce({task:scopedTask,evidence:rawEvidence,humanGatewayHistory:[]});
     const evidence=Array.isArray(traced.evidence)?traced.evidence:[];
     const evidenceIds=new Set(evidence.map(item=>text(item?.id)).filter(Boolean));
     const findings=(Array.isArray(raw?.findings)?raw.findings:[]).map(item=>({
