@@ -19,6 +19,7 @@ function snapshotProgressDetail(snapshot) {
   return '当前阶段正在推进。';
 }
 
+
 export class Scheduler {
   constructor({ repository, taskService, rootRuntime, maxConcurrentTasks = 2, capabilityLimits = null, intervalMs = 1200, retryDelaysMs = null }) {
     this.repository = repository;
@@ -187,6 +188,8 @@ export class Scheduler {
         onStageCompleted:()=>{},
       });
 
+      // Shutdown may close persistence after a bounded wait. If an executor ignores
+      // interruption and resolves later, never touch repository state after that boundary.
       if(this.shuttingDown){this.rootRuntime.discardSession(taskId);return;}
       let current=this.repository.getTask(taskId);if(!current)return;
       if(current.cancel_requested_at||outcome.kind==='cancelled'){
