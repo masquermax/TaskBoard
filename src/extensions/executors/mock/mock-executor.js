@@ -13,4 +13,8 @@ export class MockExecutor extends ExecutorPort {
     return{kind:'complete',summary:'Mock execution completed the TaskBoard control flow.',stageResult:'Mock 仅验证执行链，不产生业务事实。',finalResult:mode==='execution'?`Mock 已完成执行链：${task.title}`:null,...empty(mode),gateway:null,delegations:[]};
   }
   async runSubagent({delegation,onProgress=null,onExecutionStarted=null,signal=null}){onExecutionStarted?.({mock:true});onProgress?.({summary:'Mock 正在执行 Subagent Work Unit',detail:delegation.title||''});await wait(50,signal);return{delegationId:delegation.id,result:`Mock Subagent 完成执行链：${delegation.title}`,evidence:[],findings:[],discoveries:[],blocker:null,uncertainty:null};}
+  async runValidator({candidates,onProgress=null,onExecutionStarted=null,signal=null}){
+    onExecutionStarted?.({mock:true});onProgress?.({summary:'Mock Validator 正在认证',detail:'用于验证 TaskBoard semantic-proof 调用链。'});await wait(20,signal);
+    return{reviews:(Array.isArray(candidates)?candidates:[]).map(candidate=>({id:candidate.id,verdict:'supported',reason:'Mock Validator accepts the synthetic proof candidate for control-flow verification.'}))};
+  }
 }
