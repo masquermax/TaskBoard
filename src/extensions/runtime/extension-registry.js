@@ -23,6 +23,7 @@ export class ExtensionRegistry {
       displayName: extension.displayName || key,
       executor: extension.executor || null,
       capabilityProvider: extension.capabilityProvider || null,
+      connectionSettings: extension.connectionSettings || null,
       surfaceHosts: Array.isArray(extension.surfaceHosts) ? extension.surfaceHosts : [],
     };
   }
