@@ -41,14 +41,17 @@ test('Gate B: construction-only goal-authority patch scaffolding is absent from 
   for(const path of obsolete)assert.equal(existsSync(resolve(path)),false,`${path} is obsolete construction scaffolding`);
 });
 
-test('Gate B: ACTIVE governance docs do not retain superseded blocking-Gap or taskMode authority rules',()=>{
+test('Gate B: ACTIVE architecture docs do not retain superseded blocking-Gap or taskMode authority rules',()=>{
   const active=[
+    'README.md',
+    'docs/ADR.md',
     'docs/ARCHITECTURE.md',
     'docs/CAPABILITY_CONTRACTS.md',
     'docs/CAPABILITY_MAP.md',
     'docs/SPECIFICATION.md',
   ].map(source).join('\n');
   assert.doesNotMatch(active,/write only in execution Tasks/i);
+  assert.doesNotMatch(active,/write[^\n]{0,120}(?:accepted|granted|grants?)?[^\n]{0,40}only[^\n]{0,120}execution[- ]mode/i);
   assert.doesNotMatch(active,/blocking Gap[^\n]{0,260}(不得|不能)[^\n]{0,120}(调查|Work Unit|delegate|delegation)/i);
   assert.doesNotMatch(active,/(taskMode|Task Mode)[^\n]{0,180}(write authority|写权限|Project write)/i);
 });

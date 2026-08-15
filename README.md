@@ -170,7 +170,7 @@ Delete is not silently converted into Cancel after a race into RUNNING.
 
 ## Attachments, cleanup and time
 
-Attachments are durable Task inputs under `data/attachments/`; they do not enter the Project List or expand Project Scope. Root receives logical Task-input references and TaskBoard-managed scratch, but no Project Scope filesystem path, attachment local path or network capability. Project read/write access exists only inside a delegated Work Unit that explicitly selects the Project input and declares `projectAccess=read|write`; write is accepted only for execution-mode Tasks.
+Attachments are durable Task inputs under `data/attachments/`; they do not enter the Project List or expand Project Scope. Root receives logical Task-input references and TaskBoard-managed scratch, but no Project Scope filesystem path, attachment local path or network capability. Project read/write access exists only inside a delegated Work Unit that explicitly selects the Project input and declares `projectAccess=read|write`; the effective Project surface is the `AuthorizedGrant` derived by `GovernanceCompiler`, and write requires certified `TaskContract` authority plus selected Project scope and the Work Unit request rather than an execution-mode label.
 
 Automatic cleanup physically removes only eligible COMPLETED data on local day 91. Locked Tasks and completed Results referenced by later Tasks are protected. Daily cleanup targets local 01:00 and has a shared hard five-attempt daily retry ceiling.
 
