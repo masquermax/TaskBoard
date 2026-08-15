@@ -1,37 +1,38 @@
 # Current State
 
-Status: RELEASE
+Status: RECOMPOSITION CANDIDATE
 Release: v0.9.1
+
+The executable/package identity remains v0.9.1 until the recomposed tree is independently GREEN. This file describes the candidate semantics, not a completed v0.9.2 release claim.
 
 ## Current truths
 
-- Runtime roles use one vocabulary: **Root / Subagent / Validator**. **Executor** is the execution component name. Project is the only current project-domain term.
-- Scheduler alone owns Task lifecycle/admission. Root owns Task-level judgment/planning. Subagent executes one bounded Work Unit. Validator certifies Root Candidate Deltas. Task Core alone persists durable facts.
-- Analysis cognition advances by certified Turn delta: omission cannot erase committed knowledge; revision requires evidence.
-- Human Gateway binds exactly one certified blocking Gap; resolved Human input becomes system-owned provenance before semantic sufficiency is checked.
-- Work Units explicitly declare `projectAccess`, `networkAccess` and `inputRefs`; omitted legacy/custom capability fields fail closed.
-- Subagent context is allow-list constructed. Subagent Result is Runtime allow-listed. Root cannot originate Project/Attachment Evidence and must consume evidence returned by bounded Subagent work.
-- Persistence has one current implementation: JSON. Legacy runtime-state/config names are normalized only at explicit migration boundaries.
-- Concrete Skill content remains outside core. Core only exposes an injected Skill library boundary.
-- Current Progress and durable History are separate: activity is not automatically learned knowledge.
-- Model routing uses provider-described capability when available; unknown capability falls back to the configured/default Executor model.
+- Runtime vocabulary is **Project / Root / Subagent / Validator / Executor**; legacy names survive only at explicit compatibility boundaries.
+- Scheduler uniquely owns Task lifecycle/admission. Root owns Task reasoning/planning. Subagent executes one bounded Work Unit. Validator certifies Root Candidate Deltas and owns History semantic-value decisions. Task Core owns durable facts/atomic persistence. Executor owns operations, not business truth.
+- Task-specific Project Authority is derived only by `GovernanceCompiler` into `AuthorizedGrant`; Work Unit requests, `taskMode`, role prose, UI state and Executor defaults cannot create write authority.
+- Goal Satisfaction is derived by `CompletionEvaluator`; execution occurrence, receipts and projections cannot independently create Completion truth.
+- Blocking Gaps constrain only the real dependency radius of the unresolved fact. They do not globally revoke independent governed evidence acquisition.
+- Analysis cognition advances through certified `Evidence + Claim + Gap`. Recommendations/Steps are recomputed projections.
+- Root/Subagent/Validator contexts are allow-list constructed. Root does not receive Project Scope filesystem paths or network capability merely because those inputs exist.
+- Persistence has one current implementation: JSON. Legacy runtime/config names are accepted only at explicit migration/error-compatibility boundaries.
+- Concrete Skill content remains outside core; core exposes only the selected-method library boundary.
+- Current Progress is runtime projection, not durable History.
+- Model routing consumes provider-described capability when available and otherwise falls back to the configured/default Executor model.
+- Codex connection configuration is extension-local: the user chooses account/custom settings; the Codex extension validates/persists/projects them into its own child app-server. Task Core does not own provider/authentication semantics.
 
-## Known external/runtime limits
+## Explicit current absences
 
-- TaskBoard can guarantee which Task inputs and write/network capabilities it grants. It must not claim stronger filesystem-read isolation than the active Executor/runtime can actually enforce on the host OS.
-- Project Knowledge, replayable project-search records and generic side-effect proof are not implemented capabilities; see `CAPABILITY_MAP.md`.
+- Formal Project Knowledge subsystem.
+- Replayable Project Search evidence record.
+- Generic independent proof system for arbitrary execution side effects.
+- Root-owned first-class Work Unit execution.
 
-## Migration-only names
+## Release promotion rule
 
-The following may appear only in migration/error-compatibility code and migration tests: `taskMaxThreads`, `workerConcurrency`, `RESOURCE_WAIT`, `ownerType`, `ownerLabel`, old snapshot `root`, and external error wording `worker`. They must not re-enter current UI/API/Runtime contracts.
+The candidate may become v0.9.2 only after:
 
-## Release gate
-
-A release is complete only when:
-
-1. syntax + full automated tests pass;
-2. current docs reference only current files/terms;
-3. fresh-unpack verification passes;
-4. release identity is consistent across package/app/docs;
-5. final ZIP SHA-256 is emitted as a sibling `.sha256` artifact and reported in the handoff; it is not embedded into the ZIP it hashes;
-6. local Git is clean and the final commit is preserved; GitHub sync is performed when the configured GitHub App can access the target repository.
+1. cross-platform full verification passes;
+2. fresh-unpack verification passes;
+3. release identity is changed atomically across package/app/release documents;
+4. no legacy v0.9.2 Runtime semantic is reintroduced merely to preserve old branch history;
+5. current-tree slimming removes obsolete process scaffolding without deleting regression proof that protects canonical Owner boundaries.

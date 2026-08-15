@@ -21,7 +21,7 @@ Status: ACTIVE
 User / UI
    │ intent / facts
    ▼
-Task Core ◄──────── certified durable write ───── Validator
+Task Core ◄──────── certified durable write ─────── Validator
    │                                               ▲
    ▼                                               │ Root Candidate Delta
 Scheduler                                          │
@@ -55,13 +55,14 @@ Work Unit ───────────────────────�
 | Skill discovery / selected method | Skill | `src/skills/skill-library-port.js` | concrete Skill packages are external; core injects only selected method |
 | Model selection / execution capability use | Executor | `src/core/model-router.js` + capability providers | provider-described capability; unknown falls back to configured/default model |
 | Model / file / command operation | Executor | `src/extensions/executors/*` + ports | Work Unit capability + Executor sandbox/protocol; no Task business authority |
+| Codex child-runtime connection configuration | User intent → Codex extension | `src/extensions/config/codex/*` + `src/server/extension-connection-api.js` | extension-local persistence/projection only; Task Core does not own provider/auth semantics; secret is excluded from public state/CLI; reconfiguration is gated and rollback-capable |
 | UI presentation / user intent | UI / Surface | `src/ui/*`, `src/server/*`, surface hosts | UI submits intents; durable truth comes from Core/Scheduler |
 | Task concurrency configuration | User → Scheduler | `src/core/runtime-settings.js` | 1–5 configured ceiling; lowering never preempts active work |
 | Per-Root Subagent ceiling | User → Root Runtime | `src/core/runtime-settings.js` | 1–5 configured ceiling; no global Subagent pool |
 
 ## Mechanisms that are not new authorities
 
-`JsonTaskRepository`, `AttachmentStore`, `TaskService`, `DailyCleanupController`, `RuntimeSettingsStore`, `RetryPolicy`, `ModelRouter`, `CapabilityProvider`, `SurfaceManager` and transport/server modules are implementations under the owners above. A class/module does not become a new Authority merely because it exists.
+`JsonTaskRepository`, `AttachmentStore`, `TaskService`, `DailyCleanupController`, `RuntimeSettingsStore`, `RetryPolicy`, `ModelRouter`, `CapabilityProvider`, extension-local connection settings/gates, `SurfaceManager` and transport/server modules are implementations under the owners above. A class/module does not become a new Authority merely because it exists.
 
 ## Current explicit absences
 

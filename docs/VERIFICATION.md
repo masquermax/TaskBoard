@@ -1,40 +1,47 @@
 # Verification v0.9.1
 
-Status: PASS
+Status: RECOMPOSITION CANDIDATE — PENDING
 
-This is the only current verification record. Historical release reports live in Git history.
+This file records the verification status of the current candidate tree. Git history is the archive for prior release reports and migration/debug process.
 
-## Automated verification
+## Verified inherited baseline
 
-- Syntax check: PASS.
-- Full automated test suite: **268 / 268 PASS**, 0 failed, 0 skipped.
-- Release identity test: PASS across `package.json`, executable version and current release documents.
-- Candidate fresh-unpack gate: **3 consecutive full verify runs PASS**, each 268 / 268 in the release-build environment.
-- Windows Node.js 24 verification after correcting the Windows file-URL test path: **3 consecutive full verify runs PASS**, 0 failed. Node.js 24 reports successful test files as aggregated items under process isolation, so the full-run item count is 266 while the VBS launcher file itself contains 3 assertions/tests and passes.
+The candidate starts from the current Gate B / Provider Connection semantic tree represented by `main @ e286529c184631077fa9e171f7134b5d491509eb`.
 
-## Structural simplification audit
+That baseline was verified on Ubuntu and Windows with **355 / 355 PASS** before recomposition.
 
-- Persistence has one current path: JSON. The historical SQLite implementation, migration path and dual-repository parity surface were removed.
-- Runtime vocabulary has one current name per core position: Root / Subagent / Validator / Executor. Historical role aliases are not current APIs.
-- Project is the single current product term. Legacy system/thread/project aliases are blocked by UI and active-document regression tests.
-- Task Core has one atomic Certified Turn/History persistence path; historical fallback write paths were removed.
-- Ordinary Runtime loads Constitution plus the owned Capability Contract. ADR is engineering history and has no second Runtime loader.
-- Root, Subagent and Validator result surfaces are Runtime allow-lists. Unknown custom Executor fields cannot create new authority by omission from a schema.
-- Root may originate only Human/Reference Evidence. Project/Attachment source investigation belongs to bounded Subagent work and remains defensively checked by Validator.
-- Work Unit project/network capability is explicit and fail-closed; Subagent Task context is allow-list constructed.
-- Active docs were reduced to the current architecture set; superseded ADR bodies, versioned verification reports and superseded rule documents were removed from the release tree and remain available through Git history.
+The baseline already contains the durable owner/boundary corrections that must not regress:
 
-## Dead-code / reachability audit
+- `GovernanceCompiler` is the single Task-specific Project Authority derivation owner; `taskMode`, role prose, blocking Gap and Executor defaults cannot create write authority.
+- `CompletionEvaluator` is the Goal Satisfaction derivation owner; work occurrence, receipts, UI state and local runtime signals do not become Completion truth.
+- Validator owns Root Candidate certification and the semantic-value decision for History; Task Core owns durable commit.
+- blocking Gaps constrain only their real dependency radius and do not globally revoke separately governed evidence acquisition.
+- Codex connection configuration is rebuilt as extension-local configuration rather than legacy v0.9.2 Runtime ownership.
 
-- Node production import graph: **51 / 51 Node-loaded production modules reachable** from the real service entry points.
-- The remaining two production JS modules are browser-loaded UI modules: `index.html → app.js → time.js`; they are not Node import-graph dead code.
-- No whole production source file is left unreachable after accounting for the browser UI entry.
-- Test coverage after simplification: **96.52% line / 78.08% branch / 90.84% function** overall. Remaining low-covered functions are primarily optional extension/transport error paths rather than an alternate business runtime.
+## Candidate recomposition delta
 
-## Compatibility boundary
+This candidate intentionally changes product-tree structure rather than replaying historical commits:
 
-Legacy persisted names are accepted only at explicit migration/error-compatibility boundaries and corresponding migration tests. They are not current UI/API/Runtime terminology. Removing those migration readers would break upgrade compatibility without simplifying the current authority surface, so they remain isolated rather than being duplicated across current code.
+- replaces the branch-specific `goal-regression.yml` construction residue with one generic cross-platform Verify workflow plus fresh-unpack proof;
+- restores the old v0.9.2 UI overflow/spacing safety because it is independent product value;
+- keeps current main's newer Completion/UI semantics while adding that layout protection;
+- aligns the documented Codex connection Owner with the extension-owned runtime implementation;
+- reduces README duplication by pointing detailed semantics to canonical Contract/Architecture documents.
 
-## Archive verification
+Legacy v0.9.2 runtime behavior that conflicts with the current Owner/Authority model is **not** reintroduced. In particular, execution mode does not grant Project authority, blocking Gap does not mean global investigative freeze, and the old stateful first-Root-turn model-routing heuristic is not restored without new evidence.
 
-The final ZIP is built from the frozen Git commit without `.git` or runtime data. Final post-freeze fresh-unpack verification is an external release gate repeated after archive creation and reported in the delivery handoff. The archive SHA-256 is emitted as a sibling `.sha256` artifact; it is not embedded into the archive it hashes.
+## Candidate proof required
+
+Before this tree may replace `main` or claim v0.9.2 release status:
+
+1. syntax check passes;
+2. full automated tests pass on Ubuntu and Windows;
+3. fresh-unpack verification passes from a tracked-files archive;
+4. release identity remains internally consistent;
+5. the final v0.9.2 identity change is applied only after the recomposed semantic tree is GREEN.
+
+Until those checks complete, this document does not claim the recomposed candidate is verified.
+
+## Slimming rule
+
+Slimming removes obsolete/duplicate current-tree responsibility, not proof merely because it looks old. Regression tests that protect canonical Owner boundaries remain valuable even when their originating bug is historical. Temporary migration scripts, branch-specific CI, superseded runtime paths and duplicated prose should not remain in the current tree once their durable semantic consequence has a proper owner and proof surface.
