@@ -45,7 +45,7 @@ Work Unit ───────────────────────�
 | Task reasoning / planning / Work Unit creation / convergence | Root | `src/core/root-runtime.js` + Root Executor schema | Candidate schema + delegation contract; source investigation is delegated rather than hidden Root work |
 | Work Unit boundary | Work Unit | Root delegation schema + `validateDelegationPlan()` | explicit `goal/expectedOutput/stopCondition/projectAccess/networkAccess/inputRefs/dependsOn/skillId` |
 | One delegated Work Unit execution | Subagent | `src/core/subagent-runtime.js` | receives only selected inputs and declared capabilities; result is Runtime allow-listed |
-| Project Scope read/write request | Root | Work Unit `projectAccess` + `inputRefs` | missing capability fails closed; write only in execution Tasks |
+| Project Scope read/write request | Root | Work Unit `projectAccess` + `inputRefs` → `GovernanceCompiler.compileAuthorizedGrant()` | request is narrowed by RoleCapabilityContract, certified TaskContract authority and selected Project scope; `taskMode` does not grant Project access |
 | Root Candidate certification / Gap narrowing | Validator | `src/governance/validator-runtime.js` + analysis/source/semantic verifiers | deterministic provenance first; narrow semantic proof only when required |
 | Analysis History value decision | Validator | `ValidatorRuntime.deriveNewRootProgress()` | only certified, future-useful Root knowledge becomes a commit candidate |
 | Durable Task facts / Current Certified State / History write | Task Core | `src/core/task-service.js` + `src/core/json-repository.js` | single JSON persistence path; atomic repository transactions |
