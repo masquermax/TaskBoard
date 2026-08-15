@@ -1,7 +1,7 @@
 import { WorkUnitStatus } from './types.js';
 import { MAX_TOTAL_ATTEMPTS, capacityRetryDelayMs, capacityWaitingInstruction, classifyRetry, isCapacityUnavailable, isInterrupted, retryDelayMs, suspendedInstruction, waitingRetryInstruction } from './retry-policy.js';
 import { normalizeAnalysisFields } from '../governance/analysis-contract.js';
-import { canonicalAnalysisSummary, renderAnalysisResult } from '../governance/analysis-validator.js';
+import { canonicalAnalysisSummary, hasGovernedCandidateDelta, renderAnalysisResult } from '../governance/analysis-validator.js';
 import { applyCertifiedDelta, decisionFromCertifiedState, deriveHistoryFromTurn, knowledgeKeysFromState, normalizeCertifiedState } from '../governance/certified-state.js';
 import { taskInputRefs } from './task-input-scope.js';
 import { humanGatewayTransitionCandidate } from '../governance/human-gateway-evidence.js';
@@ -147,7 +147,7 @@ export function validateDelegationPlan(delegations, { knownWorkIds = [], availab
     const indegree = new Map(selected.map(item => [item.id, 0]));
     const outgoing = new Map(selected.map(item => [item.id, []]));
     for (const item of selected) for (const dep of item.dependsOn) {
-      if (!ids.has(dep)) continue; // existing Work Units cannot depend on this new batch, so they cannot create a new cycle
+      if (!ids.has(dep)) continue;
       indegree.set(item.id, (indegree.get(item.id) || 0) + 1);
       outgoing.get(dep).push(item.id);
     }
@@ -231,9 +231,6 @@ export class RootRuntime {
       if (!title || !detail) continue;
       const key = `${title}\n${detail}`;
       if (session.committedProgressKeys.has(key)) continue;
-      // A History boundary is committed only after Task Core/persistence accepts
-      // it. If persistence throws, do not mark this boundary as committed in
-      // memory; the execution/recovery path must be able to try it again.
       callbacks.onProgressCommit?.({ title, detail, completedAt:nowIso() });
       session.committedProgressKeys.add(key);
       session.lastCommittedStageResult = detail;
@@ -252,10 +249,6 @@ export class RootRuntime {
   interruptForShutdown(taskId) {
     const session = this.sessions.get(taskId);
     if (!session) return false;
-    // Process shutdown is not a user cancellation. Abort in-flight execution so
-    // the Scheduler can become idle, but leave lifecycle state untouched; the
-    // next process start will recover a stale RUNNING Task from its last
-    // valuable stage boundary.
     if (session.rootController) session.rootController.abort();
     for (const controller of session.runningControllers.values()) controller.abort();
     return true;
@@ -292,12 +285,8 @@ export class RootRuntime {
     const session = {
       taskId: task.id,
       round: 0,
-      // Certified Work Unit results waiting for the next Root synthesis. Results
-      // already absorbed into a certified Root result are removed to keep context bounded.
       subagentResults: pendingWorkResults,
       currentStage: null,
-      // Runtime-only execution visibility. These completed Work Units remain visible
-      // while the Task is still open, but never become certified knowledge/History.
       completedWorkUnits: durableWorkReceipts.map(receipt=>({ id:receipt.id, stageId:null, title:receipt.workUnit.title||receipt.id, projectAccess:receipt.workUnit.projectAccess||'none', networkAccess:receipt.workUnit.networkAccess===true, status:WorkUnitStatus.COMPLETED, detail:receipt.result?.result||'工作已完成。', updatedAt:receipt.completed_at||nowIso(), failureCount:0, nextRetryAt:null, canRetry:false, owner:'subagent' })),
       cancelRequested: false,
       rootController: null,
@@ -316,9 +305,6 @@ export class RootRuntime {
       certifiedContext: restoredAnalysisState.current,
       certifiedKnowledgeKeys: knowledgeKeysFromState(restoredAnalysisState),
       consumedHumanGatewayIds: new Set((restoredAnalysisState.turns||[]).flatMap(turn=>turn?.triggerRefs||[]).map(ref=>String(ref||'')).filter(ref=>ref.startsWith('human:')).map(ref=>ref.slice('human:'.length)).filter(Boolean)),
-      // Work Unit identity is semantic, not merely an Agent-provided id. Keeping
-      // accepted signatures prevents Root from accidentally re-issuing the same
-      // completed/active work under fresh ids instead of making a new Task decision.
       issuedWorkSignatures: new Set(durableWorkReceipts.map(receipt=>String(receipt.signature||'')).filter(Boolean)),
       pendingValidation: null,
       rootTurnCount: 0,
@@ -369,9 +355,7 @@ export class RootRuntime {
       }));
       session.rootTurnCount += 1;
       session.actor.status = WorkUnitStatus.COMPLETED;
-      session.actor.detail = session.policyContext?.taskMode === 'analysis'
-        ? '本轮分析已形成候选结果，正在进入 Governance 校验。'
-        : (decision.summary || '综合分析已完成。');
+      session.actor.detail = '本轮候选结果已形成，正在进入 Governance 校验。';
       session.actor.updatedAt = nowIso();
       this.emit(session, callbacks);
       return decision;
@@ -383,11 +367,10 @@ export class RootRuntime {
     }
   }
 
-
   async reviewRootDecision(task, session, decision, callbacks, { humanGatewayHistory = [], validatorHumanGatewayHistory = humanGatewayHistory, startAttempt = 1, rootInputs = [], triggerRefs = [], synthesizeHumanGapResolution = true } = {}) {
     if (!this.validatorRuntime) {
-      if (decision?.resultMode === 'analysis' || session?.policyContext?.taskMode === 'analysis') {
-        const error=new Error('VALIDATOR_RUNTIME_REQUIRED: analysis Candidate cannot bypass Validator ownership.');
+      if (hasGovernedCandidateDelta(decision)) {
+        const error=new Error('VALIDATOR_RUNTIME_REQUIRED: governed Candidate Delta cannot bypass Validator ownership.');
         error.nonRetryable=true;
         throw error;
       }
@@ -421,7 +404,7 @@ export class RootRuntime {
       let reworked;
       try {
         reworked = await this.runRootTurn(task, session, callbacks, {
-            humanGatewayHistory,
+          humanGatewayHistory,
           validationFeedback:reviewed.feedback,
           previousDecision:reviewed.decision,
           rootInputs,
@@ -449,16 +432,13 @@ export class RootRuntime {
         try {
           reviewed = await this.validatorRuntime.semanticReviewRoot?.({reviewed,policyContext:this.governanceCompiler?.compileForRole?.(task,'validator') || session.policyContext,attempt:validationAttempt,seenKnowledgeKeys:session.certifiedKnowledgeKeys,task,humanGatewayHistory:validatorHumanGatewayHistory,currentState:session.analysisState,onProgress:progress=>{session.actor={title:'Validator 认证',status:WorkUnitStatus.RUNNING,detail:progress?.detail||'正在核对需要语义解释的原始证据与当前具体证明关系。',updatedAt:nowIso(),owner:'validator'};this.emit(session,callbacks);},onExecutionStarted:()=>callbacks.onExecutionStarted?.({role:'validator'}),signal:null}) || reviewed;
         } catch (error) {
-        if (isCapacityUnavailable(error)) error.pendingRootValidation={phase:'validate',decision:reviewed.decision,validationAttempt,rootInputs,triggerRefs};
+          if (isCapacityUnavailable(error)) error.pendingRootValidation={phase:'validate',decision:reviewed.decision,validationAttempt,rootInputs,triggerRefs};
           throw error;
         }
       }
     }
     if (reviewed.outcome !== 'pass') throw validationError(reviewed.feedback || []);
 
-    // C-003 + C-005 are realized here as a durable learning boundary:
-    // only the certified delta may change Current State, and omission never
-    // deletes previously committed knowledge.
     const workTriggerRefs=(Array.isArray(rootInputs)?rootInputs:[]).map(item=>String(item?.delegationId||item?.workUnit?.id||'').trim()).filter(Boolean).map(id=>`work:${id}`);
     const certifiedTriggerRefs=[...new Set([...(Array.isArray(triggerRefs)?triggerRefs:[]),...workTriggerRefs].map(value=>String(value||'').trim()).filter(Boolean))];
     if(!certifiedTriggerRefs.length){
@@ -684,7 +664,6 @@ export class RootRuntime {
     return promise;
   }
 
-
   async runStage(task, session, callbacks) {
     const stage = session.currentStage;
     while (true) {
@@ -705,9 +684,6 @@ export class RootRuntime {
       const subagentReady = ready.slice(0, slots);
       const started = subagentReady.map(unit => this.startSubagent(task, session, unit, callbacks));
 
-      // A certified Work Unit result is delivered to Root immediately. Independent
-      // siblings keep running and newly free Subagent slots are filled above before
-      // Root receives control. This removes the old whole-stage barrier.
       if (session.subagentResults.length) {
         return { kind:'work_results_ready', results:session.subagentResults.slice(), snapshot:this.makeSnapshot(session) };
       }
@@ -758,12 +734,10 @@ export class RootRuntime {
     }
   }
 
-
-
-  async execute(task, { humanGatewayHistory = [], onProgress = null, onStageCompleted = null, onStageResult = null, onProgressCommit = null, onCertifiedTurn = null, onTaskContractAuthority = null, onWorkReceipt = null, onWorkReceiptsConsumed = null, onExecutionStarted = null } = {}) {
+  async execute(task, { humanGatewayHistory = [], onProgress = null, onStageCompleted = null, onProgressCommit = null, onCertifiedTurn = null, onTaskContractAuthority = null, onWorkReceipt = null, onWorkReceiptsConsumed = null, onExecutionStarted = null } = {}) {
     const session = this.sessions.get(task.id) || this.createSession(task);
     session.cancelRequested = false;
-    const callbacks = { onProgress, onStageCompleted, onStageResult, onProgressCommit, onCertifiedTurn, onTaskContractAuthority, onWorkReceipt, onWorkReceiptsConsumed, onExecutionStarted };
+    const callbacks = { onProgress, onStageCompleted, onProgressCommit, onCertifiedTurn, onTaskContractAuthority, onWorkReceipt, onWorkReceiptsConsumed, onExecutionStarted };
     try{task=await this.ensureTaskAuthority(task,session,callbacks);}catch(error){if(isCapacityUnavailable(error)){const delay=capacityRetryDelayMs(this.retryDelaysMs);return{kind:'waiting_resource',retryAt:Date.now()+delay,snapshot:this.makeSnapshot(session),reason:'等待 Requirement Authority Validator 资源恢复'};}throw error;}
     const newlyResolvedHuman=(Array.isArray(humanGatewayHistory)?humanGatewayHistory:[]).filter(g=>g?.status==='RESOLVED'&&String(g?.id||'').trim()&&!session.consumedHumanGatewayIds.has(String(g.id).trim()));
     let invocationTriggerRefs=newlyResolvedHuman.map(g=>`human:${String(g.id).trim()}`);
@@ -790,14 +764,9 @@ export class RootRuntime {
       return { kind:'waiting_resource', retryAt:Date.now()+delay, snapshot:this.makeSnapshot(session), reason };
     };
 
-    // Root owns Task convergence. Runtime therefore has no arbitrary stage/turn
-    // count that can force business convergence; concrete contract violations,
-    // duplicate work, retry policy and resource state provide the technical bounds.
     while (true) {
       if (session.cancelRequested) return { kind:'cancelled', quiescent:this.isQuiescent(task.id) };
 
-      // Resume a preserved Root/Validator boundary before asking running work for
-      // another delivery. Independent Work Units may continue in the background.
       const pendingValidation = session.pendingValidation;
       let stageOutcome = null;
       if (!pendingValidation && session.currentStage) {
@@ -837,11 +806,6 @@ export class RootRuntime {
           throw error;
         }
       } else if (pendingValidation?.phase === 'authority_handoff') {
-        // Validator owns certification only. When certified content changes the
-        // control implications (for example a blocking Gap remains), control
-        // returns to Root instead of Validator silently choosing completion,
-        // delegation or Human Gateway. This is a new Root control decision, not
-        // another validation rework attempt.
         validationStartAttempt = 1;
         rootInputs = [];
         session.actor = { title:'Root 控制决策', status:WorkUnitStatus.WAITING_RESOURCE, detail:'Validator 已完成内容认证；等待 Root 基于已认证边界决定下一步，不重新调查已认证内容。', updatedAt:nowIso(), owner:'root' };
@@ -869,9 +833,6 @@ export class RootRuntime {
           if(session.completionFeedback?.length&&session.completionTriggerRefs?.length){
             rootTriggerRefs=[...session.completionTriggerRefs];
           }else if(session.planningFeedback?.length&&session.planningTriggerRefs?.length){
-            // Capability-contract repair is a bounded sub-loop of the same Root
-            // turn. It reuses the original trigger; it does not manufacture a
-            // new business/event trigger merely because the plan was invalid.
             rootTriggerRefs=[...session.planningTriggerRefs];
           }else{
             if(invocationTriggerConsumed||!invocationTriggerRefs.length){
@@ -895,7 +856,6 @@ export class RootRuntime {
         }
       }
       if (decision.kind === 'cancelled') return { kind:'cancelled', quiescent:this.isQuiescent(task.id) };
-
 
       let reviewed;
       try {
@@ -939,12 +899,7 @@ export class RootRuntime {
       }
       if (decision.kind === 'cancelled') return { kind:'cancelled', quiescent:this.isQuiescent(task.id) };
       if(decision.kind!=='complete'){session.completionFeedback=null;session.completionRepairCount=0;session.completionTriggerRefs=[];}
-      if (session.policyContext?.taskMode !== 'analysis' && decision.stageResult) onStageResult?.(decision.stageResult);
 
-      // A Root result may be valuable even while sibling Work Units are still
-      // running. Validator has already certified/committed that boundary above.
-      // Root cannot implicitly abandon already-issued Work Units, so completion or
-      // Human Gateway waits until the active work set naturally reaches a boundary.
       if (this.hasUnfinishedWork(session) && (decision.kind === 'complete' || decision.kind === 'human_gateway')) {
         session.actor = { title:'阶段结论已认证', status:WorkUnitStatus.COMPLETED, detail:reviewed.commits.length?'阶段结论已写入历史；等待已签发 Work Unit 到达明确停止边界。':'阶段结论已认证；等待已签发 Work Unit 到达明确停止边界。', updatedAt:nowIso(), owner:'root' };
         this.emit(session, callbacks);
@@ -1014,7 +969,7 @@ export class RootRuntime {
         const finalView = decision.resultMode === 'analysis' ? decisionFromCertifiedState(session.analysisState,decision) : null;
         const finalResult = finalView ? renderAnalysisResult(finalView) : composeExecutionResult(decision);
         const finalSummary = finalView ? canonicalAnalysisSummary(finalView) : decision.summary;
-        const stageResult = session.lastCommittedStageResult || decision.stageResult || null;
+        const stageResult = session.lastCommittedStageResult || null;
         const proposal={ finalResult, summary:finalSummary, stageResult };
         if(this.completionAssessmentVerifier?.available?.()===false){const error=new Error('VALIDATOR_UNAVAILABLE: Completion Validator semantic certification is unavailable.');error.nonRetryable=true;throw error;}
         if(!this.completionEvaluator){const error=new Error('COMPLETION_EVALUATOR_REQUIRED');error.nonRetryable=true;throw error;}
@@ -1040,5 +995,4 @@ export class RootRuntime {
       throw error;
     }
   }
-
 }
