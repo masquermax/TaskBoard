@@ -12,14 +12,14 @@ const rootDir = resolve(here, '../..');
 const port = Number(process.env.PORT || 4317);
 const runtimeDir = resolve(rootDir, 'data/runtime');
 const instanceFile = resolve(runtimeDir, 'taskboard-instance.json');
-mkdirSync(runtimeDir, { recursive:true });
+mkdirSync(runtimeDir, { recursive: true });
 
 const runtime = bootstrap({ rootDir, startScheduler: process.env.TASKBOARD_SCHEDULER !== 'off' });
 let server = null;
 let shuttingDown = false;
 
 function removeInstanceFile() {
-  try { rmSync(instanceFile, { force:true }); } catch { /* ignore */ }
+  try { rmSync(instanceFile, { force: true }); } catch { /* ignore */ }
 }
 
 async function shutdown() {
