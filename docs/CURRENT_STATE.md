@@ -1,9 +1,9 @@
 # Current State
 
-Status: RELEASE CANDIDATE
+Status: RELEASE
 Release: v0.9.2
 
-The recomposed tree has passed full Ubuntu/Windows verification plus fresh-unpack proof before release-identity promotion. This candidate is now validating the final v0.9.2 identity set before it may replace `main`.
+v0.9.2 is the recomposed current product tree: it preserves the verified Gate B semantic/runtime baseline, restores only still-valid product value from the legacy v0.9.2 line, and removes obsolete branch/process residue instead of merging historical Runtime wholesale.
 
 ## Current truths
 
@@ -31,12 +31,8 @@ Legacy runtime/config names are accepted only at explicit load, error-compatibil
 - Generic independent proof system for arbitrary execution side effects.
 - Root-owned first-class Work Unit execution.
 
-## Release promotion rule
+## Verification boundary
 
-This candidate may replace `main` only after the final v0.9.2 identity commit passes:
+The v0.9.2 identity tree at `d381395e22d515a3b908adb1ab8c27116a6c8f1d` passed Ubuntu + Windows full verification and tracked-files fresh-unpack verification in GitHub Actions run `31905538674`.
 
-1. cross-platform full verification;
-2. fresh-unpack verification;
-3. release-identity consistency;
-4. no reintroduction of legacy v0.9.2 Runtime semantics merely to preserve branch history;
-5. final tree review confirms only intentional recomposition/slimming differences from the previous main.
+This release-state update changes documentation only and is itself required to pass the same generic Verify workflow before promotion to `main`. Product Git/Runtime evidence remains authoritative over this document if they ever diverge.
