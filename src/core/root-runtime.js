@@ -2,12 +2,12 @@ import { WorkUnitStatus } from './types.js';
 import { MAX_TOTAL_ATTEMPTS, capacityRetryDelayMs, capacityWaitingInstruction, classifyRetry, isCapacityUnavailable, isInterrupted, retryDelayMs, suspendedInstruction, waitingRetryInstruction } from './retry-policy.js';
 import { normalizeAnalysisFields } from '../governance/analysis-contract.js';
 import { canonicalAnalysisSummary, hasGovernedCandidateDelta, renderAnalysisResult } from '../governance/analysis-validator.js';
-import { applyCertifiedDelta, decisionFromCertifiedState, deriveHistoryFromTurn, knowledgeKeysFromState, normalizeCertifiedState } from '../governance/certified-state.js';
+import { applyCertifiedDelta, decisionFromCertifiedState, knowledgeKeysFromState, normalizeCertifiedState } from '../governance/certified-state.js';
 import { taskInputRefs } from './task-input-scope.js';
 import { humanGatewayTransitionCandidate } from '../governance/human-gateway-evidence.js';
 import { applyAuthorityFidelity, defaultAuthoritySemanticCandidates } from '../governance/task-contract-fidelity.js';
 import { recordTaskDiagnostic } from './runtime-diagnostic.js';
-import { capabilitiesSatisfy, requiredWorkCapabilities, validateWorkCapabilityContract, workMayMutate } from './work-capability.js';
+import { capabilitiesSatisfy, requiredWorkCapabilities, workMayMutate } from './work-capability.js';
 
 function nowIso() { return new Date().toISOString(); }
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
@@ -19,7 +19,6 @@ function snapshotWorkUnit(unit, stageId = null) {
     title: unit.title,
     projectAccess: unit.projectAccess || 'none',
     networkAccess: unit.networkAccess === true,
-    requiredCapabilities: requiredWorkCapabilities(unit),
     status: unit.status,
     detail: unit.detail,
     updatedAt: unit.updatedAt,
@@ -33,7 +32,6 @@ function snapshotWorkUnit(unit, stageId = null) {
 
 function workSemanticSignature(item) {
   const normalize = value => String(value || '').trim().replace(/\s+/g,' ');
-  const required=requiredWorkCapabilities(item);
   return JSON.stringify({
     title:normalize(item?.title),
     goal:normalize(item?.goal),
@@ -41,7 +39,6 @@ function workSemanticSignature(item) {
     stopCondition:normalize(item?.stopCondition),
     projectAccess:normalize(item?.projectAccess || 'none'),
     networkAccess:item?.networkAccess===true,
-    requiredCapabilities:required,
     skillId:normalize(item?.skillId),
     dependsOn:[...(Array.isArray(item?.dependsOn)?item.dependsOn:[])].map(normalize).filter(Boolean).sort(),
     inputRefs:[...(Array.isArray(item?.inputRefs)?item.inputRefs:[])].map(normalize).filter(Boolean).sort(),
@@ -111,7 +108,7 @@ export function validateDelegationPlan(delegations, { knownWorkIds = [], availab
   const selected = raw.map((item, index) => {
     const title=String(item?.title || '').trim();
     const goal=String(item?.goal || '').trim();
-    const normalized={
+    return {
       ...item,
       id:String(item?.id || '').trim(),
       title,
@@ -125,8 +122,6 @@ export function validateDelegationPlan(delegations, { knownWorkIds = [], availab
       inputRefs:Array.isArray(item?.inputRefs) ? [...new Set(item.inputRefs.map(value => String(value).trim()).filter(Boolean))] : [],
       __index:index,
     };
-    normalized.requiredCapabilities=requiredWorkCapabilities(normalized);
-    return normalized;
   });
   const knownIds = new Set((Array.isArray(knownWorkIds) ? knownWorkIds : []).map(value => String(value).trim()).filter(Boolean));
   const allowedInputs = Array.isArray(availableInputRefs) ? new Set(availableInputRefs.map(value=>String(value).trim()).filter(Boolean)) : null;
@@ -140,8 +135,6 @@ export function validateDelegationPlan(delegations, { knownWorkIds = [], availab
     if (!item.expectedOutput) issues.push(`工作 ${item.id || item.__index + 1} 缺少 expectedOutput。`);
     if (!item.stopCondition) issues.push(`工作 ${item.id || item.__index + 1} 缺少 stopCondition。`);
     if (!['none','read','write'].includes(item.projectAccess)) issues.push(`工作 ${item.id || item.__index + 1} 的 projectAccess 必须是 none、read 或 write。`);
-    const capabilityContract=validateWorkCapabilityContract(item);
-    for(const issue of capabilityContract.issues)issues.push(`工作 ${item.id || item.__index + 1} 的 Required Work Semantics 无法由其 capability request 实现：${issue}。`);
     if (allowedInputs) for (const ref of item.inputRefs) if (!allowedInputs.has(ref)) issues.push(`工作 ${item.id || item.__index + 1} 引用了不存在的 Task Input：${ref}。`);
     const hasProjectInput=item.inputRefs.some(ref=>ref.startsWith('project:'));
     if (item.projectAccess !== 'none' && !hasProjectInput) issues.push(`工作 ${item.id || item.__index + 1} 申请 Project 访问时必须通过 inputRefs 显式选择至少一个项目。`);
@@ -296,7 +289,7 @@ export class RootRuntime {
       round: 0,
       subagentResults: pendingWorkResults,
       currentStage: null,
-      completedWorkUnits: durableWorkReceipts.map(receipt=>({ id:receipt.id, stageId:null, title:receipt.workUnit.title||receipt.id, projectAccess:receipt.workUnit.projectAccess||'none', networkAccess:receipt.workUnit.networkAccess===true, requiredCapabilities:requiredWorkCapabilities(receipt.workUnit), status:WorkUnitStatus.COMPLETED, detail:receipt.result?.result||'工作已完成。', updatedAt:receipt.completed_at||nowIso(), failureCount:0, nextRetryAt:null, canRetry:false, owner:'subagent' })),
+      completedWorkUnits: durableWorkReceipts.map(receipt=>({ id:receipt.id, stageId:null, title:receipt.workUnit.title||receipt.id, projectAccess:receipt.workUnit.projectAccess||'none', networkAccess:receipt.workUnit.networkAccess===true, status:WorkUnitStatus.COMPLETED, detail:receipt.result?.result||'工作已完成。', updatedAt:receipt.completed_at||nowIso(), failureCount:0, nextRetryAt:null, canRetry:false, owner:'subagent' })),
       cancelRequested: false,
       rootController: null,
       runningControllers: new Map(),
@@ -331,7 +324,7 @@ export class RootRuntime {
     this.emit(session, callbacks);
     const controller = new AbortController();
     const deliveredResults = Array.isArray(rootInputs) ? rootInputs : session.subagentResults.slice();
-    const activeWork = session.currentStage ? session.currentStage.workUnits.map(unit => ({ id:unit.id, title:unit.title, status:unit.status, projectAccess:unit.projectAccess||'none', networkAccess:unit.networkAccess===true, requiredCapabilities:requiredWorkCapabilities(unit), dependsOn:unit.dependsOn })) : [];
+    const activeWork = session.currentStage ? session.currentStage.workUnits.map(unit => ({ id:unit.id, title:unit.title, status:unit.status, projectAccess:unit.projectAccess||'none', networkAccess:unit.networkAccess===true, dependsOn:unit.dependsOn })) : [];
     session.rootController = controller;
     try {
       const runRoot = this.executor.runRoot.bind(this.executor);
@@ -449,7 +442,7 @@ export class RootRuntime {
       const afterOpen=Boolean(prepared?.current?.gaps?.some?.(gap=>String(gap?.id||'').trim()===targetGapId));
       recordTaskDiagnostic('human-gap-proof-result',{taskId:task.id,gatewayId,targetGapId,proofAttempted:Boolean(synthesizeHumanGapResolution&&beforeOpen),resolved:beforeOpen&&!afterOpen,gapStillOpen:afterOpen});
     }
-    const historyCommit=deriveHistoryFromTurn(prepared.turnNode);
+    const historyCommit=prepared.turnNode?.historyCommit ? clone(prepared.turnNode.historyCommit) : null;
     const workReceiptIds=(Array.isArray(rootInputs)?rootInputs:[]).map(item=>String(item?.delegationId||item?.workUnit?.id||'').trim()).filter(Boolean);
     if(prepared.turnNode){
       const commitPayload={analysisState:prepared.state,turnNode:prepared.turnNode,historyCommit:historyCommit?{...historyCommit,completedAt:prepared.turnNode.committedAt}:null,workReceiptIds};
@@ -494,7 +487,6 @@ export class RootRuntime {
         stopCondition: String(d.stopCondition || ''),
         projectAccess: ['read','write'].includes(d.projectAccess) ? d.projectAccess : 'none',
         networkAccess: d.networkAccess === true,
-        requiredCapabilities:requiredWorkCapabilities(d),
         inputRefs: Array.isArray(d.inputRefs) ? [...d.inputRefs] : [],
         skillId: d.skillId || null,
         dependsOn: deps,
@@ -555,7 +547,7 @@ export class RootRuntime {
     this.emit(session, callbacks);
 
     const dependencyResults = unit.dependsOn.map(id => { const dep=session.currentStage?.workUnits.find(x=>x.id===id); return dep?.result ? { id, title:dep.title, result:dep.result } : null; }).filter(Boolean);
-    const workUnit={ id:unit.id, title:unit.title, goal:unit.goal, expectedOutput:unit.expectedOutput, stopCondition:unit.stopCondition, projectAccess:unit.projectAccess||'none', networkAccess:unit.networkAccess===true, requiredCapabilities:requiredWorkCapabilities(unit), skillId:unit.skillId, dependsOn:[...(unit.dependsOn||[])], inputRefs:[...(unit.inputRefs||[])] };
+    const workUnit={ id:unit.id, title:unit.title, goal:unit.goal, expectedOutput:unit.expectedOutput, stopCondition:unit.stopCondition, projectAccess:unit.projectAccess||'none', networkAccess:unit.networkAccess===true, skillId:unit.skillId, dependsOn:[...(unit.dependsOn||[])], inputRefs:[...(unit.inputRefs||[])] };
     const effectCapable=workMayMutate(workUnit);
     const effectAttemptId=effectCapable?`effect:${task.id}:${unit.id}:${unit.failureCount+1}:${Date.now()}`:null;
     let executionStarted=false;
@@ -751,7 +743,7 @@ export class RootRuntime {
               if(!grant){plan.issues.push(`工作 ${item.id} 缺少 AuthorizedGrant。`);plan.valid=false;return item;}
               const required=requiredWorkCapabilities(item);
               if(!capabilitiesSatisfy(required,grant)){plan.issues.push(`工作 ${item.id} 的 Required Work Semantics 需要 project=${required.projectAccess}, network=${required.networkAccess}，但 AuthorizedGrant 仅为 project=${String(grant.projectAccess||'none')}, network=${grant.networkAccess===true}。`);plan.valid=false;return item;}
-              return{...item,requiredCapabilities:required,projectAccess:String(grant.projectAccess||'none'),networkAccess:grant.networkAccess===true,inputRefs:Array.isArray(grant.inputRefs)?[...grant.inputRefs]:[]};
+              return{...item,projectAccess:String(grant.projectAccess||'none'),networkAccess:grant.networkAccess===true,inputRefs:Array.isArray(grant.inputRefs)?[...grant.inputRefs]:[]};
             });
           }else for(const item of plan.delegations)if(item.projectAccess!=='none'||item.networkAccess===true||item.inputRefs.length){plan.issues.push(`工作 ${item.id} 请求受治理能力但没有 GovernanceCompiler。`);plan.valid=false;}
         }
