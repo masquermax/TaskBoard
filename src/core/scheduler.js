@@ -60,7 +60,12 @@ export class Scheduler {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
     this.stop();
-    for (const taskId of [...this.claimedTasks]) this.rootRuntime.interruptForShutdown?.(taskId);
+    for (const taskId of [...this.claimedTasks]) {
+      const current=this.repository.getTask(taskId);
+      const snapshot=this.rootRuntime.snapshot(taskId);
+      if(current&&snapshot)this.repository.setExecutionState(taskId,recoveryState(current,{snapshot}));
+      this.rootRuntime.interruptForShutdown?.(taskId);
+    }
   }
 
   async waitForIdle(timeoutMs = 1200) {
@@ -368,7 +373,7 @@ export class Scheduler {
     const task=this.repository.getTask(taskId);if(!task||task.deleted_at)throw new Error('TASK_NOT_FOUND');
     if(this.claimedTasks.has(taskId)||task.status===TaskStatus.RUNNING)throw new Error('TASK_DELETE_BECAME_RUNNING');
     if(![TaskStatus.READY,TaskStatus.COMPLETED].includes(task.status))throw new Error('TASK_DELETE_NOT_ALLOWED');
-    if(task.status===TaskStatus.COMPLETED&&task.locked)throw new Error('TASK_LOCKED');
+    if(task.status===TaskStatus.COMPLETED&&task.locked)throw new Error('TASK_LOCK_NOT_ALLOWED');
     this.repository.setDeleted(taskId,true);this.activities.delete(taskId);this.rootRuntime.discardSession(taskId);this.rootRuntime.cleanupTaskWorkspace?.(taskId);return {deleted:true};
   }
 
