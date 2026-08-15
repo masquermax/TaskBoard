@@ -185,11 +185,3 @@ export function decisionFromCertifiedState(state, control = {}) {
     gapResolutions:[],
   };
 }
-
-// Compatibility accessor for RootRuntime. History semantic-value derivation belongs
-// to ValidatorRuntime; Task Core only carries the already-owned candidate through
-// the accepted Certified Delta. A Turn without Validator-owned History has none.
-export function deriveHistoryFromTurn(turnNode) {
-  const value=turnNode?.historyCommit;
-  return value&&typeof value==='object'?clone(value):null;
-}
