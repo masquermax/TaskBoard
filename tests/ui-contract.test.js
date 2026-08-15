@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 const html=readFileSync(join(process.cwd(),'src/ui/index.html'),'utf8');
 const js=readFileSync(join(process.cwd(),'src/ui/app.js'),'utf8');
+const connectionJs=readFileSync(join(process.cwd(),'src/ui/connection-settings.js'),'utf8');
 const css=readFileSync(join(process.cwd(),'src/ui/app.css'),'utf8');
 const retry=readFileSync(join(process.cwd(),'src/core/retry-policy.js'),'utf8');
 
@@ -38,11 +39,18 @@ test('suspended retry copy explicitly tells the user what to do and uses a retry
   assert.match(js,/重新进入尝试流程，将从第 1\/5 次开始/);
 });
 
-test('executor UI is generic and capability discovery does not add login/API-key/provider-management controls',()=>{
+test('capability discovery stays read-only while Executor-owned connection settings expose a separate secret-safe provider surface',()=>{
   assert.match(js,/h\.displayName\|\|h\.executor/);
   assert.match(js,/OpenAI API/);
   assert.match(js,/h\.providerId/);
-  assert.doesNotMatch(html,/API Key|登录 ChatGPT|连接 ChatGPT|Base URL|切换 Provider/i);
+  assert.doesNotMatch(js,/API Key|Base URL|connection-mode|connection-api-key/i,'capability discovery UI must not become provider configuration');
+  assert.match(html,/id="connection-settings-section"/);
+  assert.match(html,/id="connection-mode"/);
+  assert.match(html,/id="connection-api-key"[^>]+type="password"|type="password"[^>]+id="connection-api-key"/i);
+  assert.match(connectionJs,/\/api\/executor\/connection/);
+  assert.match(connectionJs,/apiKeyConfigured/);
+  assert.doesNotMatch(connectionJs,/connection\.apiKey\b/,'stored API key must never be read back into the UI');
+  assert.doesNotMatch(html,/登录 ChatGPT|连接 ChatGPT|切换 Provider/i);
   assert.doesNotMatch(html,/model[^>]*select|reasoning[^>]*select/i);
   assert.match(html,/id="executor-model-refresh"/);
   assert.match(html,/data-refresh-state="refreshing"[^>]+aria-busy="true"/);
@@ -86,8 +94,9 @@ test('Codex embedded UI reports readiness to the host only after initial TaskBoa
 });
 
 
-test('simple configuration exposes only task concurrency and per-Root maximum Subagents, both 1-5',()=>{
+test('simple configuration keeps runtime concurrency controls limited to task concurrency and per-Root maximum Subagents while connection settings remain a separate section',()=>{
   assert.match(html,/id="simple-config-link"[^>]*>简易配置</);
+  assert.match(html,/id="connection-settings-section"/);
   assert.match(html,/任务并发数/);
   assert.match(html,/id="setting-task-concurrency"/);
   assert.match(html,/每任务 Subagent 上限/);
@@ -171,7 +180,7 @@ test('runtimeWork keeps Root or Validator visible beside Work Units and separate
 });
 
 test('current UI uses one project and Subagent-settings vocabulary without legacy system/thread labels',()=>{
-  const currentUi=`${html}\n${js}\n${css}`;
+  const currentUi=`${html}\n${js}\n${connectionJs}\n${css}`;
   assert.match(html,/项目筛选/);
   assert.match(html,/按任务标题模糊搜索/);
   assert.match(html,/任务标题/);
