@@ -131,7 +131,7 @@ test('Subagent receives one Executor-owned environment snapshot and does not nee
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
-test('Executor can only reduce network capability already present in AuthorizedGrant',async()=>{
+test('Executor realizes the AuthorizedGrant exactly or reports Runtime capability unavailable',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-codex-network-cap-'));
   try{
     const task={id:'T-NET',title:'network',instruction:'x',projectScopes:[],attachments:[],references:[]};
@@ -142,11 +142,14 @@ test('Executor can only reduce network capability already present in AuthorizedG
     await allowed.runSubagent({task,delegation:{...baseDelegation,networkAccess:false},policyContext:subPolicy({taskMode:'analysis',projectAccess:'none',networkAccess:false,inputRefs:[]}),modelPolicy:{}});
     await allowed.runSubagent({task,delegation:{...baseDelegation,networkAccess:true},policyContext:subPolicy({taskMode:'analysis',projectAccess:'none',networkAccess:true,inputRefs:[]}),modelPolicy:{}});
     assert.equal(allowedClient.calls[0].networkAccess,false,'ungranted network capability stays off');
-    assert.equal(allowedClient.calls[1].networkAccess,true,'AuthorizedGrant remains effective when Runtime availability permits it');
+    assert.equal(allowedClient.calls[1].networkAccess,true,'a realizable AuthorizedGrant is preserved exactly');
 
     const deniedClient=new CaptureClient();
     const denied=new CodexExecutor({runtimeRoot:join(dir,'denied'),client:deniedClient,networkAccess:false});
-    await denied.runSubagent({task,delegation:{...baseDelegation,networkAccess:true},policyContext:subPolicy({taskMode:'analysis',projectAccess:'none',networkAccess:true,inputRefs:[]}),modelPolicy:{}});
-    assert.equal(deniedClient.calls[0].networkAccess,false,'Executor may reduce but never expand AuthorizedGrant');
+    await assert.rejects(
+      denied.runSubagent({task,delegation:{...baseDelegation,networkAccess:true},policyContext:subPolicy({taskMode:'analysis',projectAccess:'none',networkAccess:true,inputRefs:[]}),modelPolicy:{}}),
+      error=>error?.runtimeUnavailable===true&&/RUNTIME_CAPABILITY_UNAVAILABLE/.test(error.message),
+    );
+    assert.equal(deniedClient.calls.length,0,'unrealizable Work is rejected before execution instead of silently receiving weaker semantics');
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
