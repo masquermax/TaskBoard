@@ -11,33 +11,29 @@ import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { Scheduler } from '../src/core/scheduler.js';
 import { TaskStatus } from '../src/core/types.js';
 import { classifyRetry } from '../src/core/retry-policy.js';
+import { GovernanceCompiler } from '../src/governance/governance-compiler.js';
 import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
 
 // Coding Recovery Slice — behavior contract probes.
+// Assert externally meaningful recovery outcomes, not a proposed Attempt/Fence
+// schema. A RED is trustworthy only when the fixture crosses the intended
+// failure boundary under the real D-017 Authority derivation path.
 //
-// These tests intentionally assert externally meaningful recovery behavior, not a
-// proposed Attempt/Fence/EffectStatus schema. The first tranche is expected to
-// contain Contract REDs on the current Runtime. A RED is useful only when the
-// fixture can manufacture the failure boundary deterministically.
+// Coverage map:
+//   #1  RED target — effect happened + transport disconnect must not duplicate.
+//   #2  RED target — process restart must recover durable truth before replay.
+//   #3  Existing capacity tests prove safely unavailable work auto-continues.
+//   #4  Existing Completion tests prove execution count does not satisfy Goal.
+//   #5  TODO — no stable idempotency-proof semantic seam exists yet.
+//   #6  RED target — network-only effects are subject to no-blind-replay.
+//   #7  GREEN truth guard — reality change alone creates no WorkReceipt.
+//   #8  TODO — no mutation-time relevant-precondition seam exists yet.
+//   #9  TODO — unresolved recovery truth has no durable behavior surface yet.
+//   #10 RED + GREEN scope pair — same-scope split brain blocks; independent Y
+//       must remain autonomous.
 //
-// Coverage map for the frozen attack scenarios:
-//   #1  RED below — effect happened + transport disconnect must not duplicate.
-//   #2  RED below — process restart must recover from durable truth, not replay.
-//   #3  Existing scheduler/runtime tests already prove pre-execution capacity
-//       shortage can wait and auto-continue; do not replace recovery with STOP.
-//   #4  Existing completion-work-occurrence-phase4 tests prove execution count
-//       does not satisfy the Goal.
-//   #5  TODO below — no stable idempotency-proof semantic seam exists yet.
-//   #6  RED below — network-only effects are also subject to no-blind-replay.
-//   #7  GREEN truth guard below — changed reality alone creates no WorkReceipt.
-//   #8  TODO below — no mutation-time relevant-precondition seam exists yet.
-//   #9  TODO below — unresolved recovery truth has no durable behavior surface yet.
-//   #10 RED + GREEN scope pair below — same-scope split brain blocks, unrelated
-//       scope must remain autonomous.
-//
-// Every scenario is evaluated along four dimensions: Safety, Truth, Autonomy,
-// and Scope. Safety must not be obtained by making every transport error
-// non-retryable or by globally freezing unrelated work.
+// Observe Safety, Truth, Autonomy and Scope. Safety must not be obtained by
+// making every transport error non-retryable or globally freezing unrelated work.
 
 function complete(result='done') {
   return {
@@ -89,12 +85,14 @@ function rig(executor,{dir=null,retryDelaysMs=[0,0,0,0],taskConcurrency=2}={}) {
   const repo=new JsonTaskRepository(db);
   const service=new TaskService(repo);
   const router=new ModelRouter();
+  const governanceCompiler=new GovernanceCompiler({rootDir:process.cwd()});
   const subagent=new SubagentRuntime({executor,modelRouter:router});
   const root=new RootRuntime({
     ...successfulCompletionDependenciesForControlFlowTest(),
     executor,
     modelRouter:router,
     subagentRuntime:subagent,
+    governanceCompiler,
     retryDelaysMs,
   });
   const scheduler=new Scheduler({
@@ -115,6 +113,28 @@ function rig(executor,{dir=null,retryDelaysMs=[0,0,0,0],taskConcurrency=2}={}) {
   };
 }
 
+function authorityItem(task,value) {
+  const requirement_refs=(task.taskContract?.requirementRefs||[]).map(ref=>({
+    source_id:ref.sourceId,
+    start:ref.start,
+    end:ref.end,
+  }));
+  return {value,certification:'supported',requirement_refs};
+}
+
+function certifyTaskAuthority(x,taskId,{projectWrite=false,networkAccess=false}={}) {
+  const task=x.repo.getTask(taskId);
+  const authority={networkAccess:authorityItem(task,networkAccess)};
+  if ((task.projectScopes||[]).length) authority.projectWrite=authorityItem(task,projectWrite);
+  x.repo.commitTaskContractAuthority(taskId,authority);
+  return x.repo.getTask(taskId);
+}
+
+function createAuthorizedTask(x,input,authority={}) {
+  const created=x.scheduler.createTask(input);
+  return certifyTaskAuthority(x,created.id,authority);
+}
+
 function projectIn(dir,name='project') {
   const path=join(dir,name);
   mkdirSync(path,{recursive:true});
@@ -130,8 +150,6 @@ async function drive(scheduler,turns=8) {
 }
 
 test('Scenario 1 — effect happened + transport disconnect: the same mutation is not blindly replayed',async()=>{
-  // Given: one write-capable Work Unit whose remote effect happens before the
-  // control channel reports a transport failure.
   let attempts=0;
   let mutations=0;
   const unit=workUnit();
@@ -144,13 +162,8 @@ test('Scenario 1 — effect happened + transport disconnect: the same mutation i
   const x=rig(executor);
   try {
     const project=projectIn(x.dir);
-    x.scheduler.createTask({title:'no blind replay',instruction:'modify project once',temporaryProjectPath:project});
-
-    // When: Scheduler gets repeated chances to recover/retry.
+    createAuthorizedTask(x,{title:'no blind replay',instruction:'modify project once',temporaryProjectPath:project},{projectWrite:true});
     await drive(x.scheduler);
-
-    // Then — Safety: one admitted real effect must not become multiple effects
-    // merely because the result channel was lost.
     assert.equal(mutations,1,'an UNKNOWN effect outcome must not be translated into NOT_APPLIED and replayed');
     assert.ok(attempts>=1);
   } finally { x.close(); }
@@ -166,7 +179,7 @@ test('Scenario 2 — restart crosses the memory boundary: stale RUNNING work mus
   // exists, and there is deliberately no successful WorkReceipt.
   const inert={async runRoot(){throw new Error('unused');},async runSubagent(){throw new Error('unused');}};
   const a=rig(inert,{dir});
-  const task=a.scheduler.createTask({title:'restart recovery',instruction:'ensure one effect',temporaryProjectPath:project});
+  const task=createAuthorizedTask(a,{title:'restart recovery',instruction:'ensure one project effect',temporaryProjectPath:project},{projectWrite:true});
   a.repo.transitionTask(task.id,TaskStatus.RUNNING,{executionState:null});
   assert.equal(a.repo.getTask(task.id).workReceipts.length,0);
   a.close({remove:false}); // Runtime A and all in-memory session state disappear.
@@ -182,12 +195,8 @@ test('Scenario 2 — restart crosses the memory boundary: stale RUNNING work mus
   });
   const b=rig(executor,{dir});
   try {
-    // When: startup recovery sees the stale RUNNING Task and the Scheduler runs.
     assert.equal(b.scheduler.recoverStaleRunningTasks(),1);
     await drive(b.scheduler,3);
-
-    // Then — Safety + durable recovery: Runtime B must not infer from missing
-    // in-memory state / missing receipt that the prior effect never happened.
     const effects=readFileSync(reality,'utf8').trim().split(/\r?\n/).filter(Boolean);
     assert.equal(effects.length,1,'restart must reconcile durable unresolved reality before any repeat mutation');
     assert.equal(newMutations,0);
@@ -206,7 +215,7 @@ test('Scenario 6 — network-only effect: no-blind-replay is not a synonym for p
   });
   const x=rig(executor);
   try {
-    x.scheduler.createTask({title:'network effect',instruction:'perform one external mutation'});
+    createAuthorizedTask(x,{title:'network effect',instruction:'perform one external network mutation'},{networkAccess:true});
     await drive(x.scheduler);
     assert.equal(externalPosts,1,'generic effect safety must also protect non-filesystem mutation surfaces');
     assert.ok(calls>=1);
@@ -226,14 +235,9 @@ test('Scenario 7 truth guard — changed reality without a successful result is 
     const project=projectIn(x.dir);
     const reality=join(project,'foo.js');
     writeFileSync(reality,'A\n','utf8');
-    const task=x.scheduler.createTask({title:'attribution guard',instruction:'inspect current reality',temporaryProjectPath:project});
-
-    // Given: a third party changes the reality independently of this Attempt.
-    writeFileSync(reality,'B\n','utf8');
+    const task=createAuthorizedTask(x,{title:'attribution guard',instruction:'inspect and potentially modify current project reality',temporaryProjectPath:project},{projectWrite:true});
+    writeFileSync(reality,'B\n','utf8'); // third-party change
     await x.scheduler.tick();
-
-    // Truth: observing B must never be sufficient by itself to manufacture a
-    // successful execution receipt for the interrupted Attempt.
     assert.equal(readFileSync(reality,'utf8'),'B\n');
     assert.equal(x.repo.getTask(task.id).workReceipts.length,0);
     assert.notEqual(x.service.getTask(task.id).status,TaskStatus.COMPLETED);
@@ -249,8 +253,6 @@ test('Scenario 10A — stale remote mutator on the same effect scope blocks a co
     attempt+=1;
     onExecutionStarted?.();
     if (attempt===1) {
-      // The TaskBoard-facing call fails, but a simulated remote mutator remains
-      // alive outside that failed control channel.
       oldMutatorMayStillAct=true;
       throw transportDisconnect();
     }
@@ -260,9 +262,8 @@ test('Scenario 10A — stale remote mutator on the same effect scope blocks a co
   const x=rig(executor);
   try {
     const project=projectIn(x.dir);
-    x.scheduler.createTask({title:'split brain X',instruction:'mutate X once',temporaryProjectPath:project});
+    createAuthorizedTask(x,{title:'split brain X',instruction:'mutate project X once',temporaryProjectPath:project},{projectWrite:true});
     await drive(x.scheduler);
-
     assert.equal(competingStarts,0,'same-scope mutation must wait for quiescence, fencing, isolation, or equivalent proof');
   } finally { x.close(); }
 });
@@ -284,11 +285,9 @@ test('Scenario 10B autonomy/scope guard — an unresolved mutator in project X m
   try {
     const projectX=projectIn(x.dir,'project-x');
     const projectY=projectIn(x.dir,'project-y');
-    x.scheduler.createTask({title:'X',instruction:'mutate X',temporaryProjectPath:projectX});
-    const y=x.scheduler.createTask({title:'Y',instruction:'mutate Y',temporaryProjectPath:projectY});
-
+    createAuthorizedTask(x,{title:'X',instruction:'mutate project X',temporaryProjectPath:projectX},{projectWrite:true});
+    const y=createAuthorizedTask(x,{title:'Y',instruction:'mutate project Y',temporaryProjectPath:projectY},{projectWrite:true});
     await drive(x.scheduler);
-
     assert.equal(x.service.getTask(y.id).status,TaskStatus.COMPLETED,'local recovery uncertainty must not become a global Task/Project freeze');
   } finally { x.close(); }
 });
