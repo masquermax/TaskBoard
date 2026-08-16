@@ -43,8 +43,9 @@ function normalizeProfileId(value, { generate=false } = {}) {
 
 function providerIdForProfile(profileId) {
   if (profileId===LEGACY_CUSTOM_PROFILE_ID) return CUSTOM_PROVIDER_ID;
-  const suffix=String(profileId).replace(/[^A-Za-z0-9_]/g,'_');
-  return `taskboard_${suffix}`;
+  const id=String(profileId||'');
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(id)) throw new Error('EXECUTOR_CONNECTION_PROFILE_ID_INVALID');
+  return `taskboard_${id}`;
 }
 
 function accountPublic() {
