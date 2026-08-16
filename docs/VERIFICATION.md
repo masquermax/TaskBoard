@@ -1,6 +1,8 @@
 # Verification v0.9.2
 
-Status: VERIFIED
+Status: HISTORICAL SHA VERIFIED
+
+Evidence scope: the exact named Git trees below only. This record does not certify descendant commits, branch names that later moved, provider behavior that was not exercised, or a new defect class merely because the generic suite stayed green. Every descendant requires its own exact-tree gate plus a class-specific acceptance witness for the behavior it claims.
 
 ## Verified recomposed tree
 
