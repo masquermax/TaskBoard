@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { CodexConnectionSettings } from '../src/extensions/config/codex/codex-connection-settings.js';
+import { CodexConnectionSettings, providerIdForProfile } from '../src/extensions/config/codex/codex-connection-settings.js';
 
 function runtime(){
   let connects=0,closes=0,invalidations=[];
@@ -13,6 +13,12 @@ function runtime(){
 }
 
 function profileById(state,id){return state.profiles.find(profile=>profile.id===id);}
+
+test('profile ids map one-to-one onto Codex provider keys',()=>{
+  assert.notEqual(providerIdForProfile('edge-one'),providerIdForProfile('edge_one'));
+  assert.equal(providerIdForProfile('edge-one'),'taskboard_edge-one');
+  assert.equal(providerIdForProfile('edge_one'),'taskboard_edge_one');
+});
 
 test('multiple saved custom profiles project independent Codex provider identities without Core changes',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-profiles-'));const file=join(dir,'codex.json');const rt=runtime();
