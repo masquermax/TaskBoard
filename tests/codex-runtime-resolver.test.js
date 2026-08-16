@@ -39,6 +39,28 @@ test('Codex runtime resolver uses an existing explicit command without installin
   assert.equal(installs,0);
 });
 
+test('Codex runtime resolver prefers the packaged standalone runtime over the PATH-style Windows shim', async () => {
+  const profile='C:\\Users\\max';
+  const local='C:\\Users\\max\\AppData\\Local';
+  const packaged='C:\\Users\\max\\.codex\\packages\\standalone\\current\\bin\\codex.exe';
+  const shim='C:\\Users\\max\\AppData\\Local\\Programs\\OpenAI\\Codex\\bin\\codex.exe';
+  const resolver=new CodexRuntimeResolver({
+    platform:'win32',
+    env:{USERPROFILE:profile,LOCALAPPDATA:local,APPDATA:'C:\\Users\\max\\AppData\\Roaming'},
+    exists:path=>path===packaged||path===shim,
+    spawnSyncImpl:(command,args)=>{
+      if(command==='where.exe')return fakeResult(0,`${shim}\r\n`);
+      if((command===packaged||command===shim)&&args[0]==='--version')return fakeResult(0,'codex-cli 0.147.0');
+      return fakeResult(1);
+    },
+    logger:{log(){},error(){}},
+  });
+  const status=await resolver.prepare();
+  assert.equal(status.available,true);
+  assert.equal(status.command,packaged);
+  assert.equal(status.source,'standalone');
+});
+
 test('Codex runtime resolver discovers the official standalone install even when codex is absent from PATH', async () => {
   const standalone='C:\\Users\\max\\AppData\\Local\\Programs\\OpenAI\\Codex\\bin\\codex.exe';
   const resolver=new CodexRuntimeResolver({
