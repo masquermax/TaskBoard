@@ -110,14 +110,19 @@ export class CodexCapabilityProvider extends CapabilityProviderPort {
     this.contextCache.clear();
     this.invalidatedReason = reason;
     this.refreshStatus = { state:'idle', source:null, startedAt:null, completedAt:null, error:null };
-    // Preserve the last usable model record across reconnects. It becomes stale
-    // until a lightweight config read confirms the new app-server generation.
+    // A mechanical app-server generation change may retain model evidence as stale.
+    // A provider/profile change invalidates catalog provenance completely: the same
+    // model ids cannot be assumed to describe the newly configured upstream.
+    const preserveCatalog = reason === 'app-server-generation-changed';
     if (this.current) {
+      const retainedModels=preserveCatalog && Array.isArray(this.current.models) ? this.current.models : [];
       this.current = {
         ...this.current,
+        models:retainedModels,
         stale:true,
         routingSafe:false,
         invalidatedReason:reason,
+        catalogState:retainedModels.length ? 'stale' : 'unavailable',
       };
     }
     this.client.recordDiagnostic?.('capability-invalidated',{reason,generation:this.client.connectionGeneration??null});
