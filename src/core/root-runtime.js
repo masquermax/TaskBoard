@@ -5,7 +5,7 @@ import { canonicalAnalysisSummary, hasGovernedCandidateDelta, renderAnalysisResu
 import { applyCertifiedDelta, decisionFromCertifiedState, knowledgeKeysFromState, normalizeCertifiedState } from '../governance/certified-state.js';
 import { taskInputRefs } from './task-input-scope.js';
 import { humanGatewayTransitionCandidate } from '../governance/human-gateway-evidence.js';
-import { applyAuthorityFidelity, defaultAuthoritySemanticCandidates } from '../governance/task-contract-fidelity.js';
+import { applyAuthorityFidelity, authoritySemanticCandidatesForWork } from '../governance/task-contract-fidelity.js';
 import { recordTaskDiagnostic } from './runtime-diagnostic.js';
 import { capabilitiesSatisfy, requiredWorkCapabilities, workMayMutate } from './work-capability.js';
 
@@ -278,7 +278,7 @@ export class RootRuntime {
     return this.executor.cleanupTaskWorkspace?.(taskId) ?? false;
   }
 
-  async ensureTaskAuthority(task,session,callbacks){const candidates=defaultAuthoritySemanticCandidates(task);if(!candidates.length)return task;session.actor={title:'Requirement Authority 认证',status:WorkUnitStatus.WAITING_RESOURCE,detail:'等待 Validator 核对 Requirement Authority。',updatedAt:nowIso(),owner:'validator'};this.emit(session,callbacks);let reviews=[];if(this.taskContractFidelityVerifier){const result=await this.taskContractFidelityVerifier.review({task,candidates,policyContext:this.governanceCompiler?.compileForRole?.(task,'validator')||session.policyContext,onExecutionStarted:()=>{session.actor.status=WorkUnitStatus.RUNNING;callbacks.onExecutionStarted?.({role:'validator'});this.emit(session,callbacks);},onProgress:p=>{session.actor.detail=p?.detail||p?.summary||session.actor.detail;this.emit(session,callbacks);}});reviews=Array.isArray(result?.reviews)?result.reviews:[];}const nextContract=applyAuthorityFidelity(task.taskContract,candidates,reviews);callbacks.onTaskContractAuthority?.(nextContract.authority);const next={...task,taskContract:nextContract};session.policyContext=this.governanceCompiler?.compileForTask?.(next)||session.policyContext;return next;}
+  async certifyWorkAuthority(task,session,callbacks,workUnits=[]){const candidates=authoritySemanticCandidatesForWork(task,workUnits);if(!candidates.length)return task;session.actor={title:'Requirement Authority 认证',status:WorkUnitStatus.WAITING_RESOURCE,detail:'Root 已提出受治理 Work capability；等待 Validator 核对这一具体语义晋升。',updatedAt:nowIso(),owner:'validator'};this.emit(session,callbacks);let reviews=[];if(this.taskContractFidelityVerifier){const result=await this.taskContractFidelityVerifier.review({task,candidates,policyContext:this.governanceCompiler?.compileForRole?.(task,'validator')||session.policyContext,onExecutionStarted:()=>{session.actor.status=WorkUnitStatus.RUNNING;callbacks.onExecutionStarted?.({role:'validator'});this.emit(session,callbacks);},onProgress:p=>{session.actor.detail=p?.detail||p?.summary||session.actor.detail;this.emit(session,callbacks);}});reviews=Array.isArray(result?.reviews)?result.reviews:[];}const nextContract=applyAuthorityFidelity(task.taskContract,candidates,reviews);callbacks.onTaskContractAuthority?.(nextContract.authority);const next={...task,taskContract:nextContract};session.policyContext=this.governanceCompiler?.compileForTask?.(next)||session.policyContext;return next;}
 
   createSession(task) {
     const restoredAnalysisState = normalizeCertifiedState(task.analysisState);
@@ -661,7 +661,6 @@ export class RootRuntime {
     const session = this.sessions.get(task.id) || this.createSession(task);
     session.cancelRequested = false;
     const callbacks = { onProgress, onStageCompleted, onProgressCommit, onCertifiedTurn, onTaskContractAuthority, onWorkReceipt, onWorkReceiptsConsumed, onEffectAttempt, onEffectAttemptCleared, onExecutionStarted };
-    try{task=await this.ensureTaskAuthority(task,session,callbacks);}catch(error){if(isCapacityUnavailable(error)){const delay=capacityRetryDelayMs(this.retryDelaysMs);return{kind:'waiting_resource',retryAt:Date.now()+delay,snapshot:this.makeSnapshot(session),reason:'等待 Requirement Authority Validator 资源恢复'};}throw error;}
     const newlyResolvedHuman=(Array.isArray(humanGatewayHistory)?humanGatewayHistory:[]).filter(g=>g?.status==='RESOLVED'&&String(g?.id||'').trim()&&!session.consumedHumanGatewayIds.has(String(g.id).trim()));
     let invocationTriggerRefs=newlyResolvedHuman.map(g=>`human:${String(g.id).trim()}`);
     if(!invocationTriggerRefs.length){
@@ -683,6 +682,7 @@ export class RootRuntime {
     while (true) {
       if (session.cancelRequested) return { kind:'cancelled', quiescent:this.isQuiescent(task.id) };
       const pendingValidation = session.pendingValidation;
+      const authorityResume = pendingValidation?.phase === 'authority';
       let stageOutcome = null;
       if (!pendingValidation && session.currentStage) {
         stageOutcome = await this.runStage(task, session, callbacks);
@@ -697,7 +697,9 @@ export class RootRuntime {
       session.pendingValidation = null;
       if(rootInputs.length&&!rootTriggerRefs.length)rootTriggerRefs=rootInputs.map(item=>String(item?.delegationId||item?.workUnit?.id||'').trim()).filter(Boolean).map(id=>`work:${id}`);
 
-      if (pendingValidation?.phase === 'validate') {
+      if (authorityResume) {
+        decision=pendingValidation.decision;rootInputs=[];session.actor={title:'Requirement Authority 认证',status:WorkUnitStatus.WAITING_RESOURCE,detail:'Root 的受治理 Work 计划已保留；等待 Validator 继续核对同一语义晋升。',updatedAt:nowIso(),owner:'validator'};this.emit(session,callbacks);
+      } else if (pendingValidation?.phase === 'validate') {
         decision=pendingValidation.decision;validationStartAttempt=pendingValidation.validationAttempt||1;session.actor={title:'Validator 认证',status:WorkUnitStatus.WAITING_RESOURCE,detail:'Root 候选结果已保留，等待认证资源；已完成的 Root/Subagent 工作不会重跑。',updatedAt:nowIso(),owner:'validator'};this.emit(session,callbacks);
       } else if (pendingValidation?.phase === 'rework') {
         validationStartAttempt=pendingValidation.validationAttempt||2;session.actor={title:'Root 局部修正',status:WorkUnitStatus.WAITING_RESOURCE,detail:'Validator 已给出明确认证反馈，等待 Root 对同一候选做一次局部修正。',updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);
@@ -720,10 +722,11 @@ export class RootRuntime {
       if(decision.kind==='cancelled')return{kind:'cancelled',quiescent:this.isQuiescent(task.id)};
 
       let reviewed;
-      try{reviewed=await this.reviewRootDecision(task,session,decision,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),validatorHumanGatewayHistory:humanGatewayHistory,startAttempt:validationStartAttempt,rootInputs,triggerRefs:rootTriggerRefs,synthesizeHumanGapResolution:pendingValidation?.phase!=='authority_handoff'});}
+      if(authorityResume)reviewed={decision,commits:[],requiresRootDecision:false};
+      else try{reviewed=await this.reviewRootDecision(task,session,decision,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),validatorHumanGatewayHistory:humanGatewayHistory,startAttempt:validationStartAttempt,rootInputs,triggerRefs:rootTriggerRefs,synthesizeHumanGapResolution:pendingValidation?.phase!=='authority_handoff'});}
       catch(error){if(isCapacityUnavailable(error)&&error?.pendingRootValidation){session.pendingValidation={...error.pendingRootValidation,rootInputs};const waitingForRework=error.pendingRootValidation.phase==='rework';const outcome=await capacityWait({title:waitingForRework?'Root 局部修正':'Validator 认证',detail:waitingForRework?'Validator 反馈已保留；等待 Root 对同一结果做一次局部修正。':'Root 候选结果已保留；等待 Validator 认证资源，其他独立 Work Unit 可继续。',reason:waitingForRework?'等待 Root 局部修正资源恢复':'等待 Validator 认证资源恢复'});if(outcome)return outcome;continue;}throw error;}
 
-      decision=reviewed.decision;consumeHumanTriggerRefs(session,rootTriggerRefs);this.consumeRootInputs(session,rootInputs);if(rootInputs.length)session.controlHandoffCount=0;
+      decision=reviewed.decision;if(!authorityResume){consumeHumanTriggerRefs(session,rootTriggerRefs);this.consumeRootInputs(session,rootInputs);if(rootInputs.length)session.controlHandoffCount=0;}
       if(reviewed.requiresRootDecision){
         if(pendingValidation?.phase==='authority_handoff'||session.controlHandoffCount>=1){const error=new Error('ROOT_CONTROL_NON_CONVERGENCE: certified state still requires a different control decision, but no new Subagent/Human/External trigger exists.');error.nonRetryable=true;throw error;}
         session.controlHandoffCount+=1;session.pendingValidation={phase:'authority_handoff',decision,feedback:reviewed.feedback||[],rootInputs:[],triggerRefs:rootTriggerRefs};session.actor={title:'Validator 已认证',status:WorkUnitStatus.COMPLETED,detail:'内容边界已认证并在有价值时写入 History；控制决策已交回 Root。',updatedAt:nowIso(),owner:'validator'};this.emit(session,callbacks);continue;
@@ -736,17 +739,6 @@ export class RootRuntime {
         if(!decision.delegations.length){const error=new Error('ROOT_EMPTY_DELEGATION');error.nonRetryable=true;throw error;}
         const knownWorkIds=session.currentStage?.workUnits?.map(unit=>unit.id)||[];
         const plan=validateDelegationPlan(decision.delegations,{knownWorkIds,availableInputRefs:taskInputRefs(task)});
-        if(plan.valid){
-          if(this.governanceCompiler?.compileForRole){
-            plan.delegations=plan.delegations.map(item=>{
-              const grant=this.governanceCompiler.compileForRole(task,'subagent',{skillId:item.skillId,workUnit:item})?.authorizedGrant;
-              if(!grant){plan.issues.push(`工作 ${item.id} 缺少 AuthorizedGrant。`);plan.valid=false;return item;}
-              const required=requiredWorkCapabilities(item);
-              if(!capabilitiesSatisfy(required,grant)){plan.issues.push(`工作 ${item.id} 的 Required Work Semantics 需要 project=${required.projectAccess}, network=${required.networkAccess}，但 AuthorizedGrant 仅为 project=${String(grant.projectAccess||'none')}, network=${grant.networkAccess===true}。`);plan.valid=false;return item;}
-              return{...item,projectAccess:String(grant.projectAccess||'none'),networkAccess:grant.networkAccess===true,inputRefs:Array.isArray(grant.inputRefs)?[...grant.inputRefs]:[]};
-            });
-          }else for(const item of plan.delegations)if(item.projectAccess!=='none'||item.networkAccess===true||item.inputRefs.length){plan.issues.push(`工作 ${item.id} 请求受治理能力但没有 GovernanceCompiler。`);plan.valid=false;}
-        }
         const batchSignatures=new Set();
         for(const item of plan.delegations){
           const signature=workSemanticSignature(item);
@@ -756,6 +748,26 @@ export class RootRuntime {
           if(item.skillId&&this.governanceCompiler?.hasSkill&&!this.governanceCompiler.hasSkill(item.skillId)){plan.issues.push(`工作 ${item.id} 选择了不存在的 Skill：${item.skillId}。`);plan.valid=false;}
         }
         if(!plan.valid){session.planningRepairCount+=1;session.planningFeedback=plan.issues;session.planningTriggerRefs=[...rootTriggerRefs];session.actor={title:'Work Unit 契约校验',status:WorkUnitStatus.COMPLETED,detail:'Root 的新工作单不符合 Capability Contract；问题已作为内部规划反馈返回 Root。',updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);if(session.planningRepairCount>=MAX_TOTAL_ATTEMPTS){const error=new Error(`ROOT_INVALID_DELEGATION_PLAN: ${plan.issues.join(' | ')}`);error.nonRetryable=true;throw error;}continue;}
+        try{task=await this.certifyWorkAuthority(task,session,callbacks,plan.delegations);}
+        catch(error){
+          if(isCapacityUnavailable(error)){
+            session.pendingValidation={phase:'authority',decision,rootInputs:[],triggerRefs:[...rootTriggerRefs]};
+            const outcome=await capacityWait({title:'Requirement Authority Validator',detail:'Root 的受治理 Work 计划已保留；等待 Validator 恢复后继续核对同一语义晋升。',reason:'等待 Requirement Authority Validator 资源恢复'});
+            if(outcome)return outcome;
+            continue;
+          }
+          throw error;
+        }
+        if(this.governanceCompiler?.compileForRole){
+          plan.delegations=plan.delegations.map(item=>{
+            const grant=this.governanceCompiler.compileForRole(task,'subagent',{skillId:item.skillId,workUnit:item})?.authorizedGrant;
+            if(!grant){plan.issues.push(`工作 ${item.id} 缺少 AuthorizedGrant。`);plan.valid=false;return item;}
+            const required=requiredWorkCapabilities(item);
+            if(!capabilitiesSatisfy(required,grant)){plan.issues.push(`工作 ${item.id} 的 Required Work Semantics 需要 project=${required.projectAccess}, network=${required.networkAccess}，但 AuthorizedGrant 仅为 project=${String(grant.projectAccess||'none')}, network=${grant.networkAccess===true}。`);plan.valid=false;return item;}
+            return{...item,projectAccess:String(grant.projectAccess||'none'),networkAccess:grant.networkAccess===true,inputRefs:Array.isArray(grant.inputRefs)?[...grant.inputRefs]:[]};
+          });
+        }else for(const item of plan.delegations)if(item.projectAccess!=='none'||item.networkAccess===true||item.inputRefs.length){plan.issues.push(`工作 ${item.id} 请求受治理能力但没有 GovernanceCompiler。`);plan.valid=false;}
+        if(!plan.valid){session.planningRepairCount+=1;session.planningFeedback=plan.issues;session.planningTriggerRefs=[...rootTriggerRefs];session.actor={title:'AuthorizedGrant 校验',status:WorkUnitStatus.COMPLETED,detail:'Root 的 Work capability 未被当前 Task Authority 授权；问题已作为内部规划反馈返回 Root。',updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);if(session.planningRepairCount>=MAX_TOTAL_ATTEMPTS){const error=new Error(`ROOT_INVALID_DELEGATION_PLAN: ${plan.issues.join(' | ')}`);error.nonRetryable=true;throw error;}continue;}
         session.planningFeedback=null;session.planningRepairCount=0;session.planningTriggerRefs=[];for(const item of plan.delegations)session.issuedWorkSignatures.add(workSemanticSignature(item));if(session.currentStage)this.appendToStage(session,plan.delegations);else this.createStage(session,plan.delegations);this.emit(session,callbacks);continue;
       }
 
