@@ -9,6 +9,7 @@ on:
 
 jobs:
   verify:
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -24,6 +25,7 @@ jobs:
 
   fresh-unpack:
     needs: verify
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
