@@ -47,8 +47,9 @@ test('Work Unit keeps issued/start/completion timestamps separate from last acti
 
   const issuedAt=unit.issuedAt;
   const outcome=await root.runStage(currentTask,session,{});
-  assert.equal(outcome.kind,'stage_complete');
-  const completed=root.makeSnapshot(session).completedWorkUnits[0];
+  assert.equal(outcome.kind,'work_results_ready','a completed Subagent result must return to Root before the stage is cleared');
+  const completed=root.makeSnapshot(session).stage.workUnits[0];
+  assert.equal(completed.status,'COMPLETED');
   assert.equal(completed.issuedAt,issuedAt,'progress updates must never rewrite issuance time');
   assert.ok(completed.startedAt,'first real Subagent admission must be recorded');
   assert.ok(completed.completedAt,'completion must have its own timestamp');
