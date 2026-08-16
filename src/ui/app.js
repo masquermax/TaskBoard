@@ -63,7 +63,6 @@ function executorConnectionLabel(h){
   if(h.preparing)return`${name} · 正在准备执行组件，无需操作`;
   if(!h.available)return`${name} · 执行组件未就绪，请检查网络或本机 ${name}`;
   if(h.connected===false)return`${name} · 暂时不可用，将自动重试`;
-  if(h.authenticated===false)return`${name} · 尚未登录，请先在 ${name} 中完成登录`;
   if(h.ready===false)return`${name} · 配置未就绪，请在 ${name} 中检查`;
   if(h.executor==='mock')return`${name} · 已连接`;
   if(h.authMode==='chatgpt')return`${name} · 已连接${h.planType?` · ChatGPT ${String(h.planType).replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())}`:' · ChatGPT'}`;
