@@ -42,9 +42,9 @@ function windowsPathCandidates(env) {
   const codexHome = env.CODEX_HOME || j(userProfile, '.codex');
   const installDir = env.CODEX_INSTALL_DIR || j(localAppData, 'Programs', 'OpenAI', 'Codex', 'bin');
   return [
-    j(installDir, 'codex.exe'),
     j(codexHome, 'packages', 'standalone', 'current', 'bin', 'codex.exe'),
     j(codexHome, 'packages', 'standalone', 'current', 'codex.exe'),
+    j(installDir, 'codex.exe'),
     j(localAppData, 'OpenAI', 'Codex', 'bin', 'codex.exe'),
     j(appData, 'npm', 'codex.cmd'),
     j(appData, 'npm', 'codex.exe'),
@@ -134,7 +134,10 @@ export class CodexRuntimeResolver {
   candidateCommands() {
     const explicit = this.env.CODEX_COMMAND || this.env.TASKBOARD_CODEX_COMMAND || null;
     const known = this.platform === 'win32' ? windowsPathCandidates(this.env) : posixPathCandidates(this.env);
-    const candidates = [explicit, ...this.whereCandidates(), ...known].filter(Boolean);
+    const discovered = this.whereCandidates();
+    const candidates = this.platform === 'win32'
+      ? [explicit, ...known, ...discovered]
+      : [explicit, ...discovered, ...known];
     return uniq(candidates.filter(candidate => candidate === explicit || this.exists(candidate)));
   }
 
