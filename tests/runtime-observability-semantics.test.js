@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { RootRuntime } from '../src/core/root-runtime.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
@@ -93,4 +95,26 @@ test('the Codex embedded surface can bundle the shared Work timing projection',(
   assert.match(bundle.appExpression,/function formatWorkTiming\s*\(/);
   assert.match(bundle.appExpression,/const formatPhaseTime=formatTaskTime/);
   assert.doesNotMatch(bundle.appExpression,/^\s*(?:import|export)\s/m);
+});
+
+test('embedded time bundling preserves named imports and aliases instead of one hard-coded import shape',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'taskboard-embedded-time-'));
+  try{
+    writeFileSync(join(dir,'index.html'),'<body><script src="/app.js"></script><script src="/connection-settings.js"></script></body>');
+    writeFileSync(join(dir,'app.css'),'');
+    writeFileSync(join(dir,'time.js'),[
+      "export function formatTaskTime(){return 'task';}",
+      "export function formatElapsedTime(){return 'elapsed';}",
+      "export function formatWorkTiming(){return 'work';}",
+    ].join('\n'));
+    writeFileSync(join(dir,'app.js'),"import { formatElapsedTime as elapsed, formatWorkTiming } from './time.js';\nglobalThis.__timeBundle=[elapsed(),formatWorkTiming()];");
+    writeFileSync(join(dir,'connection-settings.js'),'globalThis.__connectionBundle=true;');
+
+    const bundle=loadEmbeddedTaskboardUi(dir);
+    assert.match(bundle.appExpression,/const elapsed=formatElapsedTime;/);
+    assert.match(bundle.appExpression,/function formatWorkTiming\s*\(/);
+    assert.doesNotMatch(bundle.appExpression,/^\s*(?:import|export)\s/m);
+  }finally{
+    rmSync(dir,{recursive:true,force:true});
+  }
 });
