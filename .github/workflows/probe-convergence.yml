@@ -1,0 +1,22 @@
+name: Probe Work Unit convergence
+
+on:
+  push:
+    branches:
+      - fix/v0.9.2-work-unit-convergence
+
+concurrency:
+  group: probe-convergence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm run check
+      - run: timeout 120s node --test tests/codex-app-server-client.test.js tests/work-unit-convergence.test.js tests/work-unit-convergence-composition.test.js tests/authority-lifecycle-real-entry.test.js
