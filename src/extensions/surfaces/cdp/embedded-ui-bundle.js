@@ -6,14 +6,14 @@ function extractBody(html){
   return match[1].replace(/<script\b[^>]*\bsrc=["']\/(?:app|connection-settings)\.js["'][^>]*><\/script>/gi,'');
 }
 function formatTimeSource(source){
-  const value=source.trim().replace(/^export\s+/m,'');
+  const value=source.trim().replace(/^export\s+/gm,'');
   if(!/function\s+formatTaskTime\s*\(/.test(value))throw new Error('TaskBoard time formatter could not be bundled');
   return value;
 }
 function moduleExpression(source,{timeSource=null,name='module'}={}){
   let value=source;
   if(timeSource){
-    value=source.replace(/^import\s+\{\s*formatTaskTime\s+as\s+formatPhaseTime\s*\}\s+from\s+["']\.\/time\.js["'];?\s*/m,`${timeSource}\nconst formatPhaseTime=formatTaskTime;\n`);
+    value=source.replace(/^import\s+\{[^\n]+\}\s+from\s+["']\.\/time\.js["'];?\s*/m,`${timeSource}\nconst formatPhaseTime=formatTaskTime;\n`);
     if(value===source)throw new Error('TaskBoard app module import could not be bundled');
   }
   if(/^\s*(?:import|export)\s/m.test(value))throw new Error(`TaskBoard ${name} module contains an unsupported module boundary`);
