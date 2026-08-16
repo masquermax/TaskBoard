@@ -85,7 +85,7 @@ test('legacy singleton connection files migrate into one stable custom profile w
     assert.equal(migrated.apiKeyConfigured,true);
     assert.equal(JSON.stringify(state).includes('legacy-secret'),false);
     const launch=settings.launchProfile();
-    assert.equal(launch.providerId,'taskboard_custom_default');
+    assert.equal(launch.providerId,'taskboard_custom','legacy migration preserves the already-supported Codex provider identity');
     assert.equal(launch.env.TASKBOARD_CODEX_API_KEY,'legacy-secret');
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
