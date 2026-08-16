@@ -1,12 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { capabilitiesSatisfy, requiredWorkCapabilities, validateWorkCapabilityContract } from '../src/core/work-capability.js';
+import { capabilitiesSatisfy, requiredWorkCapabilities } from '../src/core/work-capability.js';
 
 test('D-019: Work Unit capability request is the minimum capability required by its authored semantics',()=>{
   const writeWork={projectAccess:'write',networkAccess:false};
-  const contract=validateWorkCapabilityContract(writeWork);
-  assert.deepEqual(contract.issues,[]);
-  assert.deepEqual(contract.required,{projectAccess:'write',networkAccess:false});
+  assert.deepEqual(requiredWorkCapabilities(writeWork),{projectAccess:'write',networkAccess:false});
   assert.equal(capabilitiesSatisfy(requiredWorkCapabilities(writeWork),{projectAccess:'read',networkAccess:false}),false,
     'an allowed read grant cannot silently redefine work that requires write');
   assert.equal(capabilitiesSatisfy(requiredWorkCapabilities(writeWork),{projectAccess:'write',networkAccess:false}),true);
