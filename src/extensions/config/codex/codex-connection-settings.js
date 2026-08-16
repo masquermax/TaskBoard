@@ -304,19 +304,18 @@ export class CodexConnectionSettings {
     const legacy=normalizeCodexConnectionSettings(next,current);
     let profiles=clone(this.value.profiles);
     let targetProfile=target;
-    if (legacy.baseUrl || legacy.defaultModel || legacy.apiKey || legacy.mode==='custom') {
+    if (legacy.mode==='account' && next.clearApiKey===true && target) {
+      profiles=profiles.filter(profile=>profile.id!==target.id);
+      targetProfile=null;
+    } else if (legacy.baseUrl || legacy.defaultModel || legacy.apiKey || legacy.mode==='custom') {
       targetProfile=normalizeCustomProfile({
         id:target?.id||LEGACY_CUSTOM_PROFILE_ID,
         name:target?.name||'自定义 API',
         baseUrl:legacy.baseUrl,
         defaultModel:legacy.defaultModel,
         apiKey:legacy.apiKey,
-        clearApiKey:next.clearApiKey===true,
       },target);
       profiles=profiles.filter(profile=>profile.id!==targetProfile.id).concat(targetProfile);
-    } else if (target && next.clearApiKey===true) {
-      profiles=profiles.filter(profile=>profile.id!==target.id);
-      targetProfile=null;
     }
     const activeProfileId=legacy.mode==='custom' ? targetProfile.id : ACCOUNT_PROFILE_ID;
     const candidate={schemaVersion:STORE_SCHEMA_VERSION,activeProfileId,profiles};
