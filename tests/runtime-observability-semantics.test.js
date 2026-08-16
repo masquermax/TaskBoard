@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { RootRuntime } from '../src/core/root-runtime.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { ModelRouter } from '../src/core/model-router.js';
+import { loadEmbeddedTaskboardUi } from '../src/extensions/surfaces/cdp/embedded-ui-bundle.js';
 
 function delegation(id='audit') {
   return {
@@ -83,4 +85,12 @@ test('UI distinguishes certified conclusions from runtime execution progress',()
   assert.match(html,/已确认结论/);
   assert.match(html,/已通过认证并进入当前 Task 认知/);
   assert.doesNotMatch(html,/已确认进展/);
+});
+
+test('the Codex embedded surface can bundle the shared Work timing projection',()=>{
+  const uiRoot=fileURLToPath(new URL('../src/ui/',import.meta.url));
+  const bundle=loadEmbeddedTaskboardUi(uiRoot);
+  assert.match(bundle.appExpression,/function formatWorkTiming\s*\(/);
+  assert.match(bundle.appExpression,/const formatPhaseTime=formatTaskTime/);
+  assert.doesNotMatch(bundle.appExpression,/^\s*(?:import|export)\s/m);
 });
