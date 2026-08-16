@@ -22,4 +22,7 @@ test('release identity is consistent across executable/package/current release d
   assert.match(architecture,new RegExp(`^# TaskBoard Architecture v${version.replaceAll('.','\\.')}`,'m'));
   assert.match(codex,new RegExp(`^# Codex Integration v${version.replaceAll('.','\\.')}`,'m'));
   assert.match(verification,new RegExp(`^# Verification v${version.replaceAll('.','\\.')}$`,'m'));
+  assert.match(verification,/^Status: HISTORICAL SHA VERIFIED$/m);
+  assert.match(verification,/Evidence scope: the exact named Git trees below only\./);
+  assert.doesNotMatch(verification,/^Status: VERIFIED$/m);
 });
