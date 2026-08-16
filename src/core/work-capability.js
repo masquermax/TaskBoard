@@ -5,25 +5,14 @@ export function normalizeProjectAccess(value){
   return normalized in ACCESS_RANK?normalized:'none';
 }
 
-// A Work Unit must ask only for the minimum capability its authored semantics
-// actually require. Keeping a second "requiredCapabilities" field creates two
-// competing descriptions of the same work and lets them drift apart.
+// The Work Unit request is the minimum capability its authored semantics require.
+// Keep one representation only; Governance may deny it but must not silently
+// redefine the Work by weakening the realized capability.
 export function requiredWorkCapabilities(work={}){
   return {
     projectAccess:normalizeProjectAccess(work?.projectAccess),
     networkAccess:work?.networkAccess===true,
   };
-}
-
-// Compatibility name for callers/tests that still speak in request terms.
-// Request and required semantics are intentionally the same current contract.
-export function requestedWorkCapabilities(work={}){
-  return requiredWorkCapabilities(work);
-}
-
-export function validateWorkCapabilityContract(work={}){
-  const required=requiredWorkCapabilities(work);
-  return {requested:{...required},required,issues:[]};
 }
 
 export function capabilitiesSatisfy(requiredValue={},actualValue={}){
