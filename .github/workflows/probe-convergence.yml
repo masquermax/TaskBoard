@@ -19,4 +19,4 @@ jobs:
         with:
           node-version: 24
       - run: npm run check
-      - run: timeout 120s node --test tests/codex-app-server-client.test.js tests/work-unit-convergence.test.js tests/work-unit-convergence-composition.test.js tests/authority-lifecycle-real-entry.test.js
+      - run: timeout 120s node --test tests/codex-app-server-client.test.js tests/work-unit-convergence.test.js tests/work-unit-convergence-context.test.js tests/work-unit-convergence-composition.test.js tests/authority-lifecycle-real-entry.test.js
