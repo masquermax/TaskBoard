@@ -82,11 +82,14 @@ test('Root turn keeps the semantic activity title instead of collapsing every tu
   assert.equal(snapshots.at(-1)?.actor?.title,'Root 初始判断');
 });
 
-test('UI distinguishes certified conclusions from runtime execution progress',()=>{
+test('UI and active specification use the same certified-conclusion terminology',()=>{
   const html=readFileSync(new URL('../src/ui/index.html',import.meta.url),'utf8');
+  const spec=readFileSync(new URL('../docs/SPECIFICATION.md',import.meta.url),'utf8');
   assert.match(html,/已确认结论/);
   assert.match(html,/已通过认证并进入当前 Task 认知/);
+  assert.match(spec,/User-facing durable knowledge is labeled `已确认结论`/);
   assert.doesNotMatch(html,/已确认进展/);
+  assert.doesNotMatch(spec,/已确认进展/);
 });
 
 test('the Codex embedded surface can bundle the shared Work timing projection',()=>{
