@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { ExtensionRegistry, OrchestrationMode } from '../src/extensions/runtime/extension-registry.js';
+import { ConnectionSettingsPort } from '../src/extensions/ports/connection-settings.js';
 import { SurfaceManager } from '../src/extensions/runtime/surface-manager.js';
 import { ExecutorPort } from '../src/core/executor-port.js';
 import { CapabilityProviderPort } from '../src/extensions/ports/capability-provider.js';
@@ -9,6 +10,11 @@ import { SurfaceHostPort } from '../src/extensions/ports/surface-host.js';
 
 class DemoExecutor extends ExecutorPort {}
 class DemoCapability extends CapabilityProviderPort { async discover(){ return { discoveryLevel:'basic' }; } }
+class DemoConnectionSettings extends ConnectionSettingsPort {
+  describe(){return{schemaVersion:1,kind:'form',title:'Demo',fields:[]};}
+  getPublic(){return{connected:true};}
+  async update(){return this.getPublic();}
+}
 class DemoSurface extends SurfaceHostPort {
   constructor(){ super(); this.started=0; this.stopped=0; this.scanned=0; }
   start(){ this.started+=1; }
@@ -17,7 +23,7 @@ class DemoSurface extends SurfaceHostPort {
   status(){ return { id:'demo-surface', state:this.started>this.stopped?'watching':'stopped', attachedTargets:0, error:null }; }
 }
 
-test('generic extension registry carries independent execution, capability, presentation, orchestration and surface axes', () => {
+test('generic extension registry carries independent execution, capability, settings, presentation, orchestration and surface axes', () => {
   const registry=new ExtensionRegistry();
   registry.register('demo',()=>({
     displayName:'Demo',
@@ -25,6 +31,7 @@ test('generic extension registry carries independent execution, capability, pres
     presentation:{description:'External demo executor'},
     executor:new DemoExecutor(),
     capabilityProvider:new DemoCapability(),
+    connectionSettings:new DemoConnectionSettings(),
     surfaceHosts:[new DemoSurface()],
   }));
   const extension=registry.create('demo');
@@ -34,8 +41,14 @@ test('generic extension registry carries independent execution, capability, pres
   assert.equal(extension.presentation.description,'External demo executor');
   assert.ok(extension.executor instanceof ExecutorPort);
   assert.ok(extension.capabilityProvider instanceof CapabilityProviderPort);
+  assert.ok(extension.connectionSettings instanceof ConnectionSettingsPort);
   assert.ok(extension.surfaceHosts[0] instanceof SurfaceHostPort);
   assert.throws(()=>registry.register('demo',()=>({})),/EXTENSION_DUPLICATE/);
+});
+
+test('incomplete connection settings fail closed at the extension boundary',()=>{
+  const registry=new ExtensionRegistry().register('bad-settings',()=>({executor:new DemoExecutor(),connectionSettings:{getPublic(){return{};}}}));
+  assert.throws(()=>registry.create('bad-settings'),/EXTENSION_CONNECTION_SETTINGS_INVALID:bad-settings/);
 });
 
 test('runtime-native orchestration is a distinct declared mode rather than an implicit runSubagent variant',()=>{
