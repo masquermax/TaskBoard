@@ -5,7 +5,7 @@ import { CodexCapabilityProvider } from '../capabilities/codex/codex-capability-
 import { CodexCdpSurfaceHost } from '../surfaces/codex/codex-cdp-surface-host.js';
 import { CodexConnectionSettings } from '../config/codex/codex-connection-settings.js';
 import { CodexConnectionGate } from '../config/codex/codex-connection-gate.js';
-import { OrchestrationMode } from '../runtime/extension-registry.js';
+import { EXTENSION_API_VERSION, OrchestrationMode } from '../runtime/extension-registry.js';
 
 export function createCodexExtension({ rootDir, taskboardUrl } = {}) {
   const connectionSettings = new CodexConnectionSettings({ file:resolve(rootDir,'data/executor-connections/codex.json') });
@@ -23,6 +23,7 @@ export function createCodexExtension({ rootDir, taskboardUrl } = {}) {
   const executor = new CodexExecutor({ runtimeRoot:resolve(rootDir,'data/runtime'), client, capabilityProvider });
   const surfaceHosts = [new CodexCdpSurfaceHost({ taskboardUrl })];
   return {
+    apiVersion:EXTENSION_API_VERSION,
     displayName:'Codex',
     orchestrationMode:OrchestrationMode.TASKBOARD,
     presentation:{description:'Codex Executor'},
