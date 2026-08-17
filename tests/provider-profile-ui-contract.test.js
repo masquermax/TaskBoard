@@ -17,7 +17,7 @@ test('simple AI connection UI is extension-presentation driven without exposing 
   assert.match(ui,/\.profiles/);
   assert.match(ui,/actions\.save\|\|'saveProfile'/);
   assert.match(ui,/actions\.select\|\|'selectProfile'/);
-  assert.match(ui,/actions\.delete\|\|'deleteProfile'/);
+  assert.match(ui,/actions\?\.delete\|\|'deleteProfile'/);
   assert.match(ui,/field\.type==='secret'/);
   assert.doesNotMatch(html,/wire_api|env_key|requires_openai_auth|model_providers\./i);
   assert.doesNotMatch(ui,/wire_api|env_key|requires_openai_auth|model_providers\./i);
