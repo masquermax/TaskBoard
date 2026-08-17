@@ -13,6 +13,14 @@ function normalizePresentation(value={}){
   };
 }
 
+function validateConnectionSettings(id,settings){
+  if(!settings)return null;
+  if(typeof settings.describe!=='function'||typeof settings.getPublic!=='function'||typeof settings.update!=='function'){
+    throw new Error(`EXTENSION_CONNECTION_SETTINGS_INVALID:${id}`);
+  }
+  return settings;
+}
+
 export class ExtensionRegistry {
   constructor() { this.factories = new Map(); }
 
@@ -45,7 +53,7 @@ export class ExtensionRegistry {
       orchestrationMode,
       executor: extension.executor || null,
       capabilityProvider: extension.capabilityProvider || null,
-      connectionSettings: extension.connectionSettings || null,
+      connectionSettings: validateConnectionSettings(key,extension.connectionSettings||null),
       presentation: normalizePresentation(extension.presentation),
       surfaceHosts: Array.isArray(extension.surfaceHosts) ? extension.surfaceHosts : [],
     };
