@@ -2,14 +2,15 @@ const $=id=>document.getElementById(id);
 const embedConfig=globalThis.__TASKBOARD_EMBED_CONFIG__||null;
 const NEW_PROFILE_ID='__new__';
 let connectionState=null;
-let keyConfigured=false;
+let presentationState=null;
+let extensionState=null;
 let discoveredModels=[];
 
 const errorCopy={
   EXECUTOR_CONNECTION_MODE_INVALID:'AI 连接方式无效',
   EXECUTOR_CONNECTION_BASE_URL_INVALID:'API 地址必须是有效的 http/https 地址，且不能包含账号、密码、查询参数或 # 片段',
   EXECUTOR_CONNECTION_BASE_URL_REQUIRED:'请填写 API 地址',
-  EXECUTOR_CONNECTION_API_KEY_REQUIRED:'第一次保存这个自定义连接时必须填写 API Key',
+  EXECUTOR_CONNECTION_API_KEY_REQUIRED:'第一次保存这个连接时必须填写 API Key',
   EXECUTOR_CONNECTION_PROFILE_ID_INVALID:'连接标识无效，请重新新建',
   EXECUTOR_CONNECTION_PROFILE_NOT_FOUND:'这个 AI 连接已经不存在，请刷新后重试',
   EXECUTOR_CONNECTION_ACTIVE_PROFILE_DELETE:'正在使用的 AI 连接不能直接删除，请先切换到其他连接',
@@ -17,7 +18,7 @@ const errorCopy={
   EXECUTOR_CONNECTION_ACTION_INVALID:'AI 连接操作无效',
   EXECUTOR_CONNECTION_BUSY:'当前仍有 AI Turn 在执行，请等待任务收敛后再切换连接',
   EXECUTOR_CONNECTION_APPLY_FAILED:'新 AI 连接未能启动，已自动恢复原配置',
-  EXECUTOR_CONNECTION_UNAVAILABLE:'当前 Executor 不支持连接配置',
+  EXECUTOR_CONNECTION_UNAVAILABLE:'当前 Executor 不提供可配置的连接设置',
 };
 
 function api(path,options={}){
@@ -35,89 +36,110 @@ function api(path,options={}){
 
 function toast(message){const node=$('toast');if(!node)return;node.textContent=message;node.classList.add('show');setTimeout(()=>node.classList.remove('show'),2600);}
 function readable(error){return errorCopy[error?.message]||error?.message||'操作失败';}
+function escapeHtml(value){return String(value??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+function safeKey(value){return String(value||'field').replace(/[^A-Za-z0-9_-]/g,'_');}
+function fieldId(field){return `connection-field-${safeKey(field?.key)}`;}
+function fieldNoteId(field){return `${fieldId(field)}-note`;}
+function supportedField(field){return ['text','url','secret','model','select'].includes(String(field?.type||'text'));}
+function fields(){return (Array.isArray(presentationState?.fields)?presentationState.fields:[]).filter(field=>field?.key&&supportedField(field));}
+function profiles(){return Array.isArray(connectionState?.profiles)?connectionState.profiles:[];}
+function profileById(id){return profiles().find(profile=>String(profile?.id)===String(id))||null;}
+function selectedProfileId(){return $('connection-profile-select')?.value||connectionState?.activeProfileId||'';}
+function selectedProfile(){const id=selectedProfileId();return id===NEW_PROFILE_ID?null:profileById(id);}
 
-function ensureProfileControls(){
-  const fields=$('connection-custom-fields');
-  if(!fields)return;
-  if(!$('connection-profile-name')){
-    const label=document.createElement('label');
-    label.id='connection-profile-name-row';
-    label.innerHTML='<span>连接名称</span><input id="connection-profile-name" placeholder="例如：公司 API" autocomplete="off">';
-    fields.insertBefore(label,fields.firstChild);
-  }
-  if(!$('connection-model-options')){
-    const list=document.createElement('datalist');list.id='connection-model-options';fields.appendChild(list);
-  }
-  const model=$('connection-default-model');if(model)model.setAttribute('autocomplete','off');
-  if(!$('connection-delete')){
-    const save=$('connection-save');
-    const button=document.createElement('button');button.type='button';button.id='connection-delete';button.className='secondary-button full hidden';button.textContent='删除这个 AI 连接';
-    save?.parentElement?.insertBefore(button,save.nextSibling);
-    button.addEventListener('click',deleteConnection);
-  }
+function optionHtml(option){
+  const value=typeof option==='object'?option.value:option;
+  const label=typeof option==='object'?(option.label??option.value):option;
+  return `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
 }
 
-function normalizedProfiles(connection={}){
-  if(Array.isArray(connection.profiles)&&connection.profiles.length)return connection.profiles;
-  const profiles=[{id:'account',name:'Codex 当前账号',kind:'account',builtin:true,baseUrl:'',defaultModel:'',apiKeyConfigured:false}];
-  if(connection.mode==='custom')profiles.push({id:'custom-default',name:'自定义 API',kind:'custom',builtin:false,baseUrl:connection.baseUrl||'',defaultModel:connection.defaultModel||'',apiKeyConfigured:Boolean(connection.apiKeyConfigured)});
-  return profiles;
+function fieldHtml(field){
+  const id=fieldId(field);const label=escapeHtml(field.label||field.key);const placeholder=escapeHtml(field.placeholder||'');
+  if(field.type==='select'){
+    return `<label data-connection-field="${escapeHtml(field.key)}"><span>${label}</span><select id="${id}">${(field.options||[]).map(optionHtml).join('')}</select></label>`;
+  }
+  const type=field.type==='secret'?'password':field.type==='url'?'url':'text';
+  const list=field.type==='model'?` list="connection-model-options"`:'';
+  const note=field.type==='secret'?`<div id="${fieldNoteId(field)}" class="hint"></div>`:'';
+  return `<label data-connection-field="${escapeHtml(field.key)}"><span>${label}</span><input id="${id}" type="${type}" placeholder="${placeholder}" autocomplete="off"${list}></label>${note}`;
 }
 
-function profileById(id){return normalizedProfiles(connectionState||{}).find(profile=>profile.id===id)||null;}
+function renderConnectionShell(){
+  const section=$('connection-settings-section');if(!section)return;
+  if(!presentationState){section.classList.add('hidden');section.innerHTML='';return;}
+  section.classList.remove('hidden');
+  const title=escapeHtml(presentationState.title||'AI 连接');
+  const extensionName=escapeHtml(extensionState?.displayName||extensionState?.id||'Executor');
+  const help=escapeHtml(presentationState.help||'');
+  const kind=String(presentationState.kind||'form');
+  const profileSelector=kind==='profiles'
+    ? `<label><span>${escapeHtml(presentationState.selectorLabel||'连接')}</span><select id="connection-profile-select"></select></label>`
+    : '';
+  section.innerHTML=`<div class="section-title">${title}</div><div class="hint" id="connection-extension-note">当前 Executor · ${extensionName}</div>${profileSelector}<div id="connection-dynamic-fields">${fields().map(fieldHtml).join('')}</div><datalist id="connection-model-options"></datalist>${help?`<div class="hint">${help}</div>`:''}<button type="button" id="connection-save" class="secondary-button full">${escapeHtml(presentationState.saveLabel||'应用连接设置')}</button><button type="button" id="connection-delete" class="secondary-button full hidden">${escapeHtml(presentationState.deleteLabel||'删除连接')}</button><div class="divider"></div>`;
+  if(kind==='profiles'){
+    populateProfileSelect();
+    $('connection-profile-select')?.addEventListener('change',renderSelectedProfile);
+    renderSelectedProfile();
+  }else renderFormValues(connectionState||{});
+  $('connection-save')?.addEventListener('click',saveConnection);
+  $('connection-delete')?.addEventListener('click',deleteConnection);
+  applyModelSuggestions();
+}
 
 function populateProfileSelect(){
-  const select=$('connection-mode');if(!select)return;
-  select.innerHTML='';
-  for(const profile of normalizedProfiles(connectionState||{})){
-    const option=document.createElement('option');option.value=profile.id;option.textContent=profile.name||profile.id;select.appendChild(option);
+  const select=$('connection-profile-select');if(!select)return;
+  select.innerHTML=profiles().map(profile=>`<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.name||profile.id)}</option>`).join('');
+  if(presentationState?.allowCreate!==false){const add=document.createElement('option');add.value=NEW_PROFILE_ID;add.textContent=presentationState?.createLabel||'＋ 新增连接';select.appendChild(add);}
+  const preferred=connectionState?.activeProfileId;
+  select.value=profileById(preferred)?preferred:(profiles()[0]?.id||NEW_PROFILE_ID);
+}
+
+function renderFormValues(source={}){
+  for(const field of fields()){
+    const input=$(fieldId(field));if(!input)continue;
+    if(field.type==='secret'){
+      input.value='';
+      const configuredKey=field.configuredKey;const configured=Boolean(configuredKey&&source?.[configuredKey]);
+      const note=$(fieldNoteId(field));if(note)note.textContent=configured?'已保存 Secret；留空不会覆盖。':'尚未保存 Secret。';
+    }else input.value=source?.[field.key]??field.defaultValue??'';
   }
-  const add=document.createElement('option');add.value=NEW_PROFILE_ID;add.textContent='＋ 新增自定义连接';select.appendChild(add);
-  const preferred=connectionState?.activeProfileId||(connectionState?.mode==='custom'?'custom-default':'account');
-  select.value=profileById(preferred)?preferred:'account';
+}
+
+function renderSelectedProfile(){
+  const id=selectedProfileId();const profile=selectedProfile();const isNew=id===NEW_PROFILE_ID;
+  const editable=isNew||profile?.editable===true;
+  const fieldBox=$('connection-dynamic-fields');if(fieldBox)fieldBox.classList.toggle('hidden',!editable);
+  renderFormValues(profile||{});
+  const del=$('connection-delete');if(del)del.classList.toggle('hidden',!profile?.deletable);
+  applyModelSuggestions();
 }
 
 function applyModelSuggestions(){
   const list=$('connection-model-options');if(list){list.innerHTML='';for(const model of discoveredModels){const option=document.createElement('option');option.value=model;list.appendChild(option);}}
-  const input=$('connection-default-model');if(!input)return;
-  const selected=$('connection-mode')?.value;
-  if(discoveredModels.length&&selected===connectionState?.activeProfileId)input.setAttribute('list','connection-model-options');
-  else input.removeAttribute('list');
+  const kind=String(presentationState?.kind||'form');
+  const allowSuggestions=kind!=='profiles'||selectedProfileId()===connectionState?.activeProfileId;
+  for(const field of fields().filter(field=>field.type==='model')){
+    const input=$(fieldId(field));if(!input)continue;
+    if(discoveredModels.length&&allowSuggestions)input.setAttribute('list','connection-model-options');else input.removeAttribute('list');
+  }
 }
 
-function renderMode(){
-  const selected=$('connection-mode')?.value||'account';
-  const profile=profileById(selected);
-  const custom=selected===NEW_PROFILE_ID||profile?.kind==='custom';
-  $('connection-custom-fields')?.classList.toggle('hidden',!custom);
-  $('connection-clear-key-row')?.classList.add('hidden');
-  const del=$('connection-delete');
-  if(del)del.classList.toggle('hidden',!profile||profile.kind!=='custom'||profile.id===connectionState?.activeProfileId);
-  const note=$('connection-key-note');
-  if(note&&custom)note.textContent=keyConfigured?'已保存 API Key；留空不会覆盖。':'请填写 API Key。';
-  applyModelSuggestions();
+function fieldValues(){
+  const values={};
+  for(const field of fields()){
+    const input=$(fieldId(field));if(!input)continue;
+    const value=String(input.value??'').trim();
+    if(value||field.type!=='secret')values[field.key]=value;
+  }
+  return values;
 }
 
-function renderSelectedProfile(){
-  const selected=$('connection-mode')?.value||'account';
-  const profile=profileById(selected);
-  const isNew=selected===NEW_PROFILE_ID;
-  keyConfigured=Boolean(profile?.apiKeyConfigured);
-  if($('connection-profile-name'))$('connection-profile-name').value=isNew?'':(profile?.name||'');
-  $('connection-base-url').value=isNew?'':(profile?.baseUrl||'');
-  $('connection-default-model').value=isNew?'':(profile?.defaultModel||'');
-  $('connection-api-key').value='';
-  if($('connection-clear-key'))$('connection-clear-key').checked=false;
-  renderMode();
-}
-
-function renderConnection(connection={}){
-  if(!$('connection-mode'))return;
-  ensureProfileControls();
-  connectionState={...connection,profiles:normalizedProfiles(connection)};
-  populateProfileSelect();
-  renderSelectedProfile();
-  if(connection.warning)toast(connection.warning);
+function applyPayload(body={}){
+  connectionState=body.connection||{};
+  presentationState=body.presentation||null;
+  extensionState=body.extension||null;
+  renderConnectionShell();
+  if(connectionState.warning)toast(connectionState.warning);
 }
 
 async function loadModelSuggestions(){
@@ -129,49 +151,40 @@ async function loadModelSuggestions(){
 }
 
 async function loadConnection(){
-  try{const body=await api('/api/executor/connection');renderConnection(body.connection||{});void loadModelSuggestions();}
+  try{const body=await api('/api/executor/connection');applyPayload(body);void loadModelSuggestions();}
   catch(error){const code=error?.message;if(code==='EXECUTOR_CONNECTION_UNAVAILABLE'){$('connection-settings-section')?.classList.add('hidden');return;}console.warn('[connection-settings]',error);}
-}
-
-function profilePayload(selected){
-  return {
-    ...(selected!==NEW_PROFILE_ID?{id:selected}:{}),
-    name:$('connection-profile-name')?.value.trim()||'自定义 API',
-    baseUrl:$('connection-base-url').value.trim(),
-    defaultModel:$('connection-default-model').value.trim(),
-    apiKey:$('connection-api-key').value.trim(),
-  };
 }
 
 async function saveConnection(){
   const button=$('connection-save');if(!button||button.disabled)return;
   button.disabled=true;button.setAttribute('aria-busy','true');
   try{
-    const selected=$('connection-mode').value;
-    const payload=selected==='account'
-      ?{action:'selectProfile',profileId:'account'}
-      :{action:'saveProfile',profile:profilePayload(selected),select:true};
+    const actions=presentationState?.actions||{};const kind=String(presentationState?.kind||'form');let payload;
+    if(kind==='profiles'){
+      const selected=selectedProfileId();const profile=selectedProfile();
+      if(selected!==NEW_PROFILE_ID&&profile?.editable!==true){payload={action:actions.select||'selectProfile',profileId:selected};}
+      else{
+        const next=fieldValues();if(selected!==NEW_PROFILE_ID)next.id=selected;
+        payload={action:actions.save||'saveProfile',profile:next,select:true};
+      }
+    }else payload={action:actions.save||'save',values:fieldValues()};
     const body=await api('/api/executor/connection',{method:'PUT',body:JSON.stringify(payload)});
-    renderConnection(body.connection||{});
-    await loadModelSuggestions();
-    toast(selected==='account'?'已切回 Codex 当前账号':'AI 连接已保存并应用');
+    applyPayload(body);await loadModelSuggestions();toast(`${extensionState?.displayName||'AI'} 连接设置已应用`);
   }catch(error){console.error(error);toast(readable(error));}
   finally{button.disabled=false;button.removeAttribute('aria-busy');}
 }
 
 async function deleteConnection(){
-  const button=$('connection-delete');const selected=$('connection-mode')?.value;
-  const profile=profileById(selected);if(!button||button.disabled||!profile||profile.kind!=='custom')return;
+  const button=$('connection-delete');const profile=selectedProfile();if(!button||button.disabled||!profile?.deletable)return;
   if(typeof globalThis.confirm==='function'&&!globalThis.confirm(`删除 AI 连接“${profile.name||profile.id}”？`))return;
   button.disabled=true;button.setAttribute('aria-busy','true');
   try{
-    const body=await api('/api/executor/connection',{method:'PUT',body:JSON.stringify({action:'deleteProfile',profileId:profile.id})});
-    renderConnection(body.connection||{});toast('AI 连接已删除');
+    const action=presentationState?.actions?.delete||'deleteProfile';
+    const body=await api('/api/executor/connection',{method:'PUT',body:JSON.stringify({action,profileId:profile.id})});
+    applyPayload(body);toast('AI 连接已删除');
   }catch(error){console.error(error);toast(readable(error));}
   finally{button.disabled=false;button.removeAttribute('aria-busy');}
 }
 
-$('connection-mode')?.addEventListener('change',renderSelectedProfile);
-$('connection-save')?.addEventListener('click',saveConnection);
 $('simple-config-link')?.addEventListener('click',()=>{void loadConnection();});
 void loadConnection();
