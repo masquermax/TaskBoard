@@ -14,6 +14,7 @@ import {
   CapabilityProviderPort,
   ConnectionSettingsPort,
   ContinuationPort,
+  AutomationPort,
   SurfaceHostPort,
   RuntimeFailureCode,
   attachRuntimeFailure,
@@ -32,13 +33,16 @@ External distributions may compose their own registry without editing TaskBoard 
 import { bootstrap } from 'taskboard-codex/bootstrap';
 import { createBuiltinExtensionRegistry } from 'taskboard-codex/extensions';
 import { createMyExecutorExtension } from './my-extension.js';
+import { createMyAutomationExtension } from './my-automation.js';
 
 const registry=createBuiltinExtensionRegistry()
-  .register('my-executor',createMyExecutorExtension);
+  .register('my-executor',createMyExecutorExtension)
+  .register('my-automation',createMyAutomationExtension);
 
 const runtime=bootstrap({
   rootDir,
   executorName:'my-executor',
+  automationName:'my-automation',
   extensionRegistry:registry,
 });
 ```
@@ -58,6 +62,7 @@ An Extension factory returns:
   capabilityProvider,
   connectionSettings,
   continuation,
+  automation,
   presentation,
   surfaceHosts,
 }
@@ -68,6 +73,7 @@ An Extension factory returns:
 - `capabilityProvider` reports normalized Runtime/model capability facts. Capability creates no Authority.
 - `connectionSettings` is optional. When present it implements `ConnectionSettingsPort`: `describe()`, `getPublic()`, `update()`.
 - `continuation` is optional. When present it implements `ContinuationPort`: `health()`, `read()`, `write()`.
+- `automation` is optional. When present it implements `AutomationPort`: required `describe()` and `run()`, plus optional `list()` / `record()` facets. Automation results are execution evidence only and do not create Task Completion or certified state.
 - `presentation` carries safe display metadata only.
 - `surfaceHosts[]` are optional interaction surfaces and may coexist as facets of the owning Extension.
 
@@ -75,7 +81,7 @@ Provider/Profile secrets, provider identity and provider-specific launch project
 
 ## Model catalog and model selection
 
-Models are Executor capability, not a third Extension Point. A Capability snapshot separates two different facts:
+Models are Executor capability, not an independently installed model Extension Point. A Capability snapshot separates two different facts:
 
 ```js
 {
@@ -119,7 +125,9 @@ Core retains message-based classification only as a compatibility fallback for o
 
 An Extension Artifact is the install/version/enable/disable/remove boundary. One Artifact may carry multiple facets that share that lifecycle. Do not split executor capability, connection settings and presentation merely because they are separate code modules.
 
-Independent Extension Points are introduced only when real product/runtime evidence establishes a meaningful independent contract and lifecycle. `executor` and `continuation` are independently bindable points; ecosystem source layout or UI categories must not manufacture additional Core Extension Points. Model catalog/selection remains a capability of the active Executor rather than an independently installed/bound point.
+Independent Extension Points are introduced only when real product/runtime evidence establishes a meaningful independent contract and lifecycle. `executor`, `continuation` and `automation` are independently bindable points. Ecosystem source layout or UI categories must not manufacture additional Core Extension Points. Model catalog/selection remains a capability of the active Executor rather than an independently installed/bound point.
+
+`automation` exists because a reusable automation/test artifact has an independent install/remove lifecycle from the active Executor and Continuation system. Its implementation remains external/removable; TaskBoard Core only owns the minimal binding contract.
 
 Skill is a different Artifact type and uses the Skill Library boundary. A Skill is reusable method content and never gains Task Authority merely because it is installable beside Runtime Extensions.
 
@@ -141,6 +149,30 @@ const runtime=bootstrap({
 ```
 
 No continuation is the normal stock state. Removing or disabling continuation must leave Executor/Core semantics unchanged.
+
+## Automation is optional execution evidence
+
+`automation` exists for removable automation systems such as browser business-scenario recording/replay. It is not Task Authority, a Root/Subagent, certified state, Completion evidence by itself, or a requirement for stock TaskBoard execution.
+
+The minimum author contract is intentionally small:
+
+- `describe()` — safe capability/presentation metadata;
+- `run(request)` — execute one automation scenario and return implementation-owned evidence;
+- optional `list()` — discover saved scenarios;
+- optional `record(request)` — interactive or programmatic scenario capture.
+
+TaskBoard may bind zero or one active Automation Artifact independently from the active Executor and Continuation:
+
+```js
+const runtime=bootstrap({
+  rootDir,
+  executorName:'my-executor',
+  automationName:'my-automation',
+  extensionRegistry:registry,
+});
+```
+
+No automation is the normal stock state. Removing or disabling automation must leave Executor/Core semantics unchanged. A future UI, scheduler or other automation consumer must use this boundary rather than importing a concrete browser/RPA implementation into Core.
 
 ## Orchestration modes are not interchangeable
 
@@ -200,10 +232,11 @@ TaskBoard renders this descriptor and transports the chosen operation; the Exten
 
 Installation and active binding are different concepts.
 
-- A registry may contain multiple Executor or Continuation Extensions.
+- A registry may contain multiple Executor, Continuation or Automation Extensions.
 - One TaskBoard process currently binds one active Executor Extension.
 - One TaskBoard process binds zero or one active Continuation Extension.
-- Executor and Continuation bindings are independent; the absence of Continuation never blocks TaskBoard execution.
+- One TaskBoard process binds zero or one active Automation Extension.
+- Executor, Continuation and Automation bindings are independent; absence of Continuation or Automation never blocks stock TaskBoard execution.
 - One active Executor may expose many models through its capability catalog; an individual Turn uses at most one explicit model when the Executor advertises that selection capability.
 - Provider/Profile cardinality is Extension-owned; the current Codex Extension supports many saved profiles and one active profile per Codex child.
 - `surfaceHosts[]` may have multiple simultaneous contributors inside the active Extension composition.
@@ -227,9 +260,11 @@ At minimum verify:
 2. the external registry can bootstrap the Extension without Core changes;
 3. required TaskBoard Work/Authority/Context semantics can be realized without weakening them;
 4. model/capability and connection presentation remain normalized at the boundary;
-5. a real Runtime turn completes on the intended value path;
+5. a real Runtime turn/effect completes on the intended value path when that capability is claimed;
 6. disabling/removing the Extension leaves stock TaskBoard semantics and tests valid.
 
 For a Continuation Extension, compatibility additionally requires that removing it leaves stock execution semantics unchanged and that continuation content is never treated as product/runtime truth without fresh verification.
+
+For an Automation Extension, compatibility additionally requires that removing it leaves stock execution semantics unchanged, that automation evidence is not promoted directly into Task Completion, and that any claimed real-world automation path is exercised against the intended Runtime rather than inferred only from command construction.
 
 If an Executor cannot realize a required semantic safely, report `UNAVAILABLE`; do not silently downgrade or borrow another orchestration mode.

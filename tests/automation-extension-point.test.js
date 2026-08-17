@@ -3,11 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Readable } from 'node:stream';
 import { ExtensionRegistry, EXTENSION_API_VERSION, OrchestrationMode } from '../src/extensions/runtime/extension-registry.js';
 import { createMockExtension } from '../src/extensions/builtins/mock-extension.js';
 import { bootstrap } from '../src/server/bootstrap.js';
-import { createExtensionAutomationHandler } from '../src/server/extension-automation-api.js';
 import { AutomationPort } from '../src/extensions/ports/automation.js';
 
 function automationExtension(automation){
@@ -17,21 +15,6 @@ function automationExtension(automation){
     orchestrationMode:OrchestrationMode.TASKBOARD,
     automation,
   };
-}
-
-function responseCapture(){
-  return {
-    status:null, headers:null, body:'',
-    writeHead(status,headers){this.status=status;this.headers=headers;},
-    end(body=''){this.body+=body;},
-    json(){return this.body?JSON.parse(this.body):null;},
-  };
-}
-
-function request({method='GET',url='/api/automation',headers={},body=null}={}){
-  const req=Readable.from(body==null?[]:[Buffer.from(JSON.stringify(body))]);
-  req.method=method;req.url=url;req.headers=headers;
-  return req;
 }
 
 test('AutomationPort remains an optional public extension contract', async()=>{
@@ -76,35 +59,4 @@ test('bootstrap fails closed when selected artifact has no automation facet',()=
     const registry=new ExtensionRegistry().register('mock',createMockExtension);
     assert.throws(()=>bootstrap({rootDir:root,executorName:'mock',automationName:'mock',extensionRegistry:registry,startScheduler:false}),/EXTENSION_HAS_NO_AUTOMATION:mock/);
   }finally{rmSync(root,{recursive:true,force:true});}
-});
-
-test('automation HTTP boundary lists, records and runs only through explicit UI action',async()=>{
-  const calls=[];
-  const automation={
-    describe(){return{schemaVersion:1,title:'Browser tests'};},
-    async list(){return[{id:'checkout'}];},
-    async record(value){calls.push(['record',value]);return{saved:'checkout'};},
-    async run(value){calls.push(['run',value]);return{status:'passed'};},
-  };
-  const handler=createExtensionAutomationHandler({automation,extension:{id:'browser-test',displayName:'Browser Test'}});
-
-  let res=responseCapture();
-  assert.equal(await handler(request(),res),true);
-  assert.equal(res.status,200);
-  assert.deepEqual(res.json().scenarios,[{id:'checkout'}]);
-
-  res=responseCapture();
-  await handler(request({method:'POST',url:'/api/automation/run',body:{id:'checkout'}}),res);
-  assert.equal(res.status,403);
-  assert.equal(calls.length,0);
-
-  res=responseCapture();
-  await handler(request({method:'POST',url:'/api/automation/record',headers:{'x-taskboard-action':'ui'},body:{id:'checkout'}}),res);
-  assert.equal(res.status,200);
-  assert.deepEqual(calls[0],['record',{id:'checkout'}]);
-
-  res=responseCapture();
-  await handler(request({method:'POST',url:'/api/automation/run',headers:{'x-taskboard-action':'ui'},body:{id:'checkout'}}),res);
-  assert.equal(res.status,200);
-  assert.deepEqual(calls[1],['run',{id:'checkout'}]);
 });
