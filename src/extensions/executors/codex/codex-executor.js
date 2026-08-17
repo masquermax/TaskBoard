@@ -23,7 +23,7 @@ const rootEvidenceSchema={
 const rootSchema = {
   type:'object',
   properties:{
-    kind:{type:'string',enum:['complete','human_gateway','delegate']},
+    kind:{type:'string',enum:['complete','human_gateway','delegate','wait']},
     summary:{type:'string'},
     stageResult:{type:['string','null']},
     finalResult:{type:['string','null']},
@@ -31,7 +31,7 @@ const rootSchema = {
     evidence:{type:'array',items:rootEvidenceSchema,maxItems:50},
     gateway:{anyOf:[{type:'null'},{type:'object',properties:{gapId:{type:'string'},question:{type:'string'},context:{type:'string'},options:{type:'array',items:{type:'string'},maxItems:6}},required:['gapId','question','context','options'],additionalProperties:false}]},
     gapResolutions:{type:'array',items:gapResolutionSchema,maxItems:30},
-    delegations:{type:'array',items:{type:'object',properties:{id:{type:'string'},title:{type:'string'},goal:{type:'string'},expectedOutput:{type:'string'},stopCondition:{type:'string'},projectAccess:{type:'string',enum:['none','read','write']},networkAccess:{type:'boolean'},skillId:{type:['string','null']},dependsOn:{type:'array',items:{type:'string'}},inputRefs:{type:'array',items:{type:'string'},maxItems:40}},required:['id','title','goal','expectedOutput','stopCondition','projectAccess','networkAccess','skillId','dependsOn','inputRefs'],additionalProperties:false}},
+    delegations:{type:'array',items:{type:'object',properties:{id:{type:'string'},title:{type:'string'},goal:{type:'string'},contributionRefs:{type:'array',items:{type:'string'},maxItems:12},expectedOutput:{type:'string'},stopCondition:{type:'string'},projectAccess:{type:'string',enum:['none','read','write']},networkAccess:{type:'boolean'},skillId:{type:['string','null']},dependsOn:{type:'array',items:{type:'string'}},inputRefs:{type:'array',items:{type:'string'},maxItems:40}},required:['id','title','goal','contributionRefs','expectedOutput','stopCondition','projectAccess','networkAccess','skillId','dependsOn','inputRefs'],additionalProperties:false}},
   },
   required:['kind','summary','stageResult','finalResult','resultMode','evidence','claims','gaps','recommendations','steps','gateway','gapResolutions','delegations'],
   additionalProperties:false,
@@ -190,12 +190,16 @@ export class CodexExecutor extends ExecutorPort {
 
   rootPrompt({task,subagentResults,activeWork=[],humanGatewayHistory,policyContext=null,planningFeedback=null,scratchPath=null,validationFeedback=null,previousDecision=null,certifiedContext=null,authorityHandoff=false}){
     const refs=(task.references||[]).map(r=>({taskId:r.source_task_id,title:r.title,result:r.final_result}));
-    const completedWork=(task.workReceipts||[]).map(receipt=>({id:receipt.id,title:receipt.workUnit?.title||receipt.id,goal:receipt.workUnit?.goal||'',inputRefs:receipt.workUnit?.inputRefs||[],projectAccess:receipt.workUnit?.projectAccess||'none',networkAccess:receipt.workUnit?.networkAccess===true,completedAt:receipt.completed_at||null}));
+    const completedWork=(task.workReceipts||[]).map(receipt=>({id:receipt.id,title:receipt.workUnit?.title||receipt.id,goal:receipt.workUnit?.goal||'',contributionRefs:receipt.workUnit?.contributionRefs||[],inputRefs:receipt.workUnit?.inputRefs||[],projectAccess:receipt.workUnit?.projectAccess||'none',networkAccess:receipt.workUnit?.networkAccess===true,completedAt:receipt.completed_at||null}));
     const resolvedHuman=(humanGatewayHistory||[]).filter(g=>g.status==='RESOLVED').map(g=>({id:g.id,evidenceId:humanGatewayEvidenceId(g),targetGapId:g.targetGapId??g.target_gap_id??null,question:g.question,answer:g.answer}));
     const planningBlock=planningFeedback?.length?`\nWORK PLAN REPAIR — the Work Unit capability/dependency contract is invalid. Correct only these planning fields.\n${JSON.stringify(planningFeedback,null,2)}\n`:'';
     const validationBlock=validationFeedback?.length?`\nVALIDATOR FEEDBACK — the candidate content was not fully certifiable. Correct only the listed proof-boundary issues and preserve already certified content.\n${JSON.stringify(validationFeedback,null,2)}\nPrevious candidate:\n${JSON.stringify(previousDecision,null,2)}\n`:'';
     const authorityBlock=authorityHandoff?`\nCONTROL HANDOFF — the certified/narrowed content below is fixed input for this Turn. Choose the next Task control action from the certified state.\n`:'';
     const skillCatalog=Array.isArray(policyContext?.skillCatalog)?policyContext.skillCatalog:[];
+    const governedTargets=[
+      ...(task.taskContract?.obligations||[]).map(item=>({ref:`obligation:${item.id}`,kind:'obligation',criterion:item.criterion||null})),
+      ...(certifiedContext?.gaps||[]).map(item=>({ref:`gap:${item.id}`,kind:'gap',question:item.question,reason:item.reason,blocking:item.blocking===true})),
+    ];
     return `${policyPrompt(policyContext)}
 
 Turn protocol:
@@ -203,7 +207,9 @@ Turn protocol:
 - When a Work Unit already supplies an Evidence id, cite that id from Claims/Gaps instead of rewriting it. Root evidence[] is only for Human/Reference material already present in Root context; project/attachment/search/runtime Evidence belongs to bounded Subagent work.
 - Recommendations/Steps are current presentation over certified knowledge, not durable memory. On kind=complete return only the concise recommendations/steps that should be shown now.
 - gapResolutions[] closes an existing Gap by id with reason + evidenceIds; omitted committed items remain unchanged. Resolved Human Gateway answers listed below already have system-owned DIRECT evidenceId values: cite those ids from Claims/Gap resolutions and do not copy the Human answer into evidence[]. Runtime will independently submit the bound Gateway Gap for proof even if Root omits that resolution.
-- kind=delegate emits NEW bounded Work Units in delegations[] with goal, expectedOutput, stopCondition, projectAccess, networkAccess, dependsOn, inputRefs and optional skillId. projectAccess/networkAccess must be the minimum capabilities actually required by that Work Unit; Runtime may deny an unrealizable plan but must not silently weaken these semantics. inputRefs selects only the Task inputs needed by that Work Unit from the catalog below; use [] when no Task source is needed.
+- kind=delegate emits NEW bounded Work Units in delegations[] with goal, contributionRefs, expectedOutput, stopCondition, projectAccess, networkAccess, dependsOn, inputRefs and optional skillId. contributionRefs must name the governed need this Work advances using the exact refs below; use gap:<id> for an open Gap or obligation:<id> for an independent governed obligation. A new Work is not justified merely because its wording differs from earlier Work. projectAccess/networkAccess must be the minimum capabilities actually required by that Work Unit; Runtime may deny an unrealizable plan but must not silently weaken these semantics. inputRefs selects only the Task inputs needed by that Work Unit from the catalog below; use [] when no Task source is needed.
+- After a Work result is delivered, another Work against the same contributionRef requires this Turn to produce a state-bearing certified delta, or the prior Work to have returned a concrete local blocker. Mere uncertainty wording, a new method name, or more explanation is not progress.
+- kind=wait is the non-Human convergence result when governed Gaps remain open but no safe decision-relevant machine work is currently justified. Preserve the Gap and stop; do not invent Human ownership or another Work merely to stay active.
 - kind=human_gateway is only for one unresolved blocking Gap that truly requires human information/choice. Set gateway.gapId to that exact Gap id and gateway.question to that Gap's exact certified question; context/options may explain choices but may not replace the question with a broader/narrower one. Non-blocking unknowns remain Gaps. kind=complete emits a completion candidate.
 - Work Unit findings are local execution output, not Task truth. Root decides which supported findings become this Turn's Claims/Gaps/Recommendations; any Task-knowledge change must appear in this Turn's candidate delta even when the next control action is delegate.
 
@@ -216,6 +222,8 @@ ${planningBlock}${validationBlock}${authorityBlock}
 Task:\n${JSON.stringify({id:task.id,title:task.title,instruction:task.instruction},null,2)}
 
 Available Skills:\n${JSON.stringify(skillCatalog,null,2)}
+
+Governed Work Targets (use exact refs in Work Unit contributionRefs):\n${JSON.stringify(governedTargets,null,2)}
 
 Task Input Catalog (use these refs in Work Unit inputRefs):\n${JSON.stringify(taskInputCatalog(task),null,2)}
 

@@ -8,6 +8,7 @@ import { humanGatewayTransitionCandidate } from '../governance/human-gateway-evi
 import { applyAuthorityFidelity, authoritySemanticCandidatesForWork } from '../governance/task-contract-fidelity.js';
 import { recordTaskDiagnostic } from './runtime-diagnostic.js';
 import { capabilitiesSatisfy, requiredWorkCapabilities, workMayMutate } from './work-capability.js';
+import { availableContributionRefsForTask, hasLocalProgressSignal, repeatedContributionRefs, validateContributionRefs } from './work-contribution.js';
 
 function nowIso() { return new Date().toISOString(); }
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
@@ -17,6 +18,7 @@ function snapshotWorkUnit(unit, stageId = null) {
     id: unit.id,
     stageId,
     title: unit.title,
+    contributionRefs:[...(unit.contributionRefs||[])],
     projectAccess: unit.projectAccess || 'none',
     networkAccess: unit.networkAccess === true,
     status: unit.status,
@@ -56,6 +58,7 @@ function workSemanticSignature(item) {
     projectAccess:normalize(item?.projectAccess || 'none'),
     networkAccess:item?.networkAccess===true,
     skillId:normalize(item?.skillId),
+    contributionRefs:[...(Array.isArray(item?.contributionRefs)?item.contributionRefs:[])].map(normalize).filter(Boolean).sort(),
     dependsOn:[...(Array.isArray(item?.dependsOn)?item.dependsOn:[])].map(normalize).filter(Boolean).sort(),
     inputRefs:[...(Array.isArray(item?.inputRefs)?item.inputRefs:[])].map(normalize).filter(Boolean).sort(),
   });
@@ -118,7 +121,7 @@ function validationError(violations = []) {
   return error;
 }
 
-export function validateDelegationPlan(delegations, { knownWorkIds = [], availableInputRefs = null } = {}) {
+export function validateDelegationPlan(delegations, { knownWorkIds = [], availableInputRefs = null, availableContributionRefs = null } = {}) {
   const raw = Array.isArray(delegations) ? delegations : [];
   const issues = [];
   const selected = raw.map((item, index) => {
@@ -136,11 +139,13 @@ export function validateDelegationPlan(delegations, { knownWorkIds = [], availab
       skillId:item?.skillId == null || String(item.skillId).trim()==='' ? null : String(item.skillId).trim(),
       dependsOn:Array.isArray(item?.dependsOn) ? [...new Set(item.dependsOn.map(value => String(value).trim()).filter(Boolean))] : [],
       inputRefs:Array.isArray(item?.inputRefs) ? [...new Set(item.inputRefs.map(value => String(value).trim()).filter(Boolean))] : [],
+      contributionRefs:Array.isArray(item?.contributionRefs) ? [...new Set(item.contributionRefs.map(value => String(value).trim()).filter(Boolean))] : [],
       __index:index,
     };
   });
   const knownIds = new Set((Array.isArray(knownWorkIds) ? knownWorkIds : []).map(value => String(value).trim()).filter(Boolean));
   const allowedInputs = Array.isArray(availableInputRefs) ? new Set(availableInputRefs.map(value=>String(value).trim()).filter(Boolean)) : null;
+  const contributionIssues=[];
   const ids = new Set();
   for (const item of selected) {
     if (!item.id) issues.push(`第 ${item.__index + 1} 项工作缺少 id。`);
@@ -150,6 +155,9 @@ export function validateDelegationPlan(delegations, { knownWorkIds = [], availab
     if (!item.goal) issues.push(`工作 ${item.id || item.__index + 1} 缺少有限 goal。`);
     if (!item.expectedOutput) issues.push(`工作 ${item.id || item.__index + 1} 缺少 expectedOutput。`);
     if (!item.stopCondition) issues.push(`工作 ${item.id || item.__index + 1} 缺少 stopCondition。`);
+    const contribution=validateContributionRefs(item,availableContributionRefs);
+    item.contributionRefs=contribution.refs;
+    for(const reason of contribution.issues){const message=`工作 ${item.id || item.__index + 1}：${reason}`;issues.push(message);contributionIssues.push(message);}
     if (!['none','read','write'].includes(item.projectAccess)) issues.push(`工作 ${item.id || item.__index + 1} 的 projectAccess 必须是 none、read 或 write。`);
     if (allowedInputs) for (const ref of item.inputRefs) if (!allowedInputs.has(ref)) issues.push(`工作 ${item.id || item.__index + 1} 引用了不存在的 Task Input：${ref}。`);
     const hasProjectInput=item.inputRefs.some(ref=>ref.startsWith('project:'));
@@ -183,6 +191,7 @@ export function validateDelegationPlan(delegations, { knownWorkIds = [], availab
   return {
     valid:issues.length === 0,
     issues:[...new Set(issues)],
+    contributionIssues:[...new Set(contributionIssues)],
     delegations:selected.map(({__index,...item}) => item),
   };
 }
@@ -342,7 +351,7 @@ export class RootRuntime {
     this.emit(session, callbacks);
     const controller = new AbortController();
     const deliveredResults = Array.isArray(rootInputs) ? rootInputs : session.subagentResults.slice();
-    const activeWork = session.currentStage ? session.currentStage.workUnits.map(unit => ({ id:unit.id, title:unit.title, status:unit.status, projectAccess:unit.projectAccess||'none', networkAccess:unit.networkAccess===true, dependsOn:unit.dependsOn })) : [];
+    const activeWork = session.currentStage ? session.currentStage.workUnits.map(unit => ({ id:unit.id, title:unit.title, status:unit.status, contributionRefs:[...(unit.contributionRefs||[])], projectAccess:unit.projectAccess||'none', networkAccess:unit.networkAccess===true, dependsOn:unit.dependsOn })) : [];
     session.rootController = controller;
     try {
       const runRoot = this.executor.runRoot.bind(this.executor);
@@ -507,6 +516,7 @@ export class RootRuntime {
         id,
         title: String(d.title || `工作 ${index + 1}`),
         goal: String(d.goal || ''),
+        contributionRefs: Array.isArray(d.contributionRefs) ? [...d.contributionRefs] : [],
         expectedOutput: String(d.expectedOutput || ''),
         stopCondition: String(d.stopCondition || ''),
         projectAccess: ['read','write'].includes(d.projectAccess) ? d.projectAccess : 'none',
@@ -574,7 +584,7 @@ export class RootRuntime {
     this.emit(session, callbacks);
 
     const dependencyResults = unit.dependsOn.map(id => { const dep=session.currentStage?.workUnits.find(x=>x.id===id); return dep?.result ? { id, title:dep.title, result:dep.result } : null; }).filter(Boolean);
-    const workUnit={ id:unit.id, title:unit.title, goal:unit.goal, expectedOutput:unit.expectedOutput, stopCondition:unit.stopCondition, projectAccess:unit.projectAccess||'none', networkAccess:unit.networkAccess===true, skillId:unit.skillId, dependsOn:[...(unit.dependsOn||[])], inputRefs:[...(unit.inputRefs||[])] };
+    const workUnit={ id:unit.id, title:unit.title, goal:unit.goal, contributionRefs:[...(unit.contributionRefs||[])], expectedOutput:unit.expectedOutput, stopCondition:unit.stopCondition, projectAccess:unit.projectAccess||'none', networkAccess:unit.networkAccess===true, skillId:unit.skillId, dependsOn:[...(unit.dependsOn||[])], inputRefs:[...(unit.inputRefs||[])] };
     const effectCapable=workMayMutate(workUnit);
     const effectAttemptId=effectCapable?`effect:${task.id}:${unit.id}:${unit.failureCount+1}:${Date.now()}`:null;
     let executionStarted=false;
@@ -764,12 +774,18 @@ export class RootRuntime {
       }
       if(decision.kind==='cancelled')return{kind:'cancelled',quiescent:this.isQuiescent(task.id)};
       if(decision.kind!=='complete'){session.completionFeedback=null;session.completionRepairCount=0;session.completionTriggerRefs=[];}
-      if(this.hasUnfinishedWork(session)&&(decision.kind==='complete'||decision.kind==='human_gateway')){session.actor={title:'阶段结论已认证',status:WorkUnitStatus.COMPLETED,detail:reviewed.commits.length?'阶段结论已写入历史；等待已签发 Work Unit 到达明确停止边界。':'阶段结论已认证；等待已签发 Work Unit 到达明确停止边界。',updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);continue;}
+      if(this.hasUnfinishedWork(session)&&(decision.kind==='complete'||decision.kind==='human_gateway'||decision.kind==='wait')){session.actor={title:'阶段结论已认证',status:WorkUnitStatus.COMPLETED,detail:reviewed.commits.length?'阶段结论已写入历史；等待已签发 Work Unit 到达明确停止边界。':'阶段结论已认证；等待已签发 Work Unit 到达明确停止边界。',updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);continue;}
 
       if(decision.kind==='delegate'){
         if(!decision.delegations.length){const error=new Error('ROOT_EMPTY_DELEGATION');error.nonRetryable=true;throw error;}
         const knownWorkIds=session.currentStage?.workUnits?.map(unit=>unit.id)||[];
-        const plan=validateDelegationPlan(decision.delegations,{knownWorkIds,availableInputRefs:taskInputRefs(task)});
+        const availableContributionRefs=availableContributionRefsForTask(task,session.analysisState);
+        const plan=validateDelegationPlan(decision.delegations,{knownWorkIds,availableInputRefs:taskInputRefs(task),availableContributionRefs});
+        if(plan.contributionIssues?.length){
+          const reason=`ROOT_WORK_WITHOUT_GOVERNED_CONTRIBUTION: ${plan.contributionIssues.join(' | ')}`;
+          if(this.hasUnfinishedWork(session)){session.actor={title:'Root 推进边界',status:WorkUnitStatus.COMPLETED,detail:'新 Work 缺少明确 governed contribution；不启动它，继续等待已签发 Work。',updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);continue;}
+          const snapshot=this.makeSnapshot(session);this.discardSession(task.id);return{kind:'suspended',reason,snapshot,quiescent:true};
+        }
         const batchSignatures=new Set();
         for(const item of plan.delegations){
           const signature=workSemanticSignature(item);
@@ -779,6 +795,12 @@ export class RootRuntime {
           if(item.skillId&&this.governanceCompiler?.hasSkill&&!this.governanceCompiler.hasSkill(item.skillId)){plan.issues.push(`工作 ${item.id} 选择了不存在的 Skill：${item.skillId}。`);plan.valid=false;}
         }
         if(!plan.valid){session.planningRepairCount+=1;session.planningFeedback=plan.issues;session.planningTriggerRefs=[...rootTriggerRefs];session.actor={title:'Work Unit 契约校验',status:WorkUnitStatus.COMPLETED,detail:'Root 的新工作单不符合 Capability Contract；问题已作为内部规划反馈返回 Root。',updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);if(session.planningRepairCount>=MAX_TOTAL_ATTEMPTS){const error=new Error(`ROOT_INVALID_DELEGATION_PLAN: ${plan.issues.join(' | ')}`);error.nonRetryable=true;throw error;}continue;}
+        const repeatedContributions=repeatedContributionRefs(plan.delegations,rootInputs);
+        if(repeatedContributions.length&&!reviewed.turnNode&&!hasLocalProgressSignal(rootInputs)){
+          const reason=`ROOT_WORK_WITHOUT_STATE_ADVANCE: Work result did not change trusted state for ${repeatedContributions.join(', ')}; another Work against the same governed target is not admitted.`;
+          if(this.hasUnfinishedWork(session)){session.actor={title:'Root 推进边界',status:WorkUnitStatus.COMPLETED,detail:'当前结果没有形成新的可信状态；不追加同目标 Work，先等待已签发 Work 收敛。',updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);continue;}
+          const snapshot=this.makeSnapshot(session);this.discardSession(task.id);return{kind:'suspended',reason,snapshot,quiescent:true};
+        }
         try{task=await this.certifyWorkAuthority(task,session,callbacks,plan.delegations);}
         catch(error){
           if(isCapacityUnavailable(error)){
@@ -800,6 +822,12 @@ export class RootRuntime {
         }else for(const item of plan.delegations)if(item.projectAccess!=='none'||item.networkAccess===true||item.inputRefs.length){plan.issues.push(`工作 ${item.id} 请求受治理能力但没有 GovernanceCompiler。`);plan.valid=false;}
         if(!plan.valid){session.planningRepairCount+=1;session.planningFeedback=plan.issues;session.planningTriggerRefs=[...rootTriggerRefs];session.actor={title:'AuthorizedGrant 校验',status:WorkUnitStatus.COMPLETED,detail:'Root 的 Work capability 未被当前 Task Authority 授权；问题已作为内部规划反馈返回 Root。',updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);if(session.planningRepairCount>=MAX_TOTAL_ATTEMPTS){const error=new Error(`ROOT_INVALID_DELEGATION_PLAN: ${plan.issues.join(' | ')}`);error.nonRetryable=true;throw error;}continue;}
         session.planningFeedback=null;session.planningRepairCount=0;session.planningTriggerRefs=[];for(const item of plan.delegations)session.issuedWorkSignatures.add(workSemanticSignature(item));if(session.currentStage)this.appendToStage(session,plan.delegations);else this.createStage(session,plan.delegations);this.emit(session,callbacks);continue;
+      }
+
+      if(decision.kind==='wait'){
+        const openGaps=session.analysisState?.current?.gaps||[];
+        const reason=openGaps.length?(decision.summary?.trim()||'当前 governed Gap 没有安全且有决策价值的机器推进路径；等待新的外部触发。'):'ROOT_WAIT_WITHOUT_GOVERNED_GAP: wait requires an explicit governed Gap so waiting cannot hide an undefined problem.';
+        const snapshot=this.makeSnapshot(session);this.discardSession(task.id);return{kind:'suspended',reason,snapshot,quiescent:true};
       }
 
       if(decision.kind==='human_gateway'){
