@@ -19,13 +19,31 @@ function statusFor(message) {
   return 500;
 }
 
-export function createExtensionConnectionHandler({ connectionSettings = null } = {}) {
+function extensionPublic(extension){
+  if(!extension)return null;
+  return {
+    id:extension.id||null,
+    displayName:extension.displayName||extension.id||null,
+    orchestrationMode:extension.orchestrationMode||null,
+    presentation:extension.presentation||null,
+  };
+}
+
+function payloadFor(connectionSettings, extension, connection){
+  return {
+    extension:extensionPublic(extension),
+    presentation:connectionSettings?.describe?.()||null,
+    connection:connection||{},
+  };
+}
+
+export function createExtensionConnectionHandler({ connectionSettings = null, extension = null } = {}) {
   return async function handleExtensionConnection(req,res) {
     const url=new URL(req.url,'http://localhost');
     if (url.pathname!=='/api/executor/connection') return false;
     if (req.method==='GET') {
       if (!connectionSettings?.getPublic) { json(res,503,{error:'EXECUTOR_CONNECTION_UNAVAILABLE'});return true; }
-      json(res,200,{connection:connectionSettings.getPublic()});
+      json(res,200,payloadFor(connectionSettings,extension,connectionSettings.getPublic()));
       return true;
     }
     if (req.method==='PUT') {
@@ -33,7 +51,7 @@ export function createExtensionConnectionHandler({ connectionSettings = null } =
       if (!connectionSettings?.update) { json(res,503,{error:'EXECUTOR_CONNECTION_UNAVAILABLE'});return true; }
       try {
         const connection=await connectionSettings.update(await readJson(req));
-        json(res,200,{connection});
+        json(res,200,payloadFor(connectionSettings,extension,connection));
       } catch (error) {
         const message=error?.message||'EXECUTOR_CONNECTION_APPLY_FAILED';
         json(res,statusFor(message),{error:message});
