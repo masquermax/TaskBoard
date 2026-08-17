@@ -13,6 +13,7 @@ import {
   ExecutorPort,
   CapabilityProviderPort,
   ConnectionSettingsPort,
+  ContinuationPort,
   SurfaceHostPort,
 } from 'taskboard-codex/extension-api';
 ```
@@ -54,6 +55,7 @@ An Extension factory returns:
   executor,
   capabilityProvider,
   connectionSettings,
+  continuation,
   presentation,
   surfaceHosts,
 }
@@ -63,6 +65,7 @@ An Extension factory returns:
 - `executor` implements TaskBoard execution semantics.
 - `capabilityProvider` reports normalized Runtime/model capability facts. Capability creates no Authority.
 - `connectionSettings` is optional. When present it implements `ConnectionSettingsPort`: `describe()`, `getPublic()`, `update()`.
+- `continuation` is optional. When present it implements `ContinuationPort`: `health()`, `read()`, `write()`.
 - `presentation` carries safe display metadata only.
 - `surfaceHosts[]` are optional interaction surfaces and may coexist as facets of the owning Extension.
 
@@ -72,9 +75,28 @@ Provider/Profile secrets, provider identity and provider-specific launch project
 
 An Extension Artifact is the install/version/enable/disable/remove boundary. One Artifact may carry multiple facets that share that lifecycle. Do not split executor capability, connection settings and presentation merely because they are separate code modules.
 
-Future independent Extension Points may be introduced only when real product/runtime evidence establishes an independently meaningful contract and lifecycle. Ecosystem source layout or UI categories must not manufacture new Core Extension Points.
+Independent Extension Points are introduced only when real product/runtime evidence establishes a meaningful independent contract and lifecycle. `executor` and `continuation` are independently bindable points; ecosystem source layout or UI categories must not manufacture additional Core Extension Points.
 
 Skill is a different Artifact type and uses the Skill Library boundary. A Skill is reusable method content and never gains Task Authority merely because it is installable beside Runtime Extensions.
+
+## Continuation is optional working cognition
+
+`continuation` exists for removable cross-session cognition systems such as AI-Context. It is not TaskBoard product truth, certified state, Task Authority, Completion evidence or a Runtime/build/test dependency.
+
+A continuation implementation provides only the mechanical persistence boundary. The continuation system's current routing/governance rules and the Agent decide what is worth reading or writing. Before continuation cognition constrains product work, the relevant real Git/Runtime state must be re-verified.
+
+TaskBoard may bind one active continuation Artifact independently from the active Executor:
+
+```js
+const runtime=bootstrap({
+  rootDir,
+  executorName:'my-executor',
+  continuationName:'my-continuation',
+  extensionRegistry:registry,
+});
+```
+
+No continuation is the normal stock state. Removing or disabling continuation must leave Executor/Core semantics unchanged.
 
 ## Orchestration modes are not interchangeable
 
@@ -134,8 +156,10 @@ TaskBoard renders this descriptor and transports the chosen operation; the Exten
 
 Installation and active binding are different concepts.
 
-- A registry may contain multiple Executor Extensions.
+- A registry may contain multiple Executor or Continuation Extensions.
 - One TaskBoard process currently binds one active Executor Extension.
+- One TaskBoard process binds zero or one active Continuation Extension.
+- Executor and Continuation bindings are independent; the absence of Continuation never blocks TaskBoard execution.
 - One active Executor may expose many models through its capability catalog.
 - Provider/Profile cardinality is Extension-owned; the current Codex Extension supports many saved profiles and one active profile per Codex child.
 - `surfaceHosts[]` may have multiple simultaneous contributors inside the active Extension composition.
@@ -161,5 +185,7 @@ At minimum verify:
 4. model/capability and connection presentation remain normalized at the boundary;
 5. a real Runtime turn completes on the intended value path;
 6. disabling/removing the Extension leaves stock TaskBoard semantics and tests valid.
+
+For a Continuation Extension, compatibility additionally requires that removing it leaves stock execution semantics unchanged and that continuation content is never treated as product/runtime truth without fresh verification.
 
 If an Executor cannot realize a required semantic safely, report `UNAVAILABLE`; do not silently downgrade or borrow another orchestration mode.
