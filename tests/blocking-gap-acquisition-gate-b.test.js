@@ -65,6 +65,7 @@ test('D-020: a certified blocking Gap does not revoke an otherwise-governed evid
     skillId: null,
     dependsOn: [],
     inputRefs: ['project:0'],
+    contributionRefs: ['gap:G-SOURCE'],
   };
   const task = {
     id: 'T-GATE-B-D020',
