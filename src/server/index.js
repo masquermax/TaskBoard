@@ -54,7 +54,10 @@ const appHandler = createApp({
   onShutdown: shutdown,
   instanceRoot: rootDir,
 });
-const connectionHandler=createExtensionConnectionHandler({ connectionSettings:runtime.extension?.connectionSettings||null });
+const connectionHandler=createExtensionConnectionHandler({
+  connectionSettings:runtime.extension?.connectionSettings||null,
+  extension:runtime.extension||null,
+});
 const handler=async(req,res)=>{
   if(await connectionHandler(req,res))return;
   return appHandler(req,res);
@@ -80,7 +83,7 @@ server.listen(port, '127.0.0.1', () => {
   }, null, 2));
   console.log(`TaskBoard running at http://127.0.0.1:${port}`);
   console.log(`Version: ${APP_VERSION}`);
-  console.log(`Executor: ${process.env.TASKBOARD_EXECUTOR || 'codex'}`);
+  console.log(`Executor: ${runtime.extension?.displayName||runtime.extension?.id||process.env.TASKBOARD_EXECUTOR||'codex'}`);
   console.log(`Storage: ${runtime.storage} (${runtime.storageFile})`);
   if(process.env.TASKBOARD_SURFACES==='on') runtime.surfaceManager?.start?.();
   runtime.cleanup?.startDailySchedule?.();
