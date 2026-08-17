@@ -18,10 +18,11 @@ test('new-task Close/Cancel are non-submit buttons and dialog form disables nati
   assert.match(js,/create-task-submit[\s\S]{0,500}if\(!title\|\|!instruction\)return toast\('请填写任务标题和任务内容'\)/);
 });
 
-test('progress UI separates active judgment, execution work, completed work, and confirmed knowledge while confirmed progress defaults folded',()=>{
+test('progress UI separates active judgment, execution work, completed work, and certified conclusions while cognition defaults folded',()=>{
   assert.match(html,/id="history-progress"[^>]*class="[^"]*hidden/i);
-  assert.match(html,/已确认进展/);
-  assert.match(html,/已经进入当前认知的结论/);
+  assert.match(html,/已确认结论/);
+  assert.match(html,/已通过认证并进入当前 Task 认知/);
+  assert.doesNotMatch(html,/已确认进展/);
   assert.match(js,/workOwnerLabel/);
   assert.match(js,/Root/);
   assert.match(js,/Subagent/);
@@ -30,7 +31,7 @@ test('progress UI separates active judgment, execution work, completed work, and
   assert.match(js,/正在判断/);
   assert.match(js,/当前工作/);
   assert.match(js,/已完成工作/);
-  assert.match(js,/当前还没有已确认的进展/);
+  assert.match(js,/当前还没有已确认结论/);
 });
 
 test('suspended retry copy explicitly tells the user what to do and uses a retry icon action',()=>{

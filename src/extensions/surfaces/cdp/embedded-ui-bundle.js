@@ -6,16 +6,27 @@ function extractBody(html){
   return match[1].replace(/<script\b[^>]*\bsrc=["']\/(?:app|connection-settings)\.js["'][^>]*><\/script>/gi,'');
 }
 function formatTimeSource(source){
-  const value=source.trim().replace(/^export\s+/m,'');
+  const value=source.trim().replace(/^export\s+/gm,'');
   if(!/function\s+formatTaskTime\s*\(/.test(value))throw new Error('TaskBoard time formatter could not be bundled');
   return value;
 }
-function moduleExpression(source,{timeSource=null,name='module'}={}){
-  let value=source;
-  if(timeSource){
-    value=source.replace(/^import\s+\{\s*formatTaskTime\s+as\s+formatPhaseTime\s*\}\s+from\s+["']\.\/time\.js["'];?\s*/m,`${timeSource}\nconst formatPhaseTime=formatTaskTime;\n`);
-    if(value===source)throw new Error('TaskBoard app module import could not be bundled');
+function inlineTimeImport(source,timeSource){
+  const pattern=/^import\s+\{([\s\S]*?)\}\s+from\s+["']\.\/time\.js["'];?\s*/m;
+  const match=pattern.exec(source);
+  if(!match)throw new Error('TaskBoard app module import could not be bundled');
+  const aliases=[];
+  for(const raw of match[1].split(',')){
+    const spec=raw.trim();if(!spec)continue;
+    const parsed=/^([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/.exec(spec);
+    if(!parsed)throw new Error(`TaskBoard time import specifier could not be bundled: ${spec}`);
+    const imported=parsed[1],local=parsed[2]||imported;
+    if(local!==imported)aliases.push(`const ${local}=${imported};`);
   }
+  const replacement=`${timeSource}\n${aliases.length?`${aliases.join('\n')}\n`:''}`;
+  return `${source.slice(0,match.index)}${replacement}${source.slice(match.index+match[0].length)}`;
+}
+function moduleExpression(source,{timeSource=null,name='module'}={}){
+  let value=timeSource?inlineTimeImport(source,timeSource):source;
   if(/^\s*(?:import|export)\s/m.test(value))throw new Error(`TaskBoard ${name} module contains an unsupported module boundary`);
   return `(async()=>{\n${value}\n})()\n//# sourceURL=taskboard-embedded-${name}.js`;
 }

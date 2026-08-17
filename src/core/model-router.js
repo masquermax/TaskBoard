@@ -65,6 +65,16 @@ function isFiniteReadOnlyWork(work) {
   return Boolean(String(work?.goal||'').trim() && String(work?.expectedOutput||'').trim() && String(work?.stopCondition||'').trim());
 }
 
+function isBroadProjectWork(work) {
+  const refs=Array.isArray(work?.inputRefs)?work.inputRefs.map(value=>String(value||'').trim()).filter(Boolean):[];
+  if(!refs.some(ref=>ref.startsWith('project:')))return false;
+  const value=workText(work);
+  // A natural-language stopCondition does not make an explicitly broad
+  // repository investigation lightweight. These are routing hints only: they
+  // prevent an efficient downgrade; they do not create Work/Authority truth.
+  return /审计|全链路|关键链路|全量|全仓|整个项目|跨实现|跨配置|跨运行时|跨验证|跨模块|跨文件|audit\b|repository[- ]wide|cross[- ](?:module|file|runtime|implementation)/i.test(value);
+}
+
 function isDeepWork(value) {
   return /架构|重构|迁移|安全审计|性能优化|并发设计|根因|全量|端到端|复杂|architecture|refactor|migration|security audit|performance optimization|root cause|end[- ]to[- ]end|complex/i.test(String(value||''));
 }
@@ -73,7 +83,7 @@ function requiredModelTier(role, task, work) {
   if (role === 'validator') return 'balanced';
   if (role === 'subagent') {
     const local=workText(work);
-    if (isFiniteReadOnlyWork(work) && !isDeepWork(local)) return 'efficient';
+    if (isFiniteReadOnlyWork(work) && !isDeepWork(local) && !isBroadProjectWork(work)) return 'efficient';
     return 'balanced';
   }
   const value=`${task?.title||''}\n${task?.instruction||''}`;
@@ -82,7 +92,7 @@ function requiredModelTier(role, task, work) {
 }
 
 function requiredReasoningBand(role,task,work) {
-  if (role === 'subagent') return isFiniteReadOnlyWork(work) && !isDeepWork(workText(work)) ? 'low' : 'medium';
+  if (role === 'subagent') return isFiniteReadOnlyWork(work) && !isDeepWork(workText(work)) && !isBroadProjectWork(work) ? 'low' : 'medium';
   if (isRetrievalAnalysis(task)) return 'medium';
   if (role==='validator') return 'medium';
   const value=`${task?.title||''}\n${task?.instruction||''}`;

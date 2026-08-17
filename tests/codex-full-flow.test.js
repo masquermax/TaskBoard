@@ -45,7 +45,7 @@ rl.on('line', line => {
         : {reviews:[{id:'C-1',verdict:'supported',reason:'fake source proof supports the test claim'},{id:'gap_resolution:G-1',verdict:'supported',reason:'the answer explicitly supplies the requested scope'}]};
       return setTimeout(() => {
         send({ method:'item/completed', params:{ threadId, turnId, item:{ id:'agent_' + turnNo, type:'agentMessage', text:JSON.stringify(payload) } } });
-        send({ method:'turn/completed', params:{ threadId, turn:{ id:turnId, status:'completed', items:[], error:null } } });
+        send({ method:'turn/completed', params:{ threadId, turn:{ id:turnId, status:'completed',items:[],error:null } } });
       }, 5);
     }
     const answered = prompt.includes('基础办公');
@@ -78,8 +78,9 @@ test('Codex-backed full flow reaches Human Gateway and resumes to completion', a
   const projectDir = join(dir, 'oa-project');
   const { mkdirSync } = await import('node:fs');
   mkdirSync(projectDir);
-  const runtime = bootstrap({ rootDir:dir, executorName:'codex', startScheduler:false });
+  let runtime=null;
   try {
+    runtime = bootstrap({ rootDir:dir, executorName:'codex', startScheduler:false });
     const health = await runtime.executor.health();
     assert.equal(health.connected, true);
     assert.equal(health.authenticated, true);
@@ -96,8 +97,8 @@ test('Codex-backed full flow reaches Human Gateway and resumes to completion', a
     assert.match(completed.final_result, /1\. 本次 OA 范围为基础办公/);
     assert.doesNotMatch(completed.final_result, /【其他已确认】[\s\S]*本次 OA 范围为基础办公/);
   } finally {
-    runtime.executor.close();
-    runtime.database.close();
+    runtime?.executor?.close?.();
+    runtime?.database?.close?.();
     if (old == null) delete process.env.CODEX_COMMAND; else process.env.CODEX_COMMAND = old;
     rmSync(dir, { recursive:true, force:true });
   }
