@@ -12,6 +12,7 @@ import { availableContributionRefsForTask, hasLocalProgressSignal, repeatedContr
 
 function nowIso() { return new Date().toISOString(); }
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
+const MAX_PLANNING_REPAIRS = 1;
 
 function snapshotWorkUnit(unit, stageId = null) {
   return {
@@ -782,9 +783,8 @@ export class RootRuntime {
         const availableContributionRefs=availableContributionRefsForTask(task,session.analysisState);
         const plan=validateDelegationPlan(decision.delegations,{knownWorkIds,availableInputRefs:taskInputRefs(task),availableContributionRefs});
         if(plan.contributionIssues?.length){
-          const reason=`ROOT_WORK_WITHOUT_GOVERNED_CONTRIBUTION: ${plan.contributionIssues.join(' | ')}`;
-          if(this.hasUnfinishedWork(session)){session.actor={title:'Root 推进边界',status:WorkUnitStatus.COMPLETED,detail:'新 Work 缺少明确 governed contribution；不启动它，继续等待已签发 Work。',updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);continue;}
-          const snapshot=this.makeSnapshot(session);this.discardSession(task.id);return{kind:'suspended',reason,snapshot,quiescent:true};
+          plan.issues.push(...plan.contributionIssues.map(issue=>`ROOT_WORK_WITHOUT_GOVERNED_CONTRIBUTION: ${issue}`));
+          plan.valid=false;
         }
         const batchSignatures=new Set();
         for(const item of plan.delegations){
@@ -794,7 +794,7 @@ export class RootRuntime {
           batchSignatures.add(signature);
           if(item.skillId&&this.governanceCompiler?.hasSkill&&!this.governanceCompiler.hasSkill(item.skillId)){plan.issues.push(`工作 ${item.id} 选择了不存在的 Skill：${item.skillId}。`);plan.valid=false;}
         }
-        if(!plan.valid){session.planningRepairCount+=1;session.planningFeedback=plan.issues;session.planningTriggerRefs=[...rootTriggerRefs];session.actor={title:'Work Unit 契约校验',status:WorkUnitStatus.COMPLETED,detail:'Root 的新工作单不符合 Capability Contract；问题已作为内部规划反馈返回 Root。',updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);if(session.planningRepairCount>=MAX_TOTAL_ATTEMPTS){const error=new Error(`ROOT_INVALID_DELEGATION_PLAN: ${plan.issues.join(' | ')}`);error.nonRetryable=true;throw error;}continue;}
+        if(!plan.valid){session.planningRepairCount+=1;session.planningFeedback=plan.issues;session.planningTriggerRefs=[...rootTriggerRefs];session.actor={title:'Work Unit 契约校验',status:WorkUnitStatus.COMPLETED,detail:'Root 的新工作单不符合 Capability Contract；问题已作为内部规划反馈返回 Root。',updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);if(session.planningRepairCount>MAX_PLANNING_REPAIRS){const error=new Error(`ROOT_INVALID_DELEGATION_PLAN: ${plan.issues.join(' | ')}`);error.nonRetryable=true;throw error;}continue;}
         const repeatedContributions=repeatedContributionRefs(plan.delegations,rootInputs);
         if(repeatedContributions.length&&!reviewed.turnNode&&!hasLocalProgressSignal(rootInputs)){
           const reason=`ROOT_WORK_WITHOUT_STATE_ADVANCE: Work result did not change trusted state for ${repeatedContributions.join(', ')}; another Work against the same governed target is not admitted.`;
@@ -820,7 +820,7 @@ export class RootRuntime {
             return{...item,projectAccess:String(grant.projectAccess||'none'),networkAccess:grant.networkAccess===true,inputRefs:Array.isArray(grant.inputRefs)?[...grant.inputRefs]:[]};
           });
         }else for(const item of plan.delegations)if(item.projectAccess!=='none'||item.networkAccess===true||item.inputRefs.length){plan.issues.push(`工作 ${item.id} 请求受治理能力但没有 GovernanceCompiler。`);plan.valid=false;}
-        if(!plan.valid){session.planningRepairCount+=1;session.planningFeedback=plan.issues;session.planningTriggerRefs=[...rootTriggerRefs];session.actor={title:'AuthorizedGrant 校验',status:WorkUnitStatus.COMPLETED,detail:'Root 的 Work capability 未被当前 Task Authority 授权；问题已作为内部规划反馈返回 Root。',updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);if(session.planningRepairCount>=MAX_TOTAL_ATTEMPTS){const error=new Error(`ROOT_INVALID_DELEGATION_PLAN: ${plan.issues.join(' | ')}`);error.nonRetryable=true;throw error;}continue;}
+        if(!plan.valid){session.planningRepairCount+=1;session.planningFeedback=plan.issues;session.planningTriggerRefs=[...rootTriggerRefs];session.actor={title:'AuthorizedGrant 校验',status:WorkUnitStatus.COMPLETED,detail:'Root 的 Work capability 未被当前 Task Authority 授权；问题已作为内部规划反馈返回 Root。',updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);if(session.planningRepairCount>MAX_PLANNING_REPAIRS){const error=new Error(`ROOT_INVALID_DELEGATION_PLAN: ${plan.issues.join(' | ')}`);error.nonRetryable=true;throw error;}continue;}
         session.planningFeedback=null;session.planningRepairCount=0;session.planningTriggerRefs=[];for(const item of plan.delegations)session.issuedWorkSignatures.add(workSemanticSignature(item));if(session.currentStage)this.appendToStage(session,plan.delegations);else this.createStage(session,plan.delegations);this.emit(session,callbacks);continue;
       }
 
