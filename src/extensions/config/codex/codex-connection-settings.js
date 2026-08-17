@@ -8,6 +8,23 @@ const DEFAULT_STATE = Object.freeze({ mode:'account', baseUrl:'', defaultModel:'
 const ACCOUNT_PROFILE_ID = 'account';
 const LEGACY_CUSTOM_PROFILE_ID = 'custom-default';
 const STORE_SCHEMA_VERSION = 2;
+const CONNECTION_PRESENTATION = Object.freeze({
+  schemaVersion:1,
+  kind:'profiles',
+  title:'AI 连接',
+  selectorLabel:'连接方式',
+  createLabel:'＋ 新增自定义连接',
+  saveLabel:'应用 AI 连接',
+  deleteLabel:'删除这个 AI 连接',
+  fields:[
+    { key:'name', label:'连接名称', type:'text', placeholder:'例如：公司 API', required:true },
+    { key:'baseUrl', label:'API 地址', type:'url', placeholder:'https://api.example.com/v1', required:true },
+    { key:'apiKey', label:'API Key', type:'secret', placeholder:'留空表示保留已保存的 Key', configuredKey:'apiKeyConfigured' },
+    { key:'defaultModel', label:'默认模型（可选）', type:'model', placeholder:'例如：gpt-5.6-sol' },
+  ],
+  actions:{ select:'selectProfile', save:'saveProfile', delete:'deleteProfile' },
+  help:'连接配置只作用于当前 Executor Extension；Secret 不会通过公开状态、页面回显或日志返回。',
+});
 
 function text(value, max = 2048) {
   return String(value == null ? '' : value).trim().slice(0, max);
@@ -49,7 +66,7 @@ function providerIdForProfile(profileId) {
 }
 
 function accountPublic() {
-  return { id:ACCOUNT_PROFILE_ID, name:'Codex 当前账号', kind:'account', builtin:true, baseUrl:'', defaultModel:'', apiKeyConfigured:false };
+  return { id:ACCOUNT_PROFILE_ID, name:'Codex 当前账号', kind:'account', builtin:true, editable:false, deletable:false, baseUrl:'', defaultModel:'', apiKeyConfigured:false };
 }
 
 function normalizeCustomProfile(value = {}, current = null) {
@@ -65,13 +82,15 @@ function normalizeCustomProfile(value = {}, current = null) {
   return { id, name, kind:'custom', baseUrl, defaultModel, apiKey };
 }
 
-function publicProfile(profile) {
+function publicProfile(profile, activeProfileId) {
   if (profile?.kind==='account') return accountPublic();
   return {
     id:profile.id,
     name:profile.name,
     kind:'custom',
     builtin:false,
+    editable:true,
+    deletable:profile.id!==activeProfileId,
     baseUrl:profile.baseUrl,
     defaultModel:profile.defaultModel,
     apiKeyConfigured:Boolean(profile.apiKey),
@@ -121,7 +140,7 @@ function publicState(store, warning = null) {
   return {
     schemaVersion:STORE_SCHEMA_VERSION,
     activeProfileId:store.activeProfileId,
-    profiles:[accountPublic(),...store.profiles.map(publicProfile)],
+    profiles:[accountPublic(),...store.profiles.map(profile=>publicProfile(profile,store.activeProfileId))],
     // Compatibility projection for existing simple clients. These fields describe
     // only the active profile; new clients should use activeProfileId + profiles.
     mode:active.kind==='custom'?'custom':'account',
@@ -197,6 +216,7 @@ export class CodexConnectionSettings {
     }
   }
 
+  describe() { return clone(CONNECTION_PRESENTATION); }
   getPublic() { return publicState(this.value,this.loadWarning); }
 
   launchProfile() {
@@ -360,4 +380,4 @@ export class CodexConnectionSettings {
   }
 }
 
-export { CUSTOM_PROVIDER_ID, CUSTOM_ENV_KEY, ACCOUNT_PROFILE_ID, LEGACY_CUSTOM_PROFILE_ID, STORE_SCHEMA_VERSION, closeAndDrainClient, providerIdForProfile };
+export { CUSTOM_PROVIDER_ID, CUSTOM_ENV_KEY, ACCOUNT_PROFILE_ID, LEGACY_CUSTOM_PROFILE_ID, STORE_SCHEMA_VERSION, CONNECTION_PRESENTATION, closeAndDrainClient, providerIdForProfile };
