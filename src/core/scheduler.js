@@ -24,6 +24,15 @@ function recoveryState(task,nextState={}) {
   return withPreservedEffectRecovery(task?.executionState,nextState);
 }
 
+function isEffectRecoveryObservation(task) {
+  return hasUnresolvedEffectRecovery(task?.executionState)
+    && task?.executionState?.retry?.scope === 'effect-recovery-observe';
+}
+
+function observationRetry(reason='核对未知现实操作') {
+  return { scope:'effect-recovery-observe', failureCount:0, paused:false, nextAt:new Date().toISOString(), reason, error:null };
+}
+
 export class Scheduler {
   constructor({ repository, taskService, rootRuntime, maxConcurrentTasks = 2, capabilityLimits = null, intervalMs = 1200, retryDelaysMs = null }) {
     this.repository = repository;
@@ -108,7 +117,7 @@ export class Scheduler {
         state:suspended?'suspended':'queued',
         summary:recoveryBlocked?'现实操作结果待核对':(suspended?'任务存在挂起项':(retrying?'等待自动重试':(blocked?'等待执行资源':'等待执行'))),
         detail:recoveryBlocked
-          ? '上次现实操作的结果仍不确定；系统已停止自动重放，也不会把未知当成失败。'
+          ? (isEffectRecoveryObservation(task)?'系统正在准备一次只读恢复核对；旧现实操作不会被自动重放。':'上次现实操作的结果仍不确定；系统已停止自动重放，也不会把未知当成失败。')
           : (suspended?'自动恢复已停止，请在挂起项右上角点击 ↻ 重新尝试。':(retrying?retryDetail:(blocked?(gate.message||'当前执行资源尚未就绪。'):'Scheduler 会在满足条件后自动开始。'))),
         updatedAt:task.status_entered_at,
         current:snapshot,
@@ -138,9 +147,9 @@ export class Scheduler {
       }else if(unresolved){
         const state=withPreservedEffectRecovery(recoveredState,{
           snapshot:recoveredState.snapshot||null,
-          retry:{scope:'effect-recovery',failureCount:0,paused:true,nextAt:null,reason:'现实操作结果未知',error:null},
+          retry:observationRetry('重启后核对未知现实操作'),
         });
-        this.repository.transitionTask(task.id,TaskStatus.READY,{readyReason:ReadyReason.SUSPENDED,executionState:state});
+        this.repository.transitionTask(task.id,TaskStatus.READY,{readyReason:ReadyReason.WAITING_RESOURCE,executionState:state});
       }else{
         this.repository.transitionTask(task.id,TaskStatus.READY,{readyReason:ReadyReason.WAITING_RESOURCE,executionState:recoveredState});
       }
@@ -196,7 +205,8 @@ export class Scheduler {
   async runClaimed(taskId) {
     if(this.shuttingDown||this.claimedTasks.has(taskId))return;
     let task=this.repository.getTask(taskId);if(!task||task.status!==TaskStatus.READY||task.deleted_at)return;
-    if(hasUnresolvedEffectRecovery(task.executionState))return;
+    const recoveryObservation=isEffectRecoveryObservation(task);
+    if(hasUnresolvedEffectRecovery(task.executionState)&&!recoveryObservation)return;
     this.claimedTasks.add(taskId);
     let admitted=false;
     const admit=(meta={})=>{
@@ -208,16 +218,19 @@ export class Scheduler {
       else throw new Error('TASK_ADMISSION_STATE_CHANGED');
       admitted=true;this.activeTasks.add(taskId);
       const owner=meta?.role||this.rootRuntime.snapshot(taskId)?.actor?.owner||'root';
-      this.setActivity(taskId,{state:'running',summary:'已获得执行资源',detail:`${actorLabel(owner)} 已开始本轮执行。`,current:this.rootRuntime.snapshot(taskId)});
+      this.setActivity(taskId,{state:'running',summary:recoveryObservation?'正在核对现实':'已获得执行资源',detail:recoveryObservation?'Root 正在基于持久化恢复事实重新取得只读证据；新的现实操作仍被禁止。':`${actorLabel(owner)} 已开始本轮执行。`,current:this.rootRuntime.snapshot(taskId)});
     };
     try{
       const outcome=await this.rootRuntime.execute(task,{
         onExecutionStarted:admit,
         humanGatewayHistory:this.repository.listGatewayHistory(taskId),
-        onProgress:snapshot=>this.setActivity(taskId,admitted?{state:'running',summary:'当前阶段正在推进',detail:snapshotProgressDetail(snapshot),current:snapshot}:{state:'queued',summary:'等待执行资源',detail:'正在等待本轮所需的执行资源；获得真实执行资源前任务仍保持「需执行」。',current:snapshot}),
+        onProgress:snapshot=>this.setActivity(taskId,admitted?{state:'running',summary:recoveryObservation?'正在核对现实':'当前阶段正在推进',detail:recoveryObservation?'系统仅允许不会产生新现实变化的恢复求证。':snapshotProgressDetail(snapshot),current:snapshot}:{state:'queued',summary:'等待执行资源',detail:'正在等待本轮所需的执行资源；获得真实执行资源前任务仍保持「需执行」。',current:snapshot}),
         onCertifiedTurn:commit=>{if(!this.shuttingDown)this.repository.commitCertifiedTurn(taskId,commit);},
         onTaskContractAuthority:authority=>{if(this.shuttingDown){const error=new Error('TASK_CONTRACT_PERSISTENCE_UNAVAILABLE_DURING_SHUTDOWN');error.nonRetryable=true;throw error;}this.repository.commitTaskContractAuthority(taskId,authority);},
-        onEffectAttempt:attempt=>this.persistEffectAttempt(taskId,attempt),
+        onEffectAttempt:attempt=>{
+          if(recoveryObservation){const error=new Error('EFFECT_RECOVERY_ACTUATION_BLOCKED: unresolved prior effect must be reconciled before any new effect-capable Work can obtain control.');error.nonRetryable=true;error.effectRecoveryBlocked=true;throw error;}
+          this.persistEffectAttempt(taskId,attempt);
+        },
         onEffectAttemptCleared:attemptId=>this.clearEffectAttempt(taskId,attemptId),
         onWorkReceipt:receipt=>{
           if(this.shuttingDown){const error=new Error('WORK_RECEIPT_PERSISTENCE_UNAVAILABLE_DURING_SHUTDOWN');error.nonRetryable=true;throw error;}
@@ -277,10 +290,13 @@ export class Scheduler {
         this.ensureQuiescent(taskId);
         current=this.repository.getTask(taskId);
         const retrying=outcome.kind==='retry_wait';
-        const state=recoveryState(current,{snapshot:outcome.snapshot,retry:{scope:'work-unit',failureCount:0,paused:false,nextAt:new Date(outcome.retryAt).toISOString(),reason:outcome.reason,error:null}});
-        const readyReason=retrying?ReadyReason.RETRY_WAIT:ReadyReason.WAITING_RESOURCE;
+        const retry=recoveryObservation
+          ? { ...observationRetry(outcome.reason||'继续恢复核对'), nextAt:new Date(outcome.retryAt).toISOString() }
+          : {scope:'work-unit',failureCount:0,paused:false,nextAt:new Date(outcome.retryAt).toISOString(),reason:outcome.reason,error:null};
+        const state=recoveryState(current,{snapshot:outcome.snapshot,retry});
+        const readyReason=recoveryObservation?ReadyReason.WAITING_RESOURCE:(retrying?ReadyReason.RETRY_WAIT:ReadyReason.WAITING_RESOURCE);
         const ready=admitted?this.repository.transitionTask(taskId,TaskStatus.READY,{readyReason,executionState:state}):this.repository.touchTask(taskId,{readyReason,executionState:state});
-        this.setActivity(taskId,{state:'queued',summary:retrying?'等待自动重试':'等待执行资源',detail:retrying?'上一轮执行已失败；系统会在错峰等待后自动重试。':'当前没有 Agent 在执行；资源可用后 Scheduler 会自动继续。',current:outcome.snapshot});
+        this.setActivity(taskId,{state:'queued',summary:recoveryObservation?'等待继续核对':(retrying?'等待自动重试':'等待执行资源'),detail:recoveryObservation?'恢复核对尚未获得所需执行资源；不会启动新的现实操作。':(retrying?'上一轮执行已失败；系统会在错峰等待后自动重试。':'当前没有 Agent 在执行；资源可用后 Scheduler 会自动继续。'),current:outcome.snapshot});
         return ready;
       }
 
@@ -290,9 +306,16 @@ export class Scheduler {
         const suspendedCounts=(outcome.snapshot?.stage?.workUnits||[]).filter(unit=>unit.status===WorkUnitStatus.SUSPENDED).map(unit=>Number(unit.failureCount||0));
         const failureCount=suspendedCounts.length?Math.max(...suspendedCounts):0;
         const recoveryBlocked=hasUnresolvedEffectRecovery(current.executionState);
+        if(recoveryBlocked&&!recoveryObservation){
+          this.rootRuntime.discardSession(taskId);
+          const state=recoveryState(current,{snapshot:outcome.snapshot,retry:observationRetry('现实操作结果未知，进入一次受限恢复核对')});
+          const ready=admitted?this.repository.transitionTask(taskId,TaskStatus.READY,{readyReason:ReadyReason.WAITING_RESOURCE,executionState:state}):this.repository.touchTask(taskId,{readyReason:ReadyReason.WAITING_RESOURCE,executionState:state});
+          this.setActivity(taskId,{state:'queued',summary:'准备核对现实',detail:'上次现实操作结果未知；旧 Work 不会重放，系统将重新取得只读证据后再决定剩余工作。',current:outcome.snapshot});
+          return ready;
+        }
         const state=recoveryState(current,{snapshot:outcome.snapshot,retry:{scope:recoveryBlocked?'effect-recovery':'work-unit',failureCount,paused:true,nextAt:null,reason:recoveryBlocked?'现实操作结果未知':outcome.reason,error:null}});
         const ready=admitted?this.repository.transitionTask(taskId,TaskStatus.READY,{readyReason:ReadyReason.SUSPENDED,executionState:state}):this.repository.touchTask(taskId,{readyReason:ReadyReason.SUSPENDED,executionState:state});
-        this.setActivity(taskId,{state:'suspended',summary:recoveryBlocked?'现实操作结果待核对':'当前阶段存在挂起项',detail:recoveryBlocked?'上次现实操作可能已经发生；系统已停止自动重放。':'自动恢复已经停止，请按卡片正文指引点击右上角 ↻ 重新尝试。',current:outcome.snapshot});
+        this.setActivity(taskId,{state:'suspended',summary:recoveryBlocked?'现实操作结果待核对':'当前阶段存在挂起项',detail:recoveryBlocked?'本次受限核对仍未建立足够稳定的恢复事实；系统继续禁止新的现实操作和自动重放。':'自动恢复已经停止，请按卡片正文指引点击右上角 ↻ 重新尝试。',current:outcome.snapshot});
         return ready;
       }
       throw new Error(`ROOT_OUTCOME_UNSUPPORTED:${outcome.kind}`);
@@ -311,7 +334,10 @@ export class Scheduler {
       if(current?.status===TaskStatus.READY&&!admitted&&isCapacityUnavailable(error)){
         const delay=capacityRetryDelayMs(this.retryDelaysMs);const nextAt=new Date(Date.now()+delay).toISOString();
         const snapshot=this.rootRuntime.snapshot(taskId)||{taskId,actor:null,stage:null,updatedAt:nowIso()};
-        const state=recoveryState(current,{snapshot,retry:{scope:'root-capacity',failureCount:0,paused:false,nextAt,reason:'等待可用 Root',error:null}});
+        const retry=recoveryObservation
+          ? {...observationRetry('等待可用 Root 继续恢复核对'),nextAt}
+          : {scope:'root-capacity',failureCount:0,paused:false,nextAt,reason:'等待可用 Root',error:null};
+        const state=recoveryState(current,{snapshot,retry});
         this.repository.touchTask(taskId,{readyReason:ReadyReason.WAITING_RESOURCE,executionState:state});
         this.setActivity(taskId,{state:'queued',summary:'等待执行资源',detail:capacityWaitingInstruction(error?.message||''),current:snapshot});
         return;
