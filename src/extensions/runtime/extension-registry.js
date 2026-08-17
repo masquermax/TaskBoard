@@ -1,3 +1,5 @@
+export const EXTENSION_API_VERSION = 1;
+
 export const OrchestrationMode = Object.freeze({
   TASKBOARD: 'taskboard',
   RUNTIME_NATIVE: 'runtime-native',
@@ -19,6 +21,13 @@ function validateConnectionSettings(id,settings){
     throw new Error(`EXTENSION_CONNECTION_SETTINGS_INVALID:${id}`);
   }
   return settings;
+}
+
+function validateApiVersion(id,value){
+  const version=Number(value);
+  if(!Number.isInteger(version)||version<1)throw new Error(`EXTENSION_API_VERSION_REQUIRED:${id}`);
+  if(version!==EXTENSION_API_VERSION)throw new Error(`EXTENSION_API_VERSION_UNSUPPORTED:${id}:${version}`);
+  return version;
 }
 
 export class ExtensionRegistry {
@@ -45,10 +54,12 @@ export class ExtensionRegistry {
     const factory = this.factories.get(key);
     if (!factory) throw new Error(`EXTENSION_NOT_FOUND:${key}`);
     const extension = factory(context) || {};
+    const apiVersion=validateApiVersion(key,extension.apiVersion);
     const orchestrationMode=String(extension.orchestrationMode||OrchestrationMode.TASKBOARD).trim();
     if(!orchestrationModes.has(orchestrationMode))throw new Error(`EXTENSION_ORCHESTRATION_MODE_INVALID:${orchestrationMode||'missing'}`);
     return {
       id: key,
+      apiVersion,
       displayName: extension.displayName || key,
       orchestrationMode,
       executor: extension.executor || null,
