@@ -6,6 +6,7 @@
   "description": "Local-first AI task board with Human Gateway and pluggable Executor extensions.",
   "exports": {
     "./bootstrap": "./src/server/bootstrap.js",
+    "./extension-api": "./src/extensions/public-api.js",
     "./extensions": "./src/extensions/index.js"
   },
   "scripts": {
