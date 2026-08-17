@@ -1,4 +1,4 @@
-# TaskBoard v0.9.2
+# TaskBoard Codex v0.9.2
 
 TaskBoard is a local-first AI work board. TaskBoard owns durable Task facts and governed work orchestration; Codex is the stock first Executor Extension, not a Core dependency.
 
@@ -34,7 +34,7 @@ Prerequisites: Node.js 16.6+ and a usable Codex runtime. The stock distribution 
 - **Skill** — reusable method only.
 - **Executor** — concrete operations and runtime facts.
 - **Human Gateway** — genuinely human-owned information/choice transport.
-- **UI / Surface** — presentation and user intent.
+- **UI / Surface** — presentation and user intent only.
 
 Project-specific authority is derived only by `GovernanceCompiler` into `AuthorizedGrant` from the machine Role capability, certified `TaskContract` authority, selected Project scope and Work Unit request. Goal Satisfaction is derived only by `CompletionEvaluator`. Other components consume or project those results rather than independently re-deriving them.
 
