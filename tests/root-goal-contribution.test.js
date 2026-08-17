@@ -12,17 +12,24 @@ function targetedWork(id,title){return{id,title,goal:`Try one bounded acquisitio
 function runtimeFor(executor){const modelRouter=new ModelRouter();const subagentRuntime=new SubagentRuntime({executor,modelRouter});return new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter,subagentRuntime});}
 function task(id){return{id,title:'Close the governed runtime deficit',instruction:'Resolve the current governed runtime deficit with the minimum necessary work.',projectScopes:[],attachments:[],references:[],analysisState:null,workReceipts:[],taskContract:{authority:{}}};}
 
-test('new Work without a machine-checkable governed contribution suspends before Executor admission',async()=>{
+test('new Work without a machine-checkable governed contribution gets one bounded repair and never reaches Executor',async()=>{
   let rootCalls=0,subagentCalls=0;
   const executor={
-    async runRoot({subagentResults,onExecutionStarted}){rootCalls+=1;onExecutionStarted?.();if((subagentResults||[]).length)return{...baseDecision,kind:'complete',summary:'should not run after unbound work',finalResult:'done',gaps:[]};return{...baseDecision,kind:'delegate',summary:'issue a structurally valid but goal-unbound Work Unit',gaps:[targetGap()],delegations:[unrelatedWork()]};},
+    async runRoot({planningFeedback,onExecutionStarted}){
+      rootCalls+=1;onExecutionStarted?.();
+      if(planningFeedback?.length){
+        assert.match(planningFeedback.join(' | '),/ROOT_WORK_WITHOUT_GOVERNED_CONTRIBUTION/);
+        return{...baseDecision,kind:'wait',summary:'No governed machine action remains after the invalid unbound Work was rejected.',gaps:[targetGap()]};
+      }
+      return{...baseDecision,kind:'delegate',summary:'issue a structurally valid but goal-unbound Work Unit',gaps:[targetGap()],delegations:[unrelatedWork()]};
+    },
     async runSubagent({delegation,onExecutionStarted}){subagentCalls+=1;onExecutionStarted?.();return{delegationId:delegation.id,result:'unrelated metadata',evidence:[],findings:[],discoveries:[],blocker:null,uncertainty:null};},
   };
   const outcome=await runtimeFor(executor).execute(task('T-GOAL-CONTRIBUTION'));
   assert.equal(outcome.kind,'suspended');
-  assert.match(outcome.reason,/ROOT_WORK_WITHOUT_GOVERNED_CONTRIBUTION/);
+  assert.match(outcome.reason,/No governed machine action remains/);
   assert.equal(subagentCalls,0,'goal-unbound Work must be stopped before it reaches the Executor');
-  assert.equal(rootCalls,1,'the original trigger must not buy another Root cognition round');
+  assert.equal(rootCalls,2,'one invalid control plan may buy exactly one bounded planning repair, then must converge');
 });
 
 test('same governed target cannot buy another Work after the prior result produced no state-bearing delta',async()=>{
