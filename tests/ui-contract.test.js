@@ -40,16 +40,17 @@ test('suspended retry copy explicitly tells the user what to do and uses a retry
   assert.match(js,/重新进入尝试流程，将从第 1\/5 次开始/);
 });
 
-test('capability discovery stays read-only while Executor-owned connection settings expose a separate secret-safe provider surface',()=>{
+test('capability discovery stays read-only while Executor-owned connection settings expose a separate declarative secret-safe surface',()=>{
   assert.match(js,/h\.displayName\|\|h\.executor/);
-  assert.match(js,/OpenAI API/);
-  assert.match(js,/h\.providerId/);
+  assert.match(js,/function executorConnectionLabel/);
   assert.doesNotMatch(js,/API Key|Base URL|connection-mode|connection-api-key/i,'capability discovery UI must not become provider configuration');
   assert.match(html,/id="connection-settings-section"/);
-  assert.match(html,/id="connection-mode"/);
-  assert.match(html,/id="connection-api-key"[^>]+type="password"|type="password"[^>]+id="connection-api-key"/i);
+  assert.doesNotMatch(html,/connection-mode|connection-api-key|connection-base-url|connection-default-model/,'stock HTML must not encode one Executor settings form');
   assert.match(connectionJs,/\/api\/executor\/connection/);
-  assert.match(connectionJs,/apiKeyConfigured/);
+  assert.match(connectionJs,/presentationState/);
+  assert.match(connectionJs,/field\.type==='secret'/);
+  assert.match(connectionJs,/configuredKey/);
+  assert.match(connectionJs,/field\.type==='secret'\?'password'/);
   assert.doesNotMatch(connectionJs,/connection\.apiKey\b/,'stored API key must never be read back into the UI');
   assert.doesNotMatch(html,/登录 ChatGPT|连接 ChatGPT|切换 Provider/i);
   assert.doesNotMatch(html,/model[^>]*select|reasoning[^>]*select/i);
@@ -95,7 +96,7 @@ test('Codex embedded UI reports readiness to the host only after initial TaskBoa
 });
 
 
-test('simple configuration keeps runtime concurrency controls limited to task concurrency and per-Root maximum Subagents while connection settings remain a separate section',()=>{
+test('simple configuration keeps runtime concurrency controls limited to task concurrency and TaskBoard Subagents while connection settings remain a separate section',()=>{
   assert.match(html,/id="simple-config-link"[^>]*>简易配置</);
   assert.match(html,/id="connection-settings-section"/);
   assert.match(html,/任务并发数/);
@@ -104,7 +105,9 @@ test('simple configuration keeps runtime concurrency controls limited to task co
   assert.match(html,/id="setting-task-max-subagents"/);
   const settings=html.slice(html.indexOf('id="settings-dialog"'),html.indexOf('</dialog>',html.indexOf('id="settings-dialog"')));
   assert.match(settings,/value="5">5</);
-  assert.match(settings,/每个 Root 最多同时拥有的 Subagent 数/);
+  assert.match(settings,/每个 Root 最多同时拥有的 TaskBoard Subagent 数/);
+  assert.match(settings,/Runtime-native Agent Tree/);
+  assert.match(settings,/不能计入或混入这里/);
   assert.match(settings,/AI 并发能力：未报告明确上限/);
   assert.match(js,/当前 AI 上限为/);
   assert.doesNotMatch(settings,/公平配额|全局资源池|为当前任务选择 Agent|手工分配 Agent/i);
