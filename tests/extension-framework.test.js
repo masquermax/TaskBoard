@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ExtensionRegistry } from '../src/extensions/runtime/extension-registry.js';
+import { readFileSync } from 'node:fs';
+import { ExtensionRegistry, OrchestrationMode } from '../src/extensions/runtime/extension-registry.js';
 import { SurfaceManager } from '../src/extensions/runtime/surface-manager.js';
 import { ExecutorPort } from '../src/core/executor-port.js';
 import { CapabilityProviderPort } from '../src/extensions/ports/capability-provider.js';
@@ -16,15 +17,39 @@ class DemoSurface extends SurfaceHostPort {
   status(){ return { id:'demo-surface', state:this.started>this.stopped?'watching':'stopped', attachedTargets:0, error:null }; }
 }
 
-test('generic extension registry carries independent execution, capability, and surface axes', () => {
+test('generic extension registry carries independent execution, capability, presentation, orchestration and surface axes', () => {
   const registry=new ExtensionRegistry();
-  registry.register('demo',()=>({ displayName:'Demo', executor:new DemoExecutor(), capabilityProvider:new DemoCapability(), surfaceHosts:[new DemoSurface()] }));
+  registry.register('demo',()=>({
+    displayName:'Demo',
+    orchestrationMode:OrchestrationMode.TASKBOARD,
+    presentation:{description:'External demo executor'},
+    executor:new DemoExecutor(),
+    capabilityProvider:new DemoCapability(),
+    surfaceHosts:[new DemoSurface()],
+  }));
   const extension=registry.create('demo');
   assert.equal(extension.id,'demo');
+  assert.equal(extension.displayName,'Demo');
+  assert.equal(extension.orchestrationMode,OrchestrationMode.TASKBOARD);
+  assert.equal(extension.presentation.description,'External demo executor');
   assert.ok(extension.executor instanceof ExecutorPort);
   assert.ok(extension.capabilityProvider instanceof CapabilityProviderPort);
   assert.ok(extension.surfaceHosts[0] instanceof SurfaceHostPort);
   assert.throws(()=>registry.register('demo',()=>({})),/EXTENSION_DUPLICATE/);
+});
+
+test('runtime-native orchestration is a distinct declared mode rather than an implicit runSubagent variant',()=>{
+  const registry=new ExtensionRegistry();
+  registry.register('native',()=>({displayName:'Native',orchestrationMode:OrchestrationMode.RUNTIME_NATIVE,executor:new DemoExecutor()}));
+  assert.equal(registry.create('native').orchestrationMode,OrchestrationMode.RUNTIME_NATIVE);
+  registry.register('bad',()=>({orchestrationMode:'hybrid',executor:new DemoExecutor()}));
+  assert.throws(()=>registry.create('bad'),/EXTENSION_ORCHESTRATION_MODE_INVALID:hybrid/);
+});
+
+test('TaskBoard exposes stable composition entry points for an external extension repository',()=>{
+  const pkg=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8'));
+  assert.equal(pkg.exports['./extensions'],'./src/extensions/index.js');
+  assert.equal(pkg.exports['./bootstrap'],'./src/server/bootstrap.js');
 });
 
 test('surface manager is generic and lifecycle-isolates optional hosts', async () => {
