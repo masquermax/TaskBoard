@@ -1,5 +1,7 @@
 import { CapabilityProviderPort, DiscoveryLevel } from '../../ports/capability-provider.js';
 
+const CODEX_MODEL_SELECTION = Object.freeze({ explicitPerTurn:true, maxPerTurn:1 });
+function codexModelSelection() { return { ...CODEX_MODEL_SELECTION }; }
 function nowIso() { return new Date().toISOString(); }
 function valueAt(object, paths) {
   for (const path of paths) {
@@ -209,6 +211,7 @@ export class CodexCapabilityProvider extends CapabilityProviderPort {
         execution:{ available:true, connected:false, ready:false, version:probe.version || this.client.version || retained?.execution?.version || null, error:error.message || String(error) },
         provider:retained?.provider||null,
         defaults:retained?.defaults||{ model:null, reasoningEffort:null, serviceTier:null },
+        modelSelection:codexModelSelection(),
         models:retainedModels,
         providerCapabilities:retained?.providerCapabilities||null,
         unsupportedMethods:retained?.unsupportedMethods||[], warnings:[error.message||String(error)],
@@ -229,6 +232,7 @@ export class CodexCapabilityProvider extends CapabilityProviderPort {
         execution:{ available:false, connected:false, ready:false, version:probe.version || retained?.execution?.version || null, error:probe.error || 'Codex command unavailable' },
         provider:retained?.provider||null,
         defaults:retained?.defaults||{ model:null, reasoningEffort:null, serviceTier:null },
+        modelSelection:codexModelSelection(),
         models:retainedModels,
         providerCapabilities:retained?.providerCapabilities||null,
         unsupportedMethods:retained?.unsupportedMethods||[], warnings:[probe.error||'Codex command unavailable'], catalogState:retainedModels.length?'stale':'unavailable', lastRefresh:this.lastRefresh,
@@ -289,6 +293,7 @@ export class CodexCapabilityProvider extends CapabilityProviderPort {
         reasoningEffort:defaultReasoningEffort == null ? null : String(defaultReasoningEffort),
         serviceTier:defaultServiceTier == null ? null : String(defaultServiceTier),
       },
+      modelSelection:codexModelSelection(),
       models:previousModels,
       providerCapabilities:providerCaps && typeof providerCaps === 'object' ? sanitizeCapabilityValue(providerCaps) : null,
       unsupportedMethods:unsupported,

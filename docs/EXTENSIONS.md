@@ -15,6 +15,8 @@ import {
   ConnectionSettingsPort,
   ContinuationPort,
   SurfaceHostPort,
+  RuntimeFailureCode,
+  attachRuntimeFailure,
 } from 'taskboard-codex/extension-api';
 ```
 
@@ -71,11 +73,53 @@ An Extension factory returns:
 
 Provider/Profile secrets, provider identity and provider-specific launch projection remain inside the owning Executor Extension. Task Core and `ModelRouter` consume normalized capability facts rather than provider brands or transport fields.
 
+## Model catalog and model selection
+
+Models are Executor capability, not a third Extension Point. A Capability snapshot separates two different facts:
+
+```js
+{
+  defaults: { model: 'model-a' },
+  modelSelection: {
+    explicitPerTurn: true,
+    maxPerTurn: 1,
+  },
+  models: [ /* zero or more discovered models */ ],
+}
+```
+
+- `models[]` is the set of Runtime-discovered choices known for the current Provider/Profile identity. It may contain zero, one or many models.
+- `modelSelection.explicitPerTurn` states whether the Executor can faithfully accept a TaskBoard-selected model for an individual Turn.
+- `modelSelection.maxPerTurn` is the cardinality of the selected model inside one Turn; the current normalized contract is one model per Turn.
+- Missing capability or `explicitPerTurn:false` means `ModelRouter` leaves the model unset and the Executor/Runtime owns its configured default. A large catalog never implies that TaskBoard is allowed to override the model.
+- When explicit selection is supported and routing evidence is safe, `ModelRouter` may choose one minimum-sufficient model from normalized metadata. Provider-specific model ids or brands do not become Core routing rules.
+
+This keeps the semantic cardinality precise: many installed/available models, at most one selected for a Turn, and only when the active Executor actually supports that operation.
+
+## Runtime failure facts and retry ownership
+
+An Executor may normalize provider/runtime failures before they cross the public boundary:
+
+```js
+throw attachRuntimeFailure(error, {
+  code: RuntimeFailureCode.NETWORK,
+  status: 503,
+  retryAfterMs: 2500,
+  requestId: 'provider-request-id',
+});
+```
+
+The normalized facts are observations, not retry policy. Current generic codes include `NETWORK`, `TIMEOUT`, `RATE_LIMIT`, `QUOTA`, `AUTH_REQUIRED`, `UPSTREAM_REJECTED`, `INVALID_REQUEST`, `ABORTED` and `UNKNOWN`.
+
+TaskBoard Core owns retry/recovery classification. An Executor invocation represents one Runtime attempt; Extensions must not hide provider retry loops or silently fall back to a different model/provider/orchestration mode. `status`, `retryAfterMs` and `requestId` may preserve useful upstream evidence, but they do not grant Authority and do not decide whether the Task should retry.
+
+Core retains message-based classification only as a compatibility fallback for older/third-party Executors that do not yet attach structured Runtime failure facts. New adapters should prefer the structured boundary so wording changes such as `stream disconnected` or `error sending request` do not change semantic failure classification.
+
 ## Artifact and contribution boundary
 
 An Extension Artifact is the install/version/enable/disable/remove boundary. One Artifact may carry multiple facets that share that lifecycle. Do not split executor capability, connection settings and presentation merely because they are separate code modules.
 
-Independent Extension Points are introduced only when real product/runtime evidence establishes a meaningful independent contract and lifecycle. `executor` and `continuation` are independently bindable points; ecosystem source layout or UI categories must not manufacture additional Core Extension Points.
+Independent Extension Points are introduced only when real product/runtime evidence establishes a meaningful independent contract and lifecycle. `executor` and `continuation` are independently bindable points; ecosystem source layout or UI categories must not manufacture additional Core Extension Points. Model catalog/selection remains a capability of the active Executor rather than an independently installed/bound point.
 
 Skill is a different Artifact type and uses the Skill Library boundary. A Skill is reusable method content and never gains Task Authority merely because it is installable beside Runtime Extensions.
 
@@ -160,7 +204,7 @@ Installation and active binding are different concepts.
 - One TaskBoard process currently binds one active Executor Extension.
 - One TaskBoard process binds zero or one active Continuation Extension.
 - Executor and Continuation bindings are independent; the absence of Continuation never blocks TaskBoard execution.
-- One active Executor may expose many models through its capability catalog.
+- One active Executor may expose many models through its capability catalog; an individual Turn uses at most one explicit model when the Executor advertises that selection capability.
 - Provider/Profile cardinality is Extension-owned; the current Codex Extension supports many saved profiles and one active profile per Codex child.
 - `surfaceHosts[]` may have multiple simultaneous contributors inside the active Extension composition.
 
