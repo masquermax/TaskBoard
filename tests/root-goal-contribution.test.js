@@ -12,6 +12,7 @@ function targetedWork(id,title){return{id,title,goal:`Try one bounded acquisitio
 function runtimeFor(executor){const modelRouter=new ModelRouter();const subagentRuntime=new SubagentRuntime({executor,modelRouter});return new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter,subagentRuntime});}
 function task(id){return{id,title:'Close the governed runtime deficit',instruction:'Resolve the current governed runtime deficit with the minimum necessary work.',projectScopes:[],attachments:[],references:[],analysisState:null,workReceipts:[],taskContract:{authority:{}}};}
 
+// A malformed Root control plan may consume one local repair turn, but the unbound Work itself must never reach execution.
 test('new Work without a machine-checkable governed contribution gets one bounded repair and never reaches Executor',async()=>{
   let rootCalls=0,subagentCalls=0;
   const executor={
