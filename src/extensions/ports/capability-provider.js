@@ -25,6 +25,7 @@ export function basicCapabilitySnapshot({ extensionId, displayName, available = 
     execution: { available, connected, version, ready: Boolean(available && connected), error },
     provider: null,
     defaults: { model: null, reasoningEffort: null, serviceTier: null },
+    modelSelection: { explicitPerTurn: false, maxPerTurn: 1 },
     models: [],
     providerCapabilities: null,
     unsupportedMethods: [],

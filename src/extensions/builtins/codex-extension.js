@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { CodexAppServerClient } from '../executors/codex/app-server-client.js';
 import { CodexExecutor } from '../executors/codex/codex-executor.js';
+import { normalizeCodexRuntimeFailure } from '../executors/codex/runtime-failure.js';
 import { CodexCapabilityProvider } from '../capabilities/codex/codex-capability-provider.js';
 import { CodexCdpSurfaceHost } from '../surfaces/codex/codex-cdp-surface-host.js';
 import { CodexConnectionSettings } from '../config/codex/codex-connection-settings.js';
@@ -12,7 +13,10 @@ export function createCodexExtension({ rootDir, taskboardUrl } = {}) {
   const connectionGate = new CodexConnectionGate();
   const client = new CodexAppServerClient({ launchProfileProvider:() => connectionSettings.launchProfile() });
   const unguardedRunTurn = client.runTurn.bind(client);
-  client.runTurn = request => connectionGate.run(() => unguardedRunTurn(request));
+  client.runTurn = request => connectionGate.run(async () => {
+    try { return await unguardedRunTurn(request); }
+    catch (error) { throw normalizeCodexRuntimeFailure(error); }
+  });
   // Resolve or, on Windows, prepare only the mechanical Codex CLI runtime.
   // Account/custom-provider configuration is extension-owned and is projected
   // only into the TaskBoard-owned child app-server launch.

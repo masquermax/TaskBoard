@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ModelRouter } from '../src/core/model-router.js';
 
 class Provider {
-  constructor(snapshot){this.value=snapshot;this.calls=[];}
+  constructor(snapshot){this.value={modelSelection:{explicitPerTurn:true,maxPerTurn:1},...snapshot};this.calls=[];}
   async discover(options){this.calls.push(options);return this.value;}
   snapshot(){return this.value;}
 }
@@ -29,6 +29,24 @@ test('router uses executor default only when config is unsafe; a config/read mod
   router=new ModelRouter({capabilityProvider:configuredOnly}); t=task();
   await router.prepare({task:t}); route=router.route({role:'root',task:t});
   assert.equal(route.model,'unknown'); assert.equal(route.reasoningEffort,null); assert.equal(route.routeReason,'configured-model');
+});
+
+test('model catalog cardinality does not imply an Executor supports explicit per-Turn model selection', async()=>{
+  const provider=new Provider({
+    discoveryLevel:'full',routingSafe:true,
+    modelSelection:{explicitPerTurn:false,maxPerTurn:1},
+    defaults:{model:'configured-default'},
+    models:[
+      {id:'configured-default',description:'Balanced general-purpose model.',reasoningEfforts:[{value:'medium'}]},
+      {id:'alternate',description:'Flagship model for complex reasoning.',reasoningEfforts:[{value:'high'}]},
+    ],
+  });
+  const router=new ModelRouter({capabilityProvider:provider}); const t=task({id:'NO-MODEL-OVERRIDE'});
+  await router.prepare({task:t}); const route=router.route({role:'root',task:t});
+  assert.equal(route.model,null,'TaskBoard must leave model selection to the Executor when the slot is not supported');
+  assert.equal(route.reasoningEffort,null);
+  assert.equal(route.configuredDefaultModel,'configured-default');
+  assert.equal(route.routeReason,'executor-default');
 });
 
 test('router passes Task cwd to capability discovery without exposing a user model selector', async () => {

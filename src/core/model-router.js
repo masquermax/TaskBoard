@@ -50,6 +50,11 @@ function configuredModel(snapshot) {
   return value||null;
 }
 
+function supportsExplicitModelSelection(snapshot) {
+  const selection=snapshot?.modelSelection;
+  return selection?.explicitPerTurn===true && Number.isInteger(selection?.maxPerTurn) && selection.maxPerTurn>=1;
+}
+
 function taskContext(task) {
   const cwd = (task?.projectScopes || []).map(scope => scope?.path).find(Boolean) || null;
   return cwd ? { cwd } : null;
@@ -170,8 +175,10 @@ export class ModelRouter {
       routeReason: 'executor-default',
     };
 
-    // Unknown or task-context-mismatched capability must never be guessed.
-    if (snapshot?.routingSafe === false) return policy;
+    // Unknown, task-context-mismatched, or non-selectable capability must never
+    // be guessed. A model catalog may contain many choices without implying that
+    // this Executor can accept a TaskBoard-selected model on each Turn.
+    if (snapshot?.routingSafe === false || !supportsExplicitModelSelection(snapshot)) return policy;
 
     // config/read is trusted even without a model catalog. This is the fail-safe
     // path when metadata cannot prove that another model is sufficient.

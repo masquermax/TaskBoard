@@ -1,3 +1,5 @@
+import { RuntimeFailureCode, runtimeFailureOf } from './runtime-failure.js';
+
 export const MAX_TOTAL_ATTEMPTS = 5;
 
 export function messageOf(error) {
@@ -5,7 +7,7 @@ export function messageOf(error) {
 }
 
 export function isInterrupted(error) {
-  return Boolean(error?.interrupted || error?.name === 'AbortError' || /interrupted|aborted/i.test(messageOf(error)));
+  return Boolean(runtimeFailureOf(error)?.code === RuntimeFailureCode.ABORTED || error?.interrupted || error?.name === 'AbortError' || /interrupted|aborted/i.test(messageOf(error)));
 }
 
 // Capacity shortage is not an execution failure. It means no new Root/Subagent
@@ -16,10 +18,35 @@ export function isCapacityUnavailable(error) {
   return Boolean(error?.capacityUnavailable || /server overloaded|retry later|no available (?:agent|worker|slot|capacity)|concurren(?:cy|t).*limit|too many concurrent|resource busy/i.test(message));
 }
 
+function classifyRuntimeFailure(failure, message) {
+  switch (failure.code) {
+    case RuntimeFailureCode.AUTH_REQUIRED:
+      return { retryable:false, reason:'执行环境需要重新登录或授权', message };
+    case RuntimeFailureCode.UPSTREAM_REJECTED:
+      return { retryable:false, reason:'执行请求被上游环境拒绝', message };
+    case RuntimeFailureCode.INVALID_REQUEST:
+      return { retryable:false, reason:'执行参数或环境配置错误', message };
+    case RuntimeFailureCode.ABORTED:
+      return { retryable:false, reason:'执行已中止', message };
+    case RuntimeFailureCode.RATE_LIMIT:
+      return { retryable:true, reason:'执行器请求频率受限', message };
+    case RuntimeFailureCode.QUOTA:
+      return { retryable:true, reason:'当前执行额度不可用', message };
+    case RuntimeFailureCode.TIMEOUT:
+      return { retryable:true, reason:'执行器响应超时', message };
+    case RuntimeFailureCode.NETWORK:
+      return { retryable:true, reason:'Executor 流式连接中断', message };
+    default:
+      return { retryable:true, reason:'执行环境暂时不可用', message };
+  }
+}
+
 export function classifyRetry(error) {
   const message = messageOf(error);
   if (error?.executionBoundary) return { retryable:false, reason:'Work Unit 已达到执行边界', message };
   if (error?.nonRetryable) return { retryable: false, reason: '确定性执行错误', message };
+  const runtimeFailure = runtimeFailureOf(error);
+  if (runtimeFailure) return classifyRuntimeFailure(runtimeFailure, message);
   if (error?.authRequired || /not authenticated|authentication required|login required|unauthenticated|\b401\b|unauthorized/i.test(message)) {
     return { retryable: false, reason: '执行环境需要重新登录或授权', message };
   }
