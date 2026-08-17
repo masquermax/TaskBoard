@@ -21,13 +21,29 @@ function snapshotWorkUnit(unit, stageId = null) {
     networkAccess: unit.networkAccess === true,
     status: unit.status,
     detail: unit.detail,
+    issuedAt: unit.issuedAt || null,
+    startedAt: unit.startedAt || null,
     updatedAt: unit.updatedAt,
+    completedAt: unit.completedAt || null,
     failureCount: unit.failureCount || 0,
     nextRetryAt: unit.nextRetryAt || null,
     effectRecoveryRequired:unit.effectRecoveryRequired===true,
     canRetry: unit.status === WorkUnitStatus.SUSPENDED && unit.effectRecoveryRequired!==true,
     owner: unit.owner ?? ([WorkUnitStatus.RUNNING,WorkUnitStatus.COMPLETED,WorkUnitStatus.RETRY_WAIT,WorkUnitStatus.SUSPENDED].includes(unit.status) ? 'subagent' : null),
   };
+}
+
+function rootActivityCopy(kind = 'initial') {
+  const copy = {
+    initial:{title:'Root 初始判断',waiting:'正在获取首轮 Root 执行资源。',running:'模型正在形成首轮 Task 控制判断。'},
+    synthesis:{title:'Root 综合结果',waiting:'已取得 Work Unit 结果；正在获取 Root 综合资源。',running:'模型正在综合已返回的 Work Unit 结果并决定下一步。'},
+    rework:{title:'Root 局部修正',waiting:'Validator 已给出明确认证反馈；正在获取 Root 局部修正资源。',running:'模型正在按 Validator 反馈局部修正当前候选。'},
+    control:{title:'Root 控制决策',waiting:'已认证边界已就绪；正在获取 Root 控制决策资源。',running:'模型正在基于已认证边界选择下一步控制动作。'},
+    planning_repair:{title:'Root 规划修正',waiting:'Work Unit 计划需要修正；正在获取 Root 规划资源。',running:'模型正在修正 Work Unit 计划契约。'},
+    completion_repair:{title:'Root 完成修正',waiting:'Completion Contract 已返回未满足项；正在获取 Root 修正资源。',running:'模型正在按 Completion Contract 修正最终控制决策。'},
+    triggered:{title:'Root 继续判断',waiting:'新的 Task 触发已就绪；正在获取 Root 执行资源。',running:'模型正在结合新的触发与当前已认证状态继续判断。'},
+  };
+  return copy[kind] || copy.triggered;
 }
 
 function workSemanticSignature(item) {
@@ -289,7 +305,7 @@ export class RootRuntime {
       round: 0,
       subagentResults: pendingWorkResults,
       currentStage: null,
-      completedWorkUnits: durableWorkReceipts.map(receipt=>({ id:receipt.id, stageId:null, title:receipt.workUnit.title||receipt.id, projectAccess:receipt.workUnit.projectAccess||'none', networkAccess:receipt.workUnit.networkAccess===true, status:WorkUnitStatus.COMPLETED, detail:receipt.result?.result||'工作已完成。', updatedAt:receipt.completed_at||nowIso(), failureCount:0, nextRetryAt:null, canRetry:false, owner:'subagent' })),
+      completedWorkUnits: durableWorkReceipts.map(receipt=>({ id:receipt.id, stageId:null, title:receipt.workUnit.title||receipt.id, projectAccess:receipt.workUnit.projectAccess||'none', networkAccess:receipt.workUnit.networkAccess===true, status:WorkUnitStatus.COMPLETED, detail:receipt.result?.result||'工作已完成。', issuedAt:receipt.issued_at||null, startedAt:receipt.started_at||null, updatedAt:receipt.completed_at||nowIso(), completedAt:receipt.completed_at||null, failureCount:0, nextRetryAt:null, canRetry:false, owner:'subagent' })),
       cancelRequested: false,
       rootController: null,
       runningControllers: new Map(),
@@ -311,16 +327,18 @@ export class RootRuntime {
       pendingValidation: null,
       rootTurnCount: 0,
       controlHandoffCount: 0,
-      actor: { title: '综合分析', status: WorkUnitStatus.WAITING_RESOURCE, detail: '等待可用 Root 执行资源。', updatedAt: nowIso(), owner:'root' },
+      actor: { title: 'Root 初始判断', status: WorkUnitStatus.WAITING_RESOURCE, detail: '等待可用 Root 执行资源。', updatedAt: nowIso(), owner:'root' },
       updatedAt: nowIso(),
     };
     this.sessions.set(task.id, session);
     return session;
   }
 
-  async runRootTurn(task, session, callbacks, { humanGatewayHistory = [], validationFeedback = null, previousDecision = null, rootInputs = null, authorityHandoff = false } = {}) {
+  async runRootTurn(task, session, callbacks, { humanGatewayHistory = [], validationFeedback = null, previousDecision = null, rootInputs = null, authorityHandoff = false, activityKind = 'initial' } = {}) {
     if (session.cancelRequested) return { kind: 'cancelled' };
-    session.actor = { title:'综合分析', status:WorkUnitStatus.WAITING_RESOURCE, detail:'正在获取可用 Root 执行资源。', updatedAt:nowIso(), owner:'root' };
+    const activity=rootActivityCopy(activityKind);
+    const issuedAt=nowIso();
+    session.actor = { title:activity.title, status:WorkUnitStatus.WAITING_RESOURCE, detail:activity.waiting, issuedAt, startedAt:null, completedAt:null, updatedAt:issuedAt, owner:'root' };
     this.emit(session, callbacks);
     const controller = new AbortController();
     const deliveredResults = Array.isArray(rootInputs) ? rootInputs : session.subagentResults.slice();
@@ -343,22 +361,27 @@ export class RootRuntime {
         certifiedContext: session.certifiedContext,
         signal: controller.signal,
         onExecutionStarted: () => {
+          const startedAt=nowIso();
           session.actor.status = WorkUnitStatus.RUNNING;
-          session.actor.detail = deliveredResults.length ? '正在消费刚通过认证的局部结果并判断下一步。' : '正在结合任务目标、当前已认证状态与本轮触发信息进行判断。';
-          session.actor.updatedAt = nowIso();
+          session.actor.startedAt = session.actor.startedAt || startedAt;
+          session.actor.detail = activity.running;
+          session.actor.updatedAt = startedAt;
           callbacks.onExecutionStarted?.({ role:'root' });
           this.emit(session, callbacks);
         },
         onProgress: progress => {
-          session.actor.detail = progress.detail || progress.summary || session.actor.detail;
+          const detail=progress.detail || progress.summary || session.actor.detail;
+          session.actor.detail = detail === '模型正在进行 Task 级判断。' ? activity.running : detail;
           session.actor.updatedAt = nowIso();
           this.emit(session, callbacks);
         },
       }));
       session.rootTurnCount += 1;
+      const completedAt=nowIso();
       session.actor.status = WorkUnitStatus.COMPLETED;
       session.actor.detail = '本轮候选结果已形成，正在进入 Governance 校验。';
-      session.actor.updatedAt = nowIso();
+      session.actor.completedAt = completedAt;
+      session.actor.updatedAt = completedAt;
       this.emit(session, callbacks);
       return decision;
     } catch (error) {
@@ -405,7 +428,7 @@ export class RootRuntime {
       this.emit(session, callbacks);
       let reworked;
       try {
-        reworked = await this.runRootTurn(task, session, callbacks, { humanGatewayHistory, validationFeedback:reviewed.feedback, previousDecision:reviewed.decision, rootInputs });
+        reworked = await this.runRootTurn(task, session, callbacks, { humanGatewayHistory, validationFeedback:reviewed.feedback, previousDecision:reviewed.decision, rootInputs, activityKind:'rework' });
       } catch (error) {
         if (isCapacityUnavailable(error)) error.pendingRootValidation={phase:'rework',decision:reviewed.decision,feedback:reviewed.feedback,validationAttempt:2,rootInputs,triggerRefs};
         throw error;
@@ -479,6 +502,7 @@ export class RootRuntime {
       const id = String(d.id);
       const deps = Array.isArray(d.dependsOn) ? [...new Set(d.dependsOn.map(String))].filter(x => x !== id) : [];
       const waitingOnDependency = deps.some(dep => { const prior = stage?.workUnits?.find(unit => unit.id === dep); return !prior || prior.status !== WorkUnitStatus.COMPLETED; });
+      const issuedAt=nowIso();
       return {
         id,
         title: String(d.title || `工作 ${index + 1}`),
@@ -492,7 +516,10 @@ export class RootRuntime {
         dependsOn: deps,
         status: waitingOnDependency ? WorkUnitStatus.WAITING_DEPENDENCY : WorkUnitStatus.WAITING_RESOURCE,
         detail: waitingOnDependency ? '等待前置工作完成后继续。' : '工作已就绪，等待可用 Agent。',
-        updatedAt: nowIso(),
+        issuedAt,
+        startedAt:null,
+        updatedAt:issuedAt,
+        completedAt:null,
         failureCount: 0,
         nextRetryAt: Date.now(),
         result: null,
@@ -576,10 +603,12 @@ export class RootRuntime {
       policyContext: this.governanceCompiler?.compileForRole?.(task,'subagent',{skillId:unit.skillId,workUnit:unit}) || session.policyContext,
       onExecutionStarted: _meta => {
         executionStarted=true;
+        const startedAt=nowIso();
         unit.status = WorkUnitStatus.RUNNING;
         unit.owner = 'subagent';
         unit.detail = unit.failureCount ? `正在进行第 ${unit.failureCount + 1}/${MAX_TOTAL_ATTEMPTS} 次尝试。` : '正在执行分配的具体工作。';
-        unit.updatedAt = nowIso();
+        unit.startedAt = unit.startedAt || startedAt;
+        unit.updatedAt = startedAt;
         callbacks.onExecutionStarted?.({ role:'subagent', workUnitId:unit.id });
         this.emit(session, callbacks);
       },
@@ -590,8 +619,9 @@ export class RootRuntime {
       unit.owner = 'subagent';
       unit.effectRecoveryRequired=false;
       unit.detail = result?.result || '工作已完成。';
-      unit.updatedAt = nowIso();
-      const receipt={id:unit.id,signature:workSemanticSignature(workUnit),workUnit,result:clone(result),completed_at:unit.updatedAt,...(effectAttemptId?{effectAttemptId}: {})};
+      unit.completedAt = nowIso();
+      unit.updatedAt = unit.completedAt;
+      const receipt={id:unit.id,signature:workSemanticSignature(workUnit),workUnit,result:clone(result),issued_at:unit.issuedAt||null,started_at:unit.startedAt||null,completed_at:unit.completedAt,...(effectAttemptId?{effectAttemptId}: {})};
       try{callbacks.onWorkReceipt?.(receipt);effectAttemptOpen=false;}catch(error){error.nonRetryable=true;error.workReceiptPersistence=true;throw error;}
       session.subagentResults.push({...result,workUnit});
     }).catch(error => {
@@ -646,7 +676,7 @@ export class RootRuntime {
         await Promise.race(waits);continue;
       }
       if (stage.workUnits.every(x => x.status === WorkUnitStatus.COMPLETED)) {
-        const completedUnits = stage.workUnits.map(unit => ({ title:unit.title, detail:unit.detail, completedAt:unit.updatedAt }));
+        const completedUnits = stage.workUnits.map(unit => ({ title:unit.title, detail:unit.detail, completedAt:unit.completedAt||unit.updatedAt }));
         callbacks.onStageCompleted?.(completedUnits);session.completedWorkUnits.push(...stage.workUnits.map(unit => snapshotWorkUnit(unit, stage.id)));session.currentStage=null;session.round+=1;this.emit(session,callbacks);return { kind:'stage_complete' };
       }
       const suspended = stage.workUnits.filter(x => x.status === WorkUnitStatus.SUSPENDED);
@@ -703,11 +733,11 @@ export class RootRuntime {
         decision=pendingValidation.decision;validationStartAttempt=pendingValidation.validationAttempt||1;session.actor={title:'Validator 认证',status:WorkUnitStatus.WAITING_RESOURCE,detail:'Root 候选结果已保留，等待认证资源；已完成的 Root/Subagent 工作不会重跑。',updatedAt:nowIso(),owner:'validator'};this.emit(session,callbacks);
       } else if (pendingValidation?.phase === 'rework') {
         validationStartAttempt=pendingValidation.validationAttempt||2;session.actor={title:'Root 局部修正',status:WorkUnitStatus.WAITING_RESOURCE,detail:'Validator 已给出明确认证反馈，等待 Root 对同一候选做一次局部修正。',updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);
-        try{decision=await this.runRootTurn(task,session,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),validationFeedback:pendingValidation.feedback||[],previousDecision:pendingValidation.decision,rootInputs});}
+        try{decision=await this.runRootTurn(task,session,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),validationFeedback:pendingValidation.feedback||[],previousDecision:pendingValidation.decision,rootInputs,activityKind:'rework'});}
         catch(error){if(isCapacityUnavailable(error)){session.pendingValidation=pendingValidation;const outcome=await capacityWait({title:'Root 局部修正',detail:'局部修正尚未获得 Root 资源；候选结果和 Validator 反馈已保留。',reason:'等待 Root 局部修正资源恢复'});if(outcome)return outcome;continue;}throw error;}
       } else if (pendingValidation?.phase === 'authority_handoff') {
         validationStartAttempt=1;rootInputs=[];session.actor={title:'Root 控制决策',status:WorkUnitStatus.WAITING_RESOURCE,detail:'Validator 已完成内容认证；等待 Root 基于已认证边界决定下一步，不重新调查已认证内容。',updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);
-        try{decision=await this.runRootTurn(task,session,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),validationFeedback:pendingValidation.feedback||[],previousDecision:pendingValidation.decision,rootInputs:[],authorityHandoff:true});}
+        try{decision=await this.runRootTurn(task,session,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),validationFeedback:pendingValidation.feedback||[],previousDecision:pendingValidation.decision,rootInputs:[],authorityHandoff:true,activityKind:'control'});}
         catch(error){if(isCapacityUnavailable(error)){session.pendingValidation=pendingValidation;const outcome=await capacityWait({title:'Root 控制决策',detail:'已认证内容和控制权交接信息已保留；等待 Root 资源后继续。',reason:'等待 Root 控制决策资源恢复'});if(outcome)return outcome;continue;}throw error;}
       } else {
         if(rootInputs.length){session.completionFeedback=null;session.completionRepairCount=0;session.completionTriggerRefs=[];}
@@ -716,7 +746,8 @@ export class RootRuntime {
           else if(session.planningFeedback?.length&&session.planningTriggerRefs?.length)rootTriggerRefs=[...session.planningTriggerRefs];
           else {if(invocationTriggerConsumed||!invocationTriggerRefs.length){const error=new Error('ROOT_TURN_WITHOUT_TRIGGER: no Task/Human/Subagent/technical trigger exists for another ordinary Root Turn.');error.nonRetryable=true;throw error;}rootTriggerRefs=[...invocationTriggerRefs];invocationTriggerConsumed=true;}
         }
-        try{decision=await this.runRootTurn(task,session,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),rootInputs,validationFeedback:session.completionFeedback?.length?session.completionFeedback:null});}
+        const activityKind=rootInputs.length?'synthesis':session.completionFeedback?.length?'completion_repair':session.planningFeedback?.length?'planning_repair':session.rootTurnCount===0?'initial':'triggered';
+        try{decision=await this.runRootTurn(task,session,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),rootInputs,validationFeedback:session.completionFeedback?.length?session.completionFeedback:null,activityKind});}
         catch(error){if(isCapacityUnavailable(error)&&(rootInputs.length||session.currentStage)){const outcome=await capacityWait({title:'Root 综合分析',detail:'已认证的局部结果已保留，等待 Root 资源后继续综合；其他独立 Work Unit 不受影响。',reason:'等待 Root 综合资源恢复'});if(outcome)return outcome;continue;}throw error;}
       }
       if(decision.kind==='cancelled')return{kind:'cancelled',quiescent:this.isQuiescent(task.id)};

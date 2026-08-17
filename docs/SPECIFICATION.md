@@ -145,7 +145,7 @@ Passing an explicit model does not give TaskBoard control over Codex's own inter
 
 Current Progress exposes semantic work topics with execution owner labels (`Root`, `Subagent`, `Validator`, `未分配`) and states such as running/completed/dependency wait/resource wait/retry wait/suspended. While a Task remains open, completed Work Units stay visible even after their Stage is cleared. Current Root/Validator activity is rendered alongside Work Units rather than being hidden by them. A WAITING_HUMAN Task preserves its last runtime snapshot until the user replies.
 
-This runtime view is not durable History and never becomes certified knowledge merely because work completed. User-facing durable knowledge is labeled `已确认进展`; it is still backed by Validator-certified History boundaries.
+This runtime view is not durable History and never becomes certified knowledge merely because work completed. User-facing durable knowledge is labeled `已确认结论`; it is still backed by Validator-certified History boundaries.
 
 ## Human Gateway
 
