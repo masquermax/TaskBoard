@@ -1,0 +1,26 @@
+name: Apply bounded planning proof patch
+
+on:
+  push:
+    branches: [agent/root-goal-contribution-witness]
+    paths: [.github/workflows/apply-bounded-planning-proof.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/root-goal-contribution-witness
+      - run: python scripts/apply-bounded-planning-proof.py
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-bounded-planning-proof.yml scripts/apply-bounded-planning-proof.py
+          git add tests/scheduler.test.js
+          git diff --cached --check
+          git commit -m "test: bound planning non-convergence repair"
+          git push origin HEAD:agent/root-goal-contribution-witness
