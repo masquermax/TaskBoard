@@ -10,6 +10,7 @@ function capabilityProvider(){
     snapshot(){return{
       discoveryLevel:'full',routingSafe:true,
       defaults:{model:'balanced-model'},
+      modelSelection:{explicitPerTurn:true,maxPerTurn:1},
       models:[
         {id:'fast-model',displayName:'Fast',description:'Fast efficient model for routine lightweight work',reasoningEfforts:[{value:'low'},{value:'medium'}],priority:1},
         {id:'balanced-model',displayName:'Balanced',description:'Balanced general-purpose model for everyday work',reasoningEfforts:[{value:'low'},{value:'medium'},{value:'high'}],priority:1},
