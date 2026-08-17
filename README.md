@@ -1,6 +1,6 @@
-# TaskBoard Codex v0.9.2
+# TaskBoard v0.9.2
 
-TaskBoard is a local-first AI work board. TaskBoard owns durable Task facts and governed work orchestration; Codex is the first Executor extension.
+TaskBoard is a local-first AI work board. TaskBoard owns durable Task facts and governed work orchestration; Codex is the stock first Executor Extension, not a Core dependency.
 
 The current product boundary is driven by explicit ownership:
 
@@ -12,9 +12,9 @@ Product Constitution
 → Test / Eval
 ```
 
-## Run on Windows
+## Run the stock Windows distribution
 
-Prerequisites: Node.js 16.6+ and a usable Codex runtime. On Windows, the Codex extension may prepare the supported standalone runtime when none is usable.
+Prerequisites: Node.js 16.6+ and a usable Codex runtime. The stock distribution selects the built-in Codex Executor; on Windows, that Extension may prepare the supported standalone runtime when none is usable.
 
 1. Double-click `TaskBoard.vbs`.
 2. Open `http://127.0.0.1:4317` if needed.
@@ -28,7 +28,7 @@ Prerequisites: Node.js 16.6+ and a usable Codex runtime. On Windows, the Codex e
 
 - **Scheduler** — Task lifecycle and admission.
 - **Root** — Task reasoning, planning, bounded Work Unit creation and synthesis.
-- **Subagent** — one bounded Work Unit execution.
+- **Subagent** — one bounded TaskBoard Work Unit execution.
 - **Validator** — Root Candidate certification and History semantic-value decision.
 - **Task Core** — durable business facts and atomic persistence.
 - **Skill** — reusable method only.
@@ -40,13 +40,23 @@ Project-specific authority is derived only by `GovernanceCompiler` into `Authori
 
 A certified blocking Gap constrains only work/convergence that truly depends on the unresolved fact. Independent governed evidence acquisition remains possible when its own authority and safety boundary is satisfied.
 
-## Codex connection
+## Executor Extensions
 
-Task Core does not own Codex provider/authentication semantics. The Codex extension supports the user's current Codex account or a TaskBoard-local custom API profile for the child app-server that TaskBoard itself launches.
+TaskBoard can be composed with an external `ExtensionRegistry`. An Executor Extension supplies execution, capability discovery, optional connection settings and optional Surface Hosts while Core remains provider/model/runtime-agnostic.
 
-The extension owns validation, local persistence and launch projection of that connection configuration. Secrets stay out of public state and command-line arguments. Reconfiguration is blocked while active turns exist and rolls back if the replacement connection cannot become usable.
+The current execution graph is explicitly `taskboard` orchestrated: TaskBoard owns Root, Work Unit, Subagent, dependency and concurrency semantics. A future Runtime-native agent tree is a different orchestration contract and is deliberately rejected by the current bootstrap rather than silently mixed into `runSubagent()`.
 
-See `docs/CODEX_INTEGRATION.md` for the integration contract.
+Connection settings are also Extension-owned. A configurable Extension publishes a safe declarative presentation schema; the TaskBoard UI renders it without hard-coding Codex/OpenAI field names. Secrets remain private to the Extension.
+
+See `docs/EXTENSIONS.md` for the external composition, settings and compatibility contract.
+
+## Stock Codex connection
+
+Task Core does not own Codex provider/authentication semantics. The stock Codex Extension supports the user's current Codex account or TaskBoard-local custom API profiles for the child app-server that the Extension launches.
+
+The Extension owns validation, local persistence and launch projection of that connection configuration. Secrets stay out of public state and command-line arguments. Reconfiguration is blocked while active turns exist and rolls back if the replacement connection cannot become usable.
+
+See `docs/CODEX_INTEGRATION.md` for the Codex-specific integration contract.
 
 ## Development
 
@@ -65,6 +75,7 @@ The release gate requires syntax/tests, release-identity consistency and fresh-u
 - `docs/CAPABILITY_CONTRACTS.md` — human-readable role/capability projections.
 - `docs/SPECIFICATION.md` — current product semantics.
 - `docs/ARCHITECTURE.md` — architecture/runtime model.
-- `docs/CODEX_INTEGRATION.md` — Codex extension/runtime integration.
+- `docs/EXTENSIONS.md` — external Executor/connection composition contract.
+- `docs/CODEX_INTEGRATION.md` — stock Codex Extension/runtime integration.
 - `docs/ADR.md` — durable design rationale.
 - `docs/VERIFICATION.md` — current verification status.
