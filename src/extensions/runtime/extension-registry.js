@@ -31,6 +31,17 @@ function validateContinuation(id,continuation){
   return continuation;
 }
 
+function validateAutomation(id,automation){
+  if(!automation)return null;
+  if(typeof automation.describe!=='function'||typeof automation.run!=='function'){
+    throw new Error(`EXTENSION_AUTOMATION_INVALID:${id}`);
+  }
+  for(const method of ['list','record']){
+    if(automation[method]!=null&&typeof automation[method]!=='function')throw new Error(`EXTENSION_AUTOMATION_INVALID:${id}`);
+  }
+  return automation;
+}
+
 function validateApiVersion(id,value){
   const version=Number(value);
   if(!Number.isInteger(version)||version<1)throw new Error(`EXTENSION_API_VERSION_REQUIRED:${id}`);
@@ -74,6 +85,7 @@ export class ExtensionRegistry {
       capabilityProvider: extension.capabilityProvider || null,
       connectionSettings: validateConnectionSettings(key,extension.connectionSettings||null),
       continuation: validateContinuation(key,extension.continuation||null),
+      automation: validateAutomation(key,extension.automation||null),
       presentation: normalizePresentation(extension.presentation),
       surfaceHosts: Array.isArray(extension.surfaceHosts) ? extension.surfaceHosts : [],
     };

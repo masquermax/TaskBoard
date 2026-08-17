@@ -33,6 +33,7 @@ export function bootstrap({
   dbFile=null,
   executorName=process.env.TASKBOARD_EXECUTOR||'codex',
   continuationName=process.env.TASKBOARD_CONTINUATION||null,
+  automationName=process.env.TASKBOARD_AUTOMATION||null,
   extensionRegistry=null,
   startScheduler=true,
   taskboardUrl=process.env.TASKBOARD_URL||'http://127.0.0.1:4317',
@@ -61,6 +62,21 @@ export function bootstrap({
     throw new Error(`EXTENSION_HAS_NO_CONTINUATION:${continuationKey}`);
   }
   const continuation=continuationExtension?.continuation||null;
+
+  // Automation is another optional independently bound point. It exposes a
+  // removable scenario execution boundary; Task/Core semantics never depend on
+  // an automation implementation being installed or enabled.
+  const automationKey=String(automationName||'').trim()||null;
+  const automationExtension=automationKey
+    ? (automationKey===extension.id
+      ? extension
+      : (automationKey===continuationExtension?.id ? continuationExtension : registry.create(automationKey,{rootDir,taskboardUrl})))
+    : null;
+  if(automationExtension&&!automationExtension.automation){
+    try{database.close();}catch{/* fail-closed cleanup */}
+    throw new Error(`EXTENSION_HAS_NO_AUTOMATION:${automationKey}`);
+  }
+  const automation=automationExtension?.automation||null;
 
   const attachmentStore=new AttachmentStore({rootDir:resolve(rootDir,'data/attachments')});
   const taskService=new TaskService(repository,{attachmentStore,defaultExecutorKey:extension.id});
@@ -93,5 +109,5 @@ export function bootstrap({
   const recovered=scheduler.recoverStaleRunningTasks();if(recovered)console.log(`[recovery] reconciled ${recovered} stale RUNNING task(s)`);
   const cleanup=new DailyCleanupController({repository,attachmentStore});
   if(startScheduler)scheduler.start();
-  return{database,repository,taskService,executor,capabilityProvider,extension,extensionRegistry:registry,continuation,continuationExtension,surfaceManager,governanceCompiler,validatorRuntime,rootRuntime,scheduler,cleanup,settingsStore,runtimeSettingsState,applyRuntimeSettings,storage:persistence.storage,storageFile:persistence.filename};
+  return{database,repository,taskService,executor,capabilityProvider,extension,extensionRegistry:registry,continuation,continuationExtension,automation,automationExtension,surfaceManager,governanceCompiler,validatorRuntime,rootRuntime,scheduler,cleanup,settingsStore,runtimeSettingsState,applyRuntimeSettings,storage:persistence.storage,storageFile:persistence.filename};
 }
