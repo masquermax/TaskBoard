@@ -20,8 +20,11 @@ export function classifyRetry(error) {
   const message = messageOf(error);
   if (error?.executionBoundary) return { retryable:false, reason:'Work Unit 已达到执行边界', message };
   if (error?.nonRetryable) return { retryable: false, reason: '确定性执行错误', message };
-  if (error?.authRequired || /not authenticated|authentication|login required|unauthorized|forbidden/i.test(message)) {
+  if (error?.authRequired || /not authenticated|authentication required|login required|unauthenticated|\b401\b|unauthorized/i.test(message)) {
     return { retryable: false, reason: '执行环境需要重新登录或授权', message };
+  }
+  if (error?.upstreamRejected || /\b403\b|forbidden/i.test(message)) {
+    return { retryable: false, reason: '执行请求被上游环境拒绝', message };
   }
   if (/Invalid request|Invalid params|unknown variant|unknown field|unsupported|PROJECT_PATH_NOT_FOUND|ENOENT/i.test(message)) {
     return { retryable: false, reason: '执行参数或环境配置错误', message };
@@ -68,3 +71,4 @@ export function waitingRetryInstruction(reason, message, failureCount, delayMs) 
   const seconds = Math.max(1, Math.round(delayMs / 1000));
   return `${reason}。\n${message}\n本轮第 ${failureCount} 次执行未成功，已失败 ${failureCount}/${MAX_TOTAL_ATTEMPTS}；系统将在 ${seconds} 秒后自动进行第 ${next} 次重试。\n无需操作。`;
 }
+
