@@ -3,7 +3,11 @@
   "version": "0.9.2",
   "private": true,
   "type": "module",
-  "description": "Local-first AI task board with Human Gateway and a decoupled Codex Executor.",
+  "description": "Local-first AI task board with Human Gateway and pluggable Executor extensions.",
+  "exports": {
+    "./bootstrap": "./src/server/bootstrap.js",
+    "./extensions": "./src/extensions/index.js"
+  },
   "scripts": {
     "dev": "node --watch src/server/mock.js",
     "start": "node src/server/index.js",
