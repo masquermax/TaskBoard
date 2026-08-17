@@ -23,6 +23,14 @@ function validateConnectionSettings(id,settings){
   return settings;
 }
 
+function validateContinuation(id,continuation){
+  if(!continuation)return null;
+  if(typeof continuation.health!=='function'||typeof continuation.read!=='function'||typeof continuation.write!=='function'){
+    throw new Error(`EXTENSION_CONTINUATION_INVALID:${id}`);
+  }
+  return continuation;
+}
+
 function validateApiVersion(id,value){
   const version=Number(value);
   if(!Number.isInteger(version)||version<1)throw new Error(`EXTENSION_API_VERSION_REQUIRED:${id}`);
@@ -65,6 +73,7 @@ export class ExtensionRegistry {
       executor: extension.executor || null,
       capabilityProvider: extension.capabilityProvider || null,
       connectionSettings: validateConnectionSettings(key,extension.connectionSettings||null),
+      continuation: validateContinuation(key,extension.continuation||null),
       presentation: normalizePresentation(extension.presentation),
       surfaceHosts: Array.isArray(extension.surfaceHosts) ? extension.surfaceHosts : [],
     };
