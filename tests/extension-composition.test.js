@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { bootstrap } from '../src/server/bootstrap.js';
-import { ExtensionRegistry, OrchestrationMode } from '../src/extensions/runtime/extension-registry.js';
+import { EXTENSION_API_VERSION, ExtensionRegistry, OrchestrationMode } from '../src/extensions/runtime/extension-registry.js';
 import { ExecutorPort } from '../src/core/executor-port.js';
 import { CapabilityProviderPort, basicCapabilitySnapshot } from '../src/extensions/ports/capability-provider.js';
 
@@ -19,6 +19,7 @@ class ExternalCapability extends CapabilityProviderPort {
 
 function externalRegistry(mode=OrchestrationMode.TASKBOARD){
   return new ExtensionRegistry().register('external',()=>({
+    apiVersion:EXTENSION_API_VERSION,
     displayName:'External',
     orchestrationMode:mode,
     executor:new ExternalExecutor(),
@@ -33,6 +34,7 @@ test('bootstrap accepts an externally composed extension registry without changi
   try{
     runtime=bootstrap({rootDir:dir,dbFile:join(dir,'taskboard.json'),executorName:'external',extensionRegistry:externalRegistry(),startScheduler:false});
     assert.equal(runtime.extension.id,'external');
+    assert.equal(runtime.extension.apiVersion,EXTENSION_API_VERSION);
     assert.equal(runtime.extension.displayName,'External');
     assert.equal(runtime.extension.orchestrationMode,OrchestrationMode.TASKBOARD);
     assert.equal(runtime.extensionRegistry.has('external'),true);
