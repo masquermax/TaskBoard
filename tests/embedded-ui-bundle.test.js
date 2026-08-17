@@ -6,7 +6,7 @@ import { buildEmbeddedDocumentExpression, buildEmbeddedTransportExpression, load
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../src/ui');
 
-test('embedded UI bundle reuses the real TaskBoard body/CSS/app and connection controls without network script tags',()=>{
+test('embedded UI bundle reuses the real TaskBoard body/CSS/app and declarative extension connection controls without network script tags',()=>{
   const ui=loadEmbeddedTaskboardUi(root);
   assert.match(ui.bodyHtml,/class="app-shell"/);
   assert.doesNotMatch(ui.bodyHtml,/src=["']\/(?:app|connection-settings)\.js/);
@@ -18,6 +18,9 @@ test('embedded UI bundle reuses the real TaskBoard body/CSS/app and connection c
   assert.match(ui.appExpression,/taskboard-embedded-app\.js/);
   assert.match(ui.appExpression,/taskboard-embedded-connection-settings\.js/);
   assert.match(ui.appExpression,/\/api\/executor\/connection/);
+  assert.match(ui.appExpression,/presentationState/,'embedded settings must consume the active extension presentation schema');
+  assert.doesNotMatch(ui.bodyHtml,/Codex 当前账号|TaskBoard 自己启动的 Codex/,'static TaskBoard UI must not encode one Executor connection form');
+  assert.doesNotMatch(ui.appExpression,/Codex 当前账号|TaskBoard 自己启动的 Codex/,'generic settings runtime must not branch on Codex presentation');
 });
 
 test('embedded transport uses CDP binding RPC and chunked file transfer rather than fetch/XHR',()=>{
