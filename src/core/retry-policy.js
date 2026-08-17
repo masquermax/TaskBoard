@@ -36,7 +36,7 @@ export function retryReasonFromMessage(message) {
   if (/rate.?limit|too many requests|429/i.test(message)) return '执行器请求频率受限';
   if (/usage|quota|limit reached|insufficient.*quota|agentic/i.test(message)) return '当前执行额度不可用';
   if (/timed? out|timeout/i.test(message)) return '执行器响应超时';
-  if (/stream disconnected|error sending request|responses_websocket|websocket|ECONN|ENET|EHOST|socket|network|connection|app-server exited|not connected/i.test(message)) return 'Codex 流式连接中断';
+  if (/stream disconnected|error sending request|responses_websocket|websocket|ECONN|ENET|EHOST|socket|network|connection|app-server exited|not connected/i.test(message)) return 'Executor 流式连接中断';
   return '执行环境暂时不可用';
 }
 
@@ -44,8 +44,8 @@ export function retryDelayMs(failureCount, overrides = null, random = Math.rando
   const steps = overrides || [5_000, 30_000, 120_000, 300_000];
   const base=steps[Math.min(Math.max(failureCount - 1, 0), steps.length - 1)];
   if (overrides) return base;
-  // ±25% jitter prevents a group of failed Turns from re-entering Codex at the
-  // same instant after a shared transport interruption.
+  // ±25% jitter prevents a group of failed Turns from re-entering an Executor
+  // at the same instant after a shared transport interruption.
   const factor=0.75+(Math.max(0,Math.min(1,Number(random?.())||0))*0.5);
   return Math.max(1_000,Math.round(base*factor));
 }
