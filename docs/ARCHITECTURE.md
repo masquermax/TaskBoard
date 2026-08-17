@@ -124,7 +124,7 @@ Runtime does not invent missing output/stop/access/input semantics. Root must de
 
 A certified Gap marked `blocking` prevents unsafe completion or convergence while the required fact/decision remains unresolved. That marker does not by itself revoke an otherwise-governed evidence-acquisition Work Unit: Root may delegate bounded work that independently satisfies its Work Unit Contract and `AuthorizedGrant`, while the Work Unit returns evidence/local findings rather than closing the Gap. Gap resolution still requires certified supporting evidence. Human Gateway is reserved for information or decisions that are genuinely human-owned or unavailable to the system and remains bound to the exact certified Gap.
 
-For Codex Subagents, a declared `stopCondition` has a technical execution lease. At the soft lease point TaskBoard uses the same Turn's steer capability to force a convergence check against the original stop condition and existing evidence; at the hard lease point it interrupts the Turn and surfaces a nonretryable execution-boundary result. This bounds runaway tool exploration without pretending a timer proves semantic completion.
+For the stock Codex Executor in TaskBoard-orchestrated mode, a declared `stopCondition` has a technical execution lease. At the soft lease point TaskBoard uses the same Turn's steer capability to force a convergence check against the original stop condition and existing evidence; at the hard lease point it interrupts the Turn and surfaces a nonretryable execution-boundary result. This is an Executor-specific realization of the generic bounded Work contract, not a Core dependency on Codex.
 
 A Subagent may return source-near Evidence, local Findings, blocker information and `discoveries[]`. A Finding is local execution output, not a Task Claim/Gap/Recommendation. A Discovery does not grant permission to continue outside the Work Unit; it is handed back to Root for the next Task-level decision.
 
@@ -202,9 +202,11 @@ Unknown remains unknown. A component-level fact cannot become system truth, an e
 User-visible configuration remains only:
 
 - Task concurrency: maximum active Tasks.
-- Per-Task Subagent limit: maximum simultaneous Subagents for each Root; Root and Validator are not counted.
+- Per-Task Subagent limit: maximum simultaneous **TaskBoard Subagents** for each Root; Root and Validator are not counted.
 
-The ceilings are maxima, not targets. Work is created only when Root needs it and is allocated only when a real execution resource starts. `WAITING_RESOURCE` means no execution capacity was obtained; `RETRY_WAIT` means execution already failed and is waiting for a jittered retry. Capacity shortage does not consume the normal failure retry budget. Lowering a ceiling never preempts active work; the system converges naturally by stopping replenishment. No global safe Codex Turn ceiling is guessed until runtime `activeTurnCount` evidence supports one.
+The ceilings are maxima, not targets. Work is created only when Root needs it and is allocated only when a real execution resource starts. `WAITING_RESOURCE` means no execution capacity was obtained; `RETRY_WAIT` means execution already failed and is waiting for a jittered retry. Capacity shortage does not consume the normal failure retry budget. Lowering a ceiling never preempts active work; the system converges naturally by stopping replenishment. No global safe Executor concurrency ceiling is guessed until Runtime capability/evidence supports one.
+
+A future Runtime-native Agent tree is not counted as TaskBoard Subagents. It requires a distinct orchestration contract, capability accounting and observability model before admission; the current bootstrap rejects that mode rather than mixing both ceilings.
 
 Validator work is not a global serial queue. Independent certification can proceed concurrently; a temporary Validator resource shortage preserves the candidate and resumes certification without rerunning completed investigation.
 
@@ -223,19 +225,32 @@ Recovery does not restore an Agent cursor. Durable Task facts, Current Certified
 
 ## 10.1 Executor model capability lifecycle
 
-Model identity and model catalog are different capabilities. On the first Codex connection, TaskBoard performs lightweight configuration discovery so an explicitly configured model can be used immediately. Full `model/list` catalog refresh is non-blocking enhancement work and runs at most once automatically for the connection startup; the AI information area also owns a small manual refresh action. Refresh is atomic: success replaces the snapshot, failure preserves the snapshot that existed before refresh. If no model identity is known, the route is explicitly Executor Default rather than guessed.
+Model identity and model catalog are Executor/Capability facts, not Task Core semantics. An active Extension may expose an explicitly configured/default model immediately and discover a fuller `models[]` catalog asynchronously. `ModelRouter` consumes the normalized snapshot; it does not own catalog refresh or infer provider brands from model ids.
 
-Per-Task/Work routing consumes the cached snapshot. It does not own model catalog refresh. When catalog metadata provides usable capability descriptions, the Router chooses the minimum-sufficient model tier for the actual work (efficient finite read-only work, balanced ordinary analysis/Validator work, frontier complex/open-ended Root work) without treating the model id as capability evidence. If metadata cannot prove an alternate choice, it falls back to the configured model. Reasoning override remains inside `low/medium/high`. Passing a model explicitly does not suppress Codex's own internal model-manager refresh; remaining internal refresh stalls are observed, not attributed to TaskBoard routing.
+Per-Task/Work routing consumes the cached snapshot. When catalog metadata provides usable capability descriptions, the Router chooses the minimum-sufficient model tier for the actual work (efficient finite read-only work, balanced ordinary analysis/Validator work, frontier complex/open-ended Root work) without treating the model id as capability evidence. If metadata cannot prove an alternate choice, it falls back to the configured model/Executor default. Reasoning override stays within the values reported by the selected model capability.
 
-## 11. Extension axes
+The stock Codex Extension realizes this lifecycle with lightweight config discovery plus a non-blocking `model/list` refresh. Codex-specific internal model-manager refresh behavior remains an Extension/runtime observation and does not become generic Core policy.
 
-External integration remains split into three independent axes:
+## 11. Extension boundary and composition
 
-- Executor
-- Capability Provider
-- Surface Host
+TaskBoard separates removable Runtime concerns rather than treating “model integration” as one monolith:
 
-Codex is the first implementation, not a Task Core dependency. CDP is an optional loopback Surface transport only; it does not own Task execution or lifecycle.
+- **Executor** — realizes Root/Subagent/optional Validator operations and reports Runtime facts.
+- **Capability Provider** — discovers normalized execution/model/provider capability facts.
+- **Connection Settings** — owns provider/profile validation, Secret persistence and Runtime reconfiguration/rollback when the Extension supports configurable connections.
+- **Presentation** — safe declarative display metadata/settings schema; it does not create execution Authority.
+- **Surface Host** — optional interaction/embedding transport; multiple hosts may coexist.
+
+`ExtensionRegistry` is the composition boundary. Stock TaskBoard builds the builtin registry; an external distribution may inject another registry into `bootstrap()` without modifying Task Core. Public composition entry points are exported through `taskboard-codex/extensions` and `taskboard-codex/bootstrap`.
+
+Every Extension declares `orchestrationMode`:
+
+- `taskboard` — TaskBoard owns Root → Work Unit → TaskBoard Subagent orchestration. This is the only mode currently admitted.
+- `runtime-native` — reserved for a future distinct contract in which the Executor owns an internal native-agent tree. Current bootstrap fails closed on this mode.
+
+A Runtime-native Agent is never implicitly a TaskBoard Subagent, WorkReceipt, certified claim or TaskBoard concurrency slot. There is no implicit hybrid mode.
+
+Codex is the stock first implementation, not a Task Core dependency. CDP is an optional loopback Surface transport only; it does not own Task execution or lifecycle. Connection settings are rendered from the active Extension's declarative descriptor rather than from Codex/OpenAI-specific UI branches. See `docs/EXTENSIONS.md`.
 
 ## 12. Explicitly not implemented
 
@@ -243,8 +258,9 @@ Codex is the first implementation, not a Task Core dependency. CDP is an optiona
 - Root-local first-class Skill invocation. The current Runtime declares Skill selection/consumption for delegated Work Units only; Root has no Project Scope filesystem or network capability, and project read/write belongs to an explicitly scoped delegated Work Unit.
 - Replayable Project Search evidence records. Search/runtime summaries remain non-DIRECT until such a source-of-truth exists.
 - Generic execution side-effect proof/certification. All candidates route through Validator, but first-class source-grounded proof is currently analysis-oriented; write authorization and task-specific test/tool evidence remain the execution safety mechanisms.
-
+- Runtime-native orchestration. The mode is named only to enforce separation from TaskBoard-owned orchestration; no native-agent-tree execution path is currently admitted.
+- Dynamic marketplace/plugin discovery or hot Executor switching. External distributions compose a registry explicitly; one TaskBoard process binds one active Executor Extension.
 
 ## Runtime ownership
 
-Scheduler owns Task/work admission, lifecycle and resource-wait transitions. Executor performs Codex calls and reports execution facts such as `activeTurnCount`; those facts do not create a separate resource-management Owner. Capability Provider owns model/capability discovery state, including refresh outcome. UI only renders and triggers those owned capabilities.
+Scheduler owns Task/work admission, lifecycle and resource-wait transitions. Executor performs concrete Runtime operations and reports execution facts such as active execution count; those facts do not create a separate resource-management Owner. Capability Provider owns model/capability discovery state, including refresh outcome. Connection Settings owns Extension-specific connection mutation and Secret handling. UI renders normalized Task state plus Extension-owned safe presentation metadata and user intent; it does not reinterpret provider/runtime semantics.
