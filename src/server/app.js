@@ -9,14 +9,27 @@ function errorStatus(message){
   return 500;
 }
 
+function extensionIdentity(extension){
+  return {
+    id:extension?.id||null,
+    displayName:extension?.displayName||extension?.id||null,
+    orchestrationMode:extension?.orchestrationMode||null,
+    presentation:extension?.presentation||null,
+  };
+}
+
 export function createApp({taskService,executor,scheduler=null,capabilityProvider=null,surfaceManager=null,extension=null,settingsStore=null,runtimeSettingsState=null,applyRuntimeSettings=null,uiRoot,onShutdown=null,instanceRoot=null}){
   return async function handler(req,res){
     try{
       const url=new URL(req.url,'http://localhost');const path=url.pathname;
       if(path.startsWith('/api/')&&!['GET','HEAD'].includes(req.method||'GET')){const expectedAction=path==='/api/system/shutdown'?'shutdown':'ui';if(req.headers['x-taskboard-action']!==expectedAction)return json(res,403,{error:'FORBIDDEN'});}
       if(path==='/api/live'&&req.method==='GET')return json(res,200,{ok:true,app:APP_ID,version:APP_VERSION,pid:process.pid,rootDir:instanceRoot});
-      if(path==='/api/health'&&req.method==='GET')return json(res,200,{ok:true,executor:await executor.health(),surfaces:surfaceManager?.status?.()||[]});
-      if(path==='/api/capabilities'&&req.method==='GET'){const capability=capabilityProvider?.snapshot?.()||(capabilityProvider?.initialize?await capabilityProvider.initialize({backgroundRefresh:true}):(capabilityProvider?.discover?await capabilityProvider.discover():null));return json(res,200,{ok:true,extension:{id:extension?.id||null,displayName:extension?.displayName||null},capability,surfaces:surfaceManager?.status?.()||[]});}
+      if(path==='/api/health'&&req.method==='GET'){
+        const health=await executor.health();
+        const identity=extensionIdentity(extension);
+        return json(res,200,{ok:true,executor:{...health,extensionId:identity.id,displayName:health?.displayName||identity.displayName,orchestrationMode:identity.orchestrationMode},surfaces:surfaceManager?.status?.()||[]});
+      }
+      if(path==='/api/capabilities'&&req.method==='GET'){const capability=capabilityProvider?.snapshot?.()||(capabilityProvider?.initialize?await capabilityProvider.initialize({backgroundRefresh:true}):(capabilityProvider?.discover?await capabilityProvider.discover():null));return json(res,200,{ok:true,extension:extensionIdentity(extension),capability,surfaces:surfaceManager?.status?.()||[]});}
       if(path==='/api/capabilities/refresh'&&req.method==='POST'){if(!capabilityProvider?.refresh)return json(res,503,{ok:false,error:'CAPABILITY_REFRESH_UNAVAILABLE',capability:capabilityProvider?.snapshot?.()||null});const result=await capabilityProvider.refresh({reason:'manual-ui',manual:true});return json(res,200,{ok:Boolean(result?.refreshed),refreshed:Boolean(result?.refreshed),error:result?.error||null,capability:result?.capability||capabilityProvider.snapshot?.()||null});}
       if(path==='/api/surfaces/start'&&req.method==='POST'){surfaceManager?.start?.();const surfaces=await surfaceManager?.scanNow?.();return json(res,200,{ok:true,surfaces:surfaces||surfaceManager?.status?.()||[]});}
       if(path==='/api/system/shutdown'&&req.method==='POST'){if(!onShutdown)return json(res,503,{error:'SHUTDOWN_UNAVAILABLE'});json(res,202,{ok:true});setTimeout(()=>onShutdown(),40);return;}
