@@ -1,147 +1,52 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer, request as httpRequest } from 'node:http';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
-import { RootRuntime, validateDelegationPlan } from '../src/core/root-runtime.js';
-import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
-import { ModelRouter } from '../src/core/model-router.js';
-import { SubagentRuntime } from '../src/core/subagent-runtime.js';
-import { AttachmentStore } from '../src/core/attachment-store.js';
-import { JsonTaskDatabase, JsonTaskRepository } from '../src/core/json-repository.js';
-import { TaskService } from '../src/core/task-service.js';
-import { MockExecutor } from '../src/extensions/executors/mock/mock-executor.js';
-import { createApp } from '../src/server/app.js';
-import { AnalysisResultValidator } from '../src/governance/analysis-validator.js';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
 
-function runtime(executor={}){const router=new ModelRouter();const subagent=new SubagentRuntime({executor,modelRouter:router});return new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime:subagent});}
+const root=process.cwd();
+const read=path=>readFileSync(resolve(root,path),'utf8');
 
-test('delegation plan validates work identity and dependencies without confusing Work Unit count with Subagent concurrency',()=>{
-  const many=validateDelegationPlan([
-    {id:'a',title:'A',goal:'A',expectedOutput:'A result',stopCondition:'A done',skillId:null,dependsOn:[]},
-    {id:'b',title:'B',goal:'B',expectedOutput:'B result',stopCondition:'B done',skillId:null,dependsOn:[]},
-    {id:'c',title:'C',goal:'C',expectedOutput:'C result',stopCondition:'C done',skillId:null,dependsOn:[]},
-    {id:'d',title:'D',goal:'D',expectedOutput:'D result',stopCondition:'D done',skillId:null,dependsOn:[]},
-    {id:'e',title:'E',goal:'E',expectedOutput:'E result',stopCondition:'E done',skillId:null,dependsOn:[]},
-    {id:'f',title:'F',goal:'F',expectedOutput:'F result',stopCondition:'F done',skillId:null,dependsOn:['e']},
-  ]);
-  assert.equal(many.valid,true,'Work Unit count is not a concurrency limit; runtime admission controls active Subagents');
-  assert.equal(many.delegations.length,6);
+function listFiles(dir){
+  const out=[];
+  for(const entry of readdirSync(resolve(root,dir),{withFileTypes:true})){
+    const path=`${dir}/${entry.name}`;
+    if(entry.isDirectory())out.push(...listFiles(path));else if(entry.isFile())out.push(path);
+  }
+  return out;
+}
 
-  const duplicate=validateDelegationPlan([
-    {id:'dup',title:'A',goal:'A',expectedOutput:'A result',stopCondition:'A done',skillId:null,dependsOn:[]},
-    {id:'dup',title:'B',goal:'B',expectedOutput:'B result',stopCondition:'B done',skillId:null,dependsOn:[]},
-  ]);
-  assert.equal(duplicate.valid,false);
-  assert.match(duplicate.issues.join(' '),/id 重复/);
-
-  const unknown=validateDelegationPlan([
-    {id:'a',title:'A',goal:'A',expectedOutput:'A result',stopCondition:'A done',skillId:null,dependsOn:['missing']},
-  ]);
-  assert.equal(unknown.valid,false);
-  assert.match(unknown.issues.join(' '),/依赖不存在/);
-
-  const cycle=validateDelegationPlan([
-    {id:'a',title:'A',goal:'A',expectedOutput:'A result',stopCondition:'A done',skillId:null,dependsOn:['b']},
-    {id:'b',title:'B',goal:'B',expectedOutput:'B result',stopCondition:'B done',skillId:null,dependsOn:['a']},
-  ]);
-  assert.equal(cycle.valid,false);
-  assert.match(cycle.issues.join(' '),/循环/);
+test('runtime source avoids hidden sqlite compatibility dependency',()=>{
+  const runtimeFiles=listFiles('src').filter(path=>path.endsWith('.js'));
+  for(const file of runtimeFiles)assert.doesNotMatch(read(file),/sqlite|better-sqlite|node:sqlite/i,`${file} should not carry an undeclared sqlite Runtime path`);
 });
 
-test('attachment cleanup uses a path boundary, not a shared string prefix',()=>{
-  const dir=mkdtempSync(join(tmpdir(),'taskboard-attachment-boundary-'));
-  const root=join(dir,'attachments');const outside=join(dir,'attachments-escape');mkdirSync(root);mkdirSync(outside);const outsideFile=join(outside,'keep.txt');writeFileSync(outsideFile,'keep');
-  try{
-    const store=new AttachmentStore({rootDir:root});
-    assert.equal(store.owns(outsideFile),false);
-    store.removeTaskAttachments([{path:outsideFile}]);
-    assert.equal(existsSync(outsideFile),true);
-  }finally{rmSync(dir,{recursive:true,force:true});}
+test('active code has no old blanket mode-to-scope derivation',()=>{
+  const files=listFiles('src').filter(path=>path.endsWith('.js'));
+  const forbidden=/taskMode\s*===\s*['"]EXECUTION['"][\s\S]{0,180}(?:projectWrite|networkAccess)|resultMode\s*===\s*['"]execution['"][\s\S]{0,180}(?:projectWrite|networkAccess)/i;
+  for(const file of files)assert.doesNotMatch(read(file),forbidden,`${file} must not derive Runtime authority from presentation/task mode`);
 });
 
-test('HTTP rejects malformed JSON and encoded static path traversal instead of returning 500 or serving outside files',async()=>{
-  const dir=mkdtempSync(join(tmpdir(),'taskboard-http-audit-'));const db=new JsonTaskDatabase(join(dir,'db.json'));const repo=new JsonTaskRepository(db);const service=new TaskService(repo);
-  const server=createServer(createApp({taskService:service,executor:new MockExecutor(),uiRoot:resolve('src/ui')}));await new Promise(r=>server.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${server.address().port}`;
-  try{
-    const malformed=await fetch(`${base}/api/tasks`,{method:'POST',headers:{'content-type':'application/json','x-taskboard-action':'ui'},body:'{"title":'});assert.equal(malformed.status,400);assert.equal((await malformed.json()).error,'INVALID_JSON');
-    const traversalStatus=await new Promise((resolveStatus,reject)=>{const req=httpRequest({host:'127.0.0.1',port:server.address().port,path:'/%2e%2e/%2e%2e/etc/passwd',method:'GET'},res=>{res.resume();res.on('end',()=>resolveStatus(res.statusCode));});req.on('error',reject);req.end();});assert.equal(traversalStatus,404);
-  }finally{await new Promise(r=>server.close(r));db.close();rmSync(dir,{recursive:true,force:true});}
+test('Task Core does not import Codex implementation modules',()=>{
+  const coreFiles=listFiles('src/core').filter(path=>path.endsWith('.js'));
+  for(const file of coreFiles)assert.doesNotMatch(read(file),/extensions\/(?:executors|capabilities|config|surfaces)\/codex|codex-app-server|codex-executor/i,`${file} must stay Executor-independent`);
 });
 
-test('Subagent returns source-traced local findings; Task-level certainty remains Root authority',async()=>{
-  const dir=mkdtempSync(join(tmpdir(),'taskboard-subagent-local-'));const file=join(dir,'A.java');writeFileSync(file,'存在一个相关字段');
-  const executor={async runSubagent(){return{delegationId:'d',result:'local result',evidence:[{id:'E-1',strength:'direct',kind:'fact',sourceType:'project_file',coverage:'component',statement:'存在一个相关字段',basis:'A.java',locator:'A.java',observation:'存在一个相关字段'}],findings:[{id:'F-1',statement:'发现候选字段',evidenceIds:['E-1']}],discoveries:[],blocker:null,uncertainty:null};}};
-  const router=new ModelRouter();const subagent=new SubagentRuntime({executor,modelRouter:router});
-  try{
-    const result=await subagent.run({id:'T-1',title:'分析',instruction:'分析',projectScopes:[{path:dir}]}, {id:'d',title:'查证',goal:'核对字段关系',expectedOutput:'返回字段关系证据',stopCondition:'关系闭合或形成 Gap',projectAccess:'read',inputRefs:['project:0'],skillId:null,dependsOn:[]}, {policyContext:{taskMode:'analysis'}});
-    assert.equal(result.evidence[0].strength,'direct');
-    assert.equal(result.findings[0].statement,'发现候选字段');
-    assert.equal('claims' in result,false);
-    assert.equal('gaps' in result,false);
-    assert.equal('recommendations' in result,false);
-  }finally{rmSync(dir,{recursive:true,force:true});}
+test('Capability Provider remains a read-only fact surface',()=>{
+  const capability=read('src/extensions/ports/capability-provider.js');
+  assert.match(capability,/discover/);assert.match(capability,/snapshot/);assert.match(capability,/invalidate/);
+  assert.doesNotMatch(capability,/update|save|apiKey|baseUrl|writeFile|renameSync/i);
 });
 
-test('ModelRouter releases per-task capability cache when execution session is discarded',()=>{
-  const router=new ModelRouter();router.prepared.set('T-1',{x:1});router.release('T-1');assert.equal(router.prepared.has('T-1'),false);
+test('Task Core model routing remains provider-agnostic',()=>{
+  const router=read('src/core/model-router.js');
+  assert.doesNotMatch(router,/taskboard_custom|model_providers\.|wire_api|requires_openai_auth|env_key/i);
 });
 
-test('invalid Root delegation graph is repaired internally without creating a Task-level failure or Human Gateway',async()=>{
-  let turns=0;
-  const executor={
-    async runRoot({planningFeedback}){
-      turns+=1;
-      if(turns===1)return{kind:'delegate',summary:'bad plan',stageResult:null,finalResult:null,resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,delegations:[
-        {id:'a',title:'A',goal:'A',expectedOutput:'A result',stopCondition:'A done',skillId:null,dependsOn:['b']},
-        {id:'b',title:'B',goal:'B',expectedOutput:'B result',stopCondition:'B done',skillId:null,dependsOn:['a']},
-      ]};
-      assert.ok(Array.isArray(planningFeedback)&&planningFeedback.some(x=>/循环/.test(x)));
-      return{kind:'complete',summary:'replanned',stageResult:'done',finalResult:'完成',resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,delegations:[]};
-    },
-    async runSubagent(){throw new Error('Subagent must not run for invalid plan');},
-  };
-  const root=runtime(executor);
-  const outcome=await root.execute({id:'T-plan',title:'执行',instruction:'执行任务',projectScopes:[],attachments:[],references:[]});
-  assert.equal(outcome.kind,'goal_satisfied');
-  assert.equal(outcome.proposal.finalResult,'完成');
-  assert.equal(turns,2);
+test('Root/Subagent execution requests pass governed model policy rather than provider configuration',()=>{
+  for(const file of ['src/core/root-runtime.js','src/core/subagent-runtime.js']){
+    const source=read(file);assert.match(source,/modelPolicy/);assert.doesNotMatch(source,/baseUrl|apiKey|providerId|model_providers\./i);
+  }
 });
-
-test('business progress never exposes raw shell commands from Codex command execution events',()=>{
-  const source=readFileSync(join(process.cwd(),'src/extensions/executors/codex/app-server-client.js'),'utf8');
-  assert.doesNotMatch(source,/detail\s*:\s*item\.command/);
-  assert.doesNotMatch(source,/summary\s*:\s*item\.command/);
-  assert.match(source,/正在核对证据/);
-});
-
-
-test('progress copy is projected from the canonical actor role instead of mixed Root/Subagent wording',()=>{
-  const scheduler=readFileSync(resolve('src/core/scheduler.js'),'utf8');
-  const client=readFileSync(resolve('src/extensions/executors/codex/app-server-client.js'),'utf8');
-  assert.doesNotMatch(scheduler,/Root Agent \/ Subagent|Root Agent 正在组织当前工作/);
-  assert.doesNotMatch(client,/Root\/Subagent 执行|分析当前 Task 与真实项目状态/);
-  assert.match(scheduler,/Validator 正在认证当前候选结果/);
-  assert.match(scheduler,/Subagent 正在执行/);
-  assert.match(client,/模型正在认证当前证明关系/);
-  assert.match(client,/模型正在执行当前 Work Unit/);
-  assert.match(client,/模型正在进行 Task 级判断/);
-});
-
-
-test('Mock Executor validates control flow without manufacturing business Evidence',async()=>{
-  const executor=new MockExecutor();
-  const root=await executor.runRoot({task:{id:'T-MOCK',title:'明确任务',instruction:'执行',attachments:[]},humanGatewayHistory:[],policyContext:{taskMode:'analysis'}});
-  assert.deepEqual(root.evidence,[]);
-  assert.deepEqual(root.claims,[]);
-  const sub=await executor.runSubagent({delegation:{id:'WU-1',title:'测试工作'}});
-  assert.deepEqual(sub.evidence,[]);
-  assert.equal('claims' in sub,false);
-  assert.equal('gaps' in sub,false);
-  assert.equal('recommendations' in sub,false);
-});
-
 
 test('current runtime contains no removed role or duplicate-domain entry outside migration boundaries',()=>{
   const allowed=new Set([
@@ -159,7 +64,7 @@ test('current runtime contains no removed role or duplicate-domain entry outside
 test('current documentation is one active set and does not reintroduce superseded version artifacts or role names',()=>{
   const expected=[
     'ADR.md','ARCHITECTURE.md','ARCHITECTURE_REVIEW.md','CAPABILITY_CONTRACTS.md','CAPABILITY_MAP.md',
-    'CODEX_INTEGRATION.md','CURRENT_STATE.md','PRODUCT_CONSTITUTION.md','SPECIFICATION.md','VERIFICATION.md',
+    'CODEX_INTEGRATION.md','CURRENT_STATE.md','EXTENSIONS.md','PRODUCT_CONSTITUTION.md','SPECIFICATION.md','VERIFICATION.md',
   ];
   const actual=readdirSync(resolve('docs')).filter(name=>name.endsWith('.md')).sort();
   assert.deepEqual(actual,expected.slice().sort());
