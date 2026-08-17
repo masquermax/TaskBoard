@@ -1,28 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RootRuntime } from '../src/core/root-runtime.js';
+import { RootRuntime, validateDelegationPlan } from '../src/core/root-runtime.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { ModelRouter } from '../src/core/model-router.js';
 import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
 
 const baseDecision={stageResult:null,finalResult:null,resultMode:'execution',evidence:[],claims:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[]};
 function targetGap(){return{id:'G-TARGET',question:'What exact runtime fact is still missing to satisfy the current governed goal?',reason:'The goal cannot be advanced reliably until this specific runtime fact is known.',kind:'missing_fact',blocking:false,evidenceIds:[]};}
-function unrelatedWork(){return{id:'WU-UNBOUND',title:'Inventory unrelated repository metadata',goal:'Read unrelated repository metadata that does not answer G-TARGET.',expectedOutput:'Return the unrelated metadata.',stopCondition:'Stop after returning that metadata.',projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[]};}
-function targetedWork(id,title){return{id,title,goal:`Try one bounded acquisition path for G-TARGET: ${title}.`,expectedOutput:'Return the discriminator result for G-TARGET.',stopCondition:'Stop after the bounded discriminator returns, including a negative result.',projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[],targetGapIds:['G-TARGET']};}
+function unrelatedWork(){return{id:'WU-UNBOUND',title:'Inventory unrelated repository metadata',goal:'Read unrelated repository metadata that does not answer G-TARGET.',expectedOutput:'Return the unrelated metadata.',stopCondition:'Stop after returning that metadata.',projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[],contributionRefs:[]};}
+function targetedWork(id,title){return{id,title,goal:`Try one bounded acquisition path for G-TARGET: ${title}.`,expectedOutput:'Return the discriminator result for G-TARGET.',stopCondition:'Stop after the bounded discriminator returns, including a negative result.',projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[],contributionRefs:['gap:G-TARGET']};}
 function runtimeFor(executor){const modelRouter=new ModelRouter();const subagentRuntime=new SubagentRuntime({executor,modelRouter});return new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter,subagentRuntime});}
 function task(id){return{id,title:'Close the governed runtime deficit',instruction:'Resolve the current governed runtime deficit with the minimum necessary work.',projectScopes:[],attachments:[],references:[],analysisState:null,workReceipts:[],taskContract:{authority:{}}};}
 
-test('new Work without a machine-checkable governed contribution is rejected before Executor admission',async()=>{
+test('new Work without a machine-checkable governed contribution suspends before Executor admission',async()=>{
   let rootCalls=0,subagentCalls=0;
   const executor={
-    async runRoot({subagentResults,onExecutionStarted}){rootCalls+=1;onExecutionStarted?.();if((subagentResults||[]).length)return{...baseDecision,kind:'complete',summary:'unrelated work returned, but governed deficit is unchanged',finalResult:'done',gaps:[]};return{...baseDecision,kind:'delegate',summary:'issue a structurally valid but goal-unbound Work Unit',gaps:[targetGap()],delegations:[unrelatedWork()]};},
+    async runRoot({subagentResults,onExecutionStarted}){rootCalls+=1;onExecutionStarted?.();if((subagentResults||[]).length)return{...baseDecision,kind:'complete',summary:'should not run after unbound work',finalResult:'done',gaps:[]};return{...baseDecision,kind:'delegate',summary:'issue a structurally valid but goal-unbound Work Unit',gaps:[targetGap()],delegations:[unrelatedWork()]};},
     async runSubagent({delegation,onExecutionStarted}){subagentCalls+=1;onExecutionStarted?.();return{delegationId:delegation.id,result:'unrelated metadata',evidence:[],findings:[],discoveries:[],blocker:null,uncertainty:null};},
   };
-  await assert.rejects(runtimeFor(executor).execute(task('T-GOAL-CONTRIBUTION')),/ROOT_WORK_WITHOUT_GOVERNED_CONTRIBUTION/,'Root must not be able to turn narrative non-convergence into valid-but-goal-unbound Work Units.');
-  assert.equal(subagentCalls,0);assert.equal(rootCalls,1);
+  const outcome=await runtimeFor(executor).execute(task('T-GOAL-CONTRIBUTION'));
+  assert.equal(outcome.kind,'suspended');
+  assert.match(outcome.reason,/ROOT_WORK_WITHOUT_GOVERNED_CONTRIBUTION/);
+  assert.equal(subagentCalls,0,'goal-unbound Work must be stopped before it reaches the Executor');
+  assert.equal(rootCalls,1,'the original trigger must not buy another Root cognition round');
 });
 
-test('declaring the same Gap target does not buy another Work after the prior result produced no state-bearing delta',async()=>{
+test('same governed target cannot buy another Work after the prior result produced no state-bearing delta',async()=>{
   let rootCalls=0,subagentCalls=0;
   const executor={
     async runRoot({subagentResults,onExecutionStarted}){
@@ -33,7 +36,32 @@ test('declaring the same Gap target does not buy another Work after the prior re
     },
     async runSubagent({delegation,onExecutionStarted}){subagentCalls+=1;onExecutionStarted?.();return{delegationId:delegation.id,result:'bounded attempt returned no evidence that changes G-TARGET',evidence:[],findings:[],discoveries:[],blocker:null,uncertainty:'G-TARGET remains unchanged'};},
   };
-  await assert.rejects(runtimeFor(executor).execute(task('T-GAP-NO-DELTA')),/ROOT_WORK_WITHOUT_STATE_ADVANCE/,'A self-declared Gap target must not become a license for repeated cognition when the previous targeted Work changed no governed state.');
+  const outcome=await runtimeFor(executor).execute(task('T-GAP-NO-DELTA'));
+  assert.equal(outcome.kind,'suspended');
+  assert.match(outcome.reason,/ROOT_WORK_WITHOUT_STATE_ADVANCE/);
   assert.equal(subagentCalls,1,'only the first bounded discriminator may execute before the no-progress boundary is enforced');
-  assert.equal(rootCalls,2,'the first Work result may trigger one Root synthesis, but that synthesis cannot buy another unchanged-gap Work');
+  assert.equal(rootCalls,2,'one Work result may trigger synthesis, but cannot buy another unchanged-target Work');
+});
+
+test('Root wait is a structured non-Human convergence result when a governed Gap remains open',async()=>{
+  let rootCalls=0,subagentCalls=0;
+  const executor={
+    async runRoot({onExecutionStarted}){rootCalls+=1;onExecutionStarted?.();return{...baseDecision,kind:'wait',summary:'No safe decision-relevant acquisition path remains.',gaps:[targetGap()]};},
+    async runSubagent(){subagentCalls+=1;throw new Error('must not run');},
+  };
+  const outcome=await runtimeFor(executor).execute(task('T-STRUCTURED-WAIT'));
+  assert.equal(outcome.kind,'suspended');
+  assert.match(outcome.reason,/No safe decision-relevant acquisition path remains/);
+  assert.equal(rootCalls,1);
+  assert.equal(subagentCalls,0);
+});
+
+test('one canonical obligation may be inferred only while no governed Gap competes for contribution identity',()=>{
+  const baseWork={id:'W-1',title:'bounded work',goal:'advance goal',expectedOutput:'fact',stopCondition:'fact returned',projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[],contributionRefs:[]};
+  const inferred=validateDelegationPlan([baseWork],{availableContributionRefs:['obligation:OBL-T-GOAL']});
+  assert.equal(inferred.valid,true);
+  assert.deepEqual(inferred.delegations[0].contributionRefs,['obligation:OBL-T-GOAL']);
+  const ambiguous=validateDelegationPlan([baseWork],{availableContributionRefs:['obligation:OBL-T-GOAL','gap:G-1']});
+  assert.equal(ambiguous.valid,false);
+  assert.ok(ambiguous.contributionIssues.length>0);
 });
