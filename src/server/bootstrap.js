@@ -32,6 +32,7 @@ export function bootstrap({
   rootDir,
   dbFile=null,
   executorName=process.env.TASKBOARD_EXECUTOR||'codex',
+  continuationName=process.env.TASKBOARD_CONTINUATION||null,
   extensionRegistry=null,
   startScheduler=true,
   taskboardUrl=process.env.TASKBOARD_URL||'http://127.0.0.1:4317',
@@ -47,6 +48,20 @@ export function bootstrap({
     try{database.close();}catch{/* fail-closed cleanup */}
     throw new Error(`EXTENSION_ORCHESTRATION_MODE_UNSUPPORTED:${extension.orchestrationMode}`);
   }
+
+  // Continuation is an optional, independently bound Extension Point. It carries
+  // disposable cross-session cognition only; Executor/Core semantics do not
+  // depend on its presence. One process binds at most one active continuation.
+  const continuationKey=String(continuationName||'').trim()||null;
+  const continuationExtension=continuationKey
+    ? (continuationKey===extension.id ? extension : registry.create(continuationKey,{rootDir,taskboardUrl}))
+    : null;
+  if(continuationExtension&&!continuationExtension.continuation){
+    try{database.close();}catch{/* fail-closed cleanup */}
+    throw new Error(`EXTENSION_HAS_NO_CONTINUATION:${continuationKey}`);
+  }
+  const continuation=continuationExtension?.continuation||null;
+
   const attachmentStore=new AttachmentStore({rootDir:resolve(rootDir,'data/attachments')});
   const taskService=new TaskService(repository,{attachmentStore,defaultExecutorKey:extension.id});
 
@@ -78,5 +93,5 @@ export function bootstrap({
   const recovered=scheduler.recoverStaleRunningTasks();if(recovered)console.log(`[recovery] reconciled ${recovered} stale RUNNING task(s)`);
   const cleanup=new DailyCleanupController({repository,attachmentStore});
   if(startScheduler)scheduler.start();
-  return{database,repository,taskService,executor,capabilityProvider,extension,extensionRegistry:registry,surfaceManager,governanceCompiler,validatorRuntime,rootRuntime,scheduler,cleanup,settingsStore,runtimeSettingsState,applyRuntimeSettings,storage:persistence.storage,storageFile:persistence.filename};
+  return{database,repository,taskService,executor,capabilityProvider,extension,extensionRegistry:registry,continuation,continuationExtension,surfaceManager,governanceCompiler,validatorRuntime,rootRuntime,scheduler,cleanup,settingsStore,runtimeSettingsState,applyRuntimeSettings,storage:persistence.storage,storageFile:persistence.filename};
 }
