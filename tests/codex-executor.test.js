@@ -153,3 +153,35 @@ test('Executor realizes the AuthorizedGrant exactly or reports Runtime capabilit
     assert.equal(deniedClient.calls.length,0,'unrealizable Work is rejected before execution instead of silently receiving weaker semantics');
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
+
+test('Recovery context exposes minimum unresolved effect facts to Root without promoting observation into stable truth',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'taskboard-codex-recovery-context-'));
+  const client=new CaptureClient();
+  const executor=new CodexExecutor({runtimeRoot:join(dir,'runtime'),client});
+  try{
+    await executor.runRoot({
+      task:{
+        id:'T-RECOVERY',title:'recover',instruction:'核对现实后再决定是否继续',projectScopes:[],attachments:[],references:[],last_stage_result:null,workReceipts:[],
+        executionState:{
+          recovery:{effectAttempts:[{
+            id:'effect:T-RECOVERY:WU-OLD:1',workUnitId:'WU-OLD',signature:'opaque-signature-must-not-leak',
+            projectAccess:'write',networkAccess:false,inputRefs:['project:0'],admittedAt:'2026-08-17T00:00:00.000Z',
+            reason:'effect-capable-work-admitted',resolved:false,
+          }]},
+          retry:{scope:'effect-recovery-observe',paused:false,nextAt:null},
+        },
+      },
+      subagentResults:[],humanGatewayHistory:[],modelPolicy:{model:null,reasoningEffort:null},policyContext:rootPolicy('analysis'),
+    });
+    assert.equal(client.calls.length,1);
+    const prompt=client.calls[0].prompt;
+    assert.match(prompt,/RECOVERY OBSERVATION BOUNDARY/);
+    assert.match(prompt,/effect outcome is UNKNOWN/i);
+    assert.match(prompt,/old-mutator liveness is UNKNOWN/i);
+    assert.match(prompt,/Do not replay the old Work/i);
+    assert.match(prompt,/side-effect-free Work/i);
+    assert.match(prompt,/do not promote it into stable recovery truth/i);
+    assert.match(prompt,/WU-OLD/);
+    assert.doesNotMatch(prompt,/opaque-signature-must-not-leak/,'Root receives only the minimum recovery identity, not internal attempt signature detail');
+  }finally{rmSync(dir,{recursive:true,force:true});}
+});
