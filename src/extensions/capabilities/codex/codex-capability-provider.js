@@ -79,6 +79,9 @@ function sanitizeCapabilityValue(value, depth = 0) {
 function unsupportedMethod(error) {
   return error?.rpcCode === -32601 || /method not found|unknown method|unsupported.*method|not implemented/i.test(error?.message || '');
 }
+function authenticationFailure(error) {
+  return /not authenticated|authentication required|login required|unauthenticated|unauthorized|refresh token.*revoked|access token.*could not be refreshed|log out.*sign in again|sign in again/i.test(error?.message || String(error || ''));
+}
 
 async function probeClient(client) {
   if (typeof client?.probeRuntime === 'function') return client.probeRuntime({ prepare:true });
@@ -249,8 +252,9 @@ export class CodexCapabilityProvider extends CapabilityProviderPort {
     }
 
     const unsupported = [];
+    const customTransport=this.client?.isCustom?.()===true;
     const [accountResult, configResult, providerResult] = await Promise.all([
-      optionalRpc(this.client, 'account/read', { refreshToken:false }, 2_500, unsupported),
+      optionalRpc(this.client, 'account/read', { refreshToken:!customTransport }, 15_000, unsupported),
       optionalRpc(this.client, 'config/read', {}, 2_500, unsupported),
       optionalRpc(this.client, 'modelProvider/capabilities/read', {}, 2_500, unsupported),
     ]);
@@ -259,11 +263,11 @@ export class CodexCapabilityProvider extends CapabilityProviderPort {
     const config = configResult.value;
     const providerCaps = providerResult.value;
     const previousModels=Array.isArray(this.current?.models)?this.current.models:[];
-    const requiresOpenaiAuth = account?.requiresOpenaiAuth ?? null;
+    const authFailure = Boolean(accountResult.error && authenticationFailure(accountResult.error));
+    const requiresOpenaiAuth = account?.requiresOpenaiAuth ?? (customTransport ? false : true);
     const authMode = normalizeAuthMode(account?.account?.type ?? account?.authMode ?? null);
     const accountPresent = Boolean(account?.account);
     const authKnown = accountResult.ok;
-    const authFailure = Boolean(accountResult.error && /unauthorized|unauthenticated|authentication|login required|not logged/i.test(accountResult.error.message || ''));
     const ready = authKnown ? (requiresOpenaiAuth === false || accountPresent) : !authFailure;
     const providerId = safeProviderId(config, providerCaps);
     const defaultModel = configResult.ok ? valueAt(config, ['config.model', 'model']) : this.current?.defaults?.model;
@@ -281,7 +285,7 @@ export class CodexCapabilityProvider extends CapabilityProviderPort {
       discoveredAt:nowIso(),
       routingSafe:Boolean(configResult.ok),
       stale:false,
-      execution:{ available:true, connected:true, ready, version:probe.version || this.client.version || null, error:ready ? (nonUnsupportedErrors[0] || null) : 'Codex is connected but its current authentication/provider state is not ready' },
+      execution:{ available:true, connected:true, ready, version:probe.version || this.client.version || null, error:ready ? (nonUnsupportedErrors[0] || null) : (accountResult.error?.message || 'Codex is connected but its current authentication/provider state is not ready') },
       provider:{
         id:providerId,
         authMode,

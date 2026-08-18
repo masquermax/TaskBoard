@@ -347,7 +347,7 @@ export class CodexConnectionSettings {
     await this.verifyActiveConnection({connect:false});
     if (!this.capabilityProvider?.initialize) return null;
     const capability=await this.capabilityProvider.initialize({backgroundRefresh:true});
-    if (capability?.execution?.connected===false) throw new Error(capability.execution.error||'EXECUTOR_CONNECTION_APPLY_FAILED');
+    if (capability?.execution?.connected===false || capability?.execution?.ready===false) throw new Error(capability.execution.error||'EXECUTOR_CONNECTION_APPLY_FAILED');
     return capability;
   }
 
@@ -425,6 +425,11 @@ export class CodexConnectionSettings {
       if (unchanged && revalidate) {
         try {
           await this.verifyActiveConnection();
+          this.capabilityProvider?.invalidate?.('provider-profile-revalidated');
+          if (this.capabilityProvider?.initialize) {
+            const capability=await this.capabilityProvider.initialize({backgroundRefresh:true});
+            if (capability?.execution?.connected===false || capability?.execution?.ready===false) throw new Error(capability.execution.error||'EXECUTOR_CONNECTION_APPLY_FAILED');
+          }
           return this.getPublic();
         } catch (error) {
           if (isAccountAuthFailure(error)) throw accountAuthRequired(error);
