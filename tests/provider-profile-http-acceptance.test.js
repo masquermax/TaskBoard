@@ -56,14 +56,22 @@ class ProfileAwareAppServer {
   recordDiagnostic(){}
 }
 class ProfileAwareExec {
-  constructor(){this.runs=0;this.activeTurnCount=0;this.child=null;}
-  async runTurn(){this.runs+=1;return'exec-result';}
+  constructor({probeResult='{"ok":true}',probeError=null}={}){this.runs=0;this.activeTurnCount=0;this.child=null;this.probeResult=probeResult;this.probeError=probeError;this.requests=[];}
+  async runTurn(request={}){
+    this.runs+=1;this.requests.push(request);
+    if(request?.diagnosticContext?.role==='connection-probe'){
+      if(this.probeError)throw this.probeError;
+      return this.probeResult;
+    }
+    return'exec-result';
+  }
   close(){}
 }
 
 function realTransportRig(dir,options={}){
-  const appServer=new ProfileAwareAppServer(options);
-  const exec=new ProfileAwareExec();
+  const {execProbeResult='{"ok":true}',execProbeError=null,...appServerOptions}=options;
+  const appServer=new ProfileAwareAppServer(appServerOptions);
+  const exec=new ProfileAwareExec({probeResult:execProbeResult,probeError:execProbeError});
   let settings=null;
   const client=new CodexTransportClient({
     appServerClient:appServer,
@@ -109,6 +117,64 @@ test('real connection API saves, switches and projects provider profiles without
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
+test('custom Apply performs a real minimal provider turn before the API can return success',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'taskboard-profile-provider-probe-'));
+  const x=realTransportRig(dir);
+  try{
+    const result=await call(x.handler,'PUT',{
+      action:'saveProfile',
+      profile:{id:'company',name:'Company API',baseUrl:'https://company.example/v1',apiKey:'company-secret',defaultModel:'company-model'},
+      select:true,
+    });
+    assert.equal(result.status,200);
+    assert.equal(result.body.connection.activeProfileId,'company');
+    assert.equal(x.exec.runs,1,'Apply must execute one provider acceptance Turn');
+    assert.equal(x.exec.requests.length,1);
+    const probe=x.exec.requests[0];
+    assert.equal(probe.model,'company-model');
+    assert.equal(probe.diagnosticContext?.role,'connection-probe');
+    assert.equal(probe.diagnosticContext?.routeReason,'connection-apply');
+    assert.equal(probe.networkAccess,false);
+    assert.equal(JSON.stringify(result.body).includes('company-secret'),false);
+  }finally{x.client.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('failed custom provider acceptance returns 502 and restores the previous account runtime',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'taskboard-profile-provider-probe-failed-'));
+  const x=realTransportRig(dir,{execProbeError:new Error('upstream provider rejected the acceptance turn')});
+  try{
+    const result=await call(x.handler,'PUT',{
+      action:'saveProfile',
+      profile:{id:'company',name:'Company API',baseUrl:'https://company.example/v1',apiKey:'company-secret',defaultModel:'company-model'},
+      select:true,
+    });
+    assert.equal(result.status,502);
+    assert.equal(result.body.error,'EXECUTOR_CONNECTION_PROVIDER_VALIDATION_FAILED');
+    assert.equal(x.exec.runs,1,'the failing provider must have been called exactly once');
+    assert.equal(x.settings.getPublic().activeProfileId,'account','failed Apply must restore the previous persisted selection');
+    assert.equal(x.settings.getPublic().mode,'account');
+    assert.equal(x.client.connectedMode,'account','rollback must restore the previous live account transport');
+    assert.deepEqual(x.appServer.requests,ACCOUNT_VALIDATION_REQUESTS,'rollback account transport must itself be revalidated');
+    assert.equal(JSON.stringify(result.body).includes('company-secret'),false);
+  }finally{x.client.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('custom Apply without a model fails as a client error instead of pretending the Provider was verified',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'taskboard-profile-provider-model-required-'));
+  const x=realTransportRig(dir);
+  try{
+    const result=await call(x.handler,'PUT',{
+      action:'saveProfile',
+      profile:{id:'company',name:'Company API',baseUrl:'https://company.example/v1',apiKey:'company-secret',defaultModel:''},
+      select:true,
+    });
+    assert.equal(result.status,400);
+    assert.equal(result.body.error,'EXECUTOR_CONNECTION_DEFAULT_MODEL_REQUIRED');
+    assert.equal(x.exec.runs,0,'no provider Turn can be claimed without a concrete model');
+    assert.equal(x.settings.getPublic().activeProfileId,'account');
+  }finally{x.client.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('UI-equivalent custom -> Codex account switch changes the real transport, forces builtin OpenAI provider and stops projecting the custom API key',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-profile-transport-'));
   const x=realTransportRig(dir);
@@ -124,8 +190,9 @@ test('UI-equivalent custom -> Codex account switch changes the real transport, f
     assert.equal(x.appServer.connects,0,'selecting custom must not authenticate/start the account app-server transport');
     assert.equal(x.settings.launchProfile().mode,'custom');
     assert.equal(x.settings.launchProfile().env.TASKBOARD_CODEX_API_KEY,'company-secret');
+    assert.equal(x.exec.runs,1,'custom Apply must first prove the Provider with a minimal Turn');
     assert.equal(await x.client.runTurn({}),'exec-result');
-    assert.equal(x.exec.runs,1);
+    assert.equal(x.exec.runs,2);
     assert.equal(x.appServer.runs,0);
 
     // This is the exact payload emitted by the settings UI when the built-in
