@@ -23,7 +23,7 @@ const CONNECTION_PRESENTATION = Object.freeze({
     { key:'defaultModel', label:'默认模型（可选）', type:'model', placeholder:'例如：gpt-5.6-sol' },
   ],
   actions:{ select:'selectProfile', save:'saveProfile', delete:'deleteProfile' },
-  help:'连接配置只作用于当前 Executor Extension；Secret 不会通过公开状态、页面回显或日志返回。',
+  help:'连接配置只作用于当前 Executor Extension；Secret 不会通过公开状态、页面回显或日志返回。选择「Codex 当前账号」并应用时会真实验证当前 Codex 登录。',
 });
 
 function text(value, max = 2048) {
@@ -151,6 +151,16 @@ function publicState(store, warning = null) {
   };
 }
 
+function isAccountAuthFailure(error) {
+  return /EXECUTOR_CONNECTION_AUTH_REQUIRED|not authenticated|authentication required|login required|unauthenticated|unauthorized|refresh token.*revoked|access token.*could not be refreshed|log out.*sign in again|sign in again/i.test(error?.message||String(error||''));
+}
+
+function accountAuthRequired(cause = null) {
+  const error=new Error('EXECUTOR_CONNECTION_AUTH_REQUIRED');
+  if (cause) error.cause=cause;
+  return error;
+}
+
 async function closeAndDrainClient(client) {
   if (!client?.close) return;
   const child=client.child||null;
@@ -271,11 +281,26 @@ export class CodexConnectionSettings {
     this.loadWarning=snapshot.warning||null;
   }
 
+  async verifyActiveConnection({ connect=true } = {}) {
+    if (!this.client) return null;
+    if (connect) await this.client.connect();
+    if (this.launchProfile().mode!=='account' || !this.client.request) return null;
+    try {
+      const account=await this.client.request('account/read',{refreshToken:true},15_000);
+      if (account?.requiresOpenaiAuth===true && !account?.account) throw accountAuthRequired();
+      return account;
+    } catch (error) {
+      if (isAccountAuthFailure(error)) throw accountAuthRequired(error);
+      throw error;
+    }
+  }
+
   async restartRuntime(reason) {
     if (!this.client) return null;
     await closeAndDrainClient(this.client);
     this.capabilityProvider?.invalidate?.(reason);
     await this.client.connect();
+    await this.verifyActiveConnection({connect:false});
     if (!this.capabilityProvider?.initialize) return null;
     const capability=await this.capabilityProvider.initialize({backgroundRefresh:true});
     if (capability?.execution?.connected===false) throw new Error(capability.execution.error||'EXECUTOR_CONNECTION_APPLY_FAILED');
@@ -295,20 +320,21 @@ export class CodexConnectionSettings {
       const candidate={schemaVersion:STORE_SCHEMA_VERSION,activeProfileId,profiles};
       const afterActive=activePrivateProfile(candidate);
       const runtimeImpact=activeProfileId!==this.value.activeProfileId || (profile.id===this.value.activeProfileId && JSON.stringify(beforeActive)!==JSON.stringify(afterActive));
-      return {candidate,runtimeImpact,reason:'provider-profile-changed'};
+      return {candidate,runtimeImpact,revalidate:false,reason:'provider-profile-changed'};
     }
     if (next.action==='selectProfile') {
       const profileId=text(next.profileId,64);
       if (profileId!==ACCOUNT_PROFILE_ID && !this.value.profiles.some(profile=>profile.id===profileId)) throw new Error('EXECUTOR_CONNECTION_PROFILE_NOT_FOUND');
       const candidate={...clone(this.value),activeProfileId:profileId};
-      return {candidate,runtimeImpact:profileId!==this.value.activeProfileId,reason:'provider-profile-changed'};
+      const unchanged=profileId===this.value.activeProfileId;
+      return {candidate,runtimeImpact:!unchanged,revalidate:unchanged&&profileId===ACCOUNT_PROFILE_ID,reason:'provider-profile-changed'};
     }
     if (next.action==='deleteProfile') {
       const profileId=text(next.profileId,64);
       if (!profileId || profileId===ACCOUNT_PROFILE_ID) throw new Error('EXECUTOR_CONNECTION_PROFILE_DELETE_INVALID');
       if (profileId===this.value.activeProfileId) throw new Error('EXECUTOR_CONNECTION_ACTIVE_PROFILE_DELETE');
       if (!this.value.profiles.some(profile=>profile.id===profileId)) throw new Error('EXECUTOR_CONNECTION_PROFILE_NOT_FOUND');
-      return {candidate:{...clone(this.value),profiles:this.value.profiles.filter(profile=>profile.id!==profileId)},runtimeImpact:false,reason:null};
+      return {candidate:{...clone(this.value),profiles:this.value.profiles.filter(profile=>profile.id!==profileId)},runtimeImpact:false,revalidate:false,reason:null};
     }
     throw new Error('EXECUTOR_CONNECTION_ACTION_INVALID');
   }
@@ -341,22 +367,35 @@ export class CodexConnectionSettings {
     const activeProfileId=legacy.mode==='custom' ? targetProfile.id : ACCOUNT_PROFILE_ID;
     const candidate={schemaVersion:STORE_SCHEMA_VERSION,activeProfileId,profiles};
     const runtimeImpact=JSON.stringify(activePrivateProfile(candidate))!==JSON.stringify(activePrivateProfile(this.value));
-    return {candidate,runtimeImpact,reason:'provider-profile-changed'};
+    return {candidate,runtimeImpact,revalidate:false,reason:'provider-profile-changed'};
   }
 
   async update(next = {}) {
-    const {candidate,runtimeImpact,reason}=this.operation(next);
-    if (JSON.stringify(candidate)===JSON.stringify(this.value)) return this.getPublic();
-    if (!runtimeImpact) {
-      this.persist(candidate);
-      this.value=candidate;
-      this.loadWarning=null;
-      return this.getPublic();
-    }
+    const {candidate,runtimeImpact,revalidate,reason}=this.operation(next);
+    const unchanged=JSON.stringify(candidate)===JSON.stringify(this.value);
+    if (unchanged && !revalidate) return this.getPublic();
 
     const releaseGate=this.connectionGate?.beginReconfigure?.() || (()=>{});
     try {
       if (!this.connectionGate && Number(this.client?.activeTurnCount||0)>0) throw new Error('EXECUTOR_CONNECTION_BUSY');
+      if (unchanged && revalidate) {
+        try {
+          await this.verifyActiveConnection();
+          return this.getPublic();
+        } catch (error) {
+          if (isAccountAuthFailure(error)) throw accountAuthRequired(error);
+          const wrapped=new Error('EXECUTOR_CONNECTION_APPLY_FAILED');
+          wrapped.cause=error;
+          throw wrapped;
+        }
+      }
+      if (!runtimeImpact) {
+        this.persist(candidate);
+        this.value=candidate;
+        this.loadWarning=null;
+        return this.getPublic();
+      }
+
       const before=this.snapshot();
       this.persist(candidate);
       this.value=candidate;
@@ -369,8 +408,8 @@ export class CodexConnectionSettings {
         let rollbackError=null;
         try { await this.restartRuntime('connection-settings-rollback'); }
         catch (rollback) { rollbackError=rollback?.message||String(rollback); }
-        const wrapped=new Error('EXECUTOR_CONNECTION_APPLY_FAILED');
-        wrapped.cause=error;
+        const wrapped=isAccountAuthFailure(error) ? accountAuthRequired(error) : new Error('EXECUTOR_CONNECTION_APPLY_FAILED');
+        if (!wrapped.cause) wrapped.cause=error;
         wrapped.rollbackError=rollbackError;
         throw wrapped;
       }
