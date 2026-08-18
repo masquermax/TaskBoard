@@ -26,11 +26,11 @@ const CONNECTION_PRESENTATION = Object.freeze({
   actions:{ select:'selectProfile', save:'saveProfile', delete:'deleteProfile' },
   errors:{
     EXECUTOR_CONNECTION_AUTH_REQUIRED:'Codex 当前登录已失效或未登录，请先在 Codex 重新登录，再应用这个连接',
-    EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID:'Codex 当前账号没有落到内置 OpenAI provider，已拒绝使用可能继承的自定义 Provider',
+    EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID:'Codex 当前账号没有落到未被覆盖的内置 OpenAI provider，已拒绝继承自定义 Provider 配置',
     EXECUTOR_CONNECTION_DEFAULT_MODEL_REQUIRED:'自定义连接必须填写一个实际模型，TaskBoard 才能在应用时完成真实 Provider 验证',
     EXECUTOR_CONNECTION_PROVIDER_VALIDATION_FAILED:'自定义 AI 连接没有通过真实模型调用验证，请检查 API 地址、API Key、模型及上游服务状态',
   },
-  help:'连接配置只作用于当前 Executor Extension；Secret 不会通过公开状态、页面回显或日志返回。Codex 当前账号会验证真实登录；自定义连接会用所填模型执行一次最小 Provider acceptance，通过后才视为已应用。',
+  help:'连接配置只作用于当前 Executor Extension；Secret 不会通过公开状态、页面回显或日志返回。Codex 当前账号会验证真实登录并拒绝被用户/项目配置覆盖的 openai provider；自定义连接会用所填模型执行一次最小 Provider acceptance，通过后才视为已应用。',
 });
 
 function text(value, max = 2048) {
@@ -148,8 +148,6 @@ function publicState(store, warning = null) {
     schemaVersion:STORE_SCHEMA_VERSION,
     activeProfileId:store.activeProfileId,
     profiles:[accountPublic(),...store.profiles.map(profile=>publicProfile(profile,store.activeProfileId))],
-    // Compatibility projection for existing simple clients. These fields describe
-    // only the active profile; new clients should use activeProfileId + profiles.
     mode:active.kind==='custom'?'custom':'account',
     baseUrl:active.kind==='custom'?active.baseUrl:'',
     defaultModel:active.kind==='custom'?active.defaultModel:'',
@@ -191,6 +189,28 @@ function providerIdFromConfig(result) {
   return value == null ? null : String(value);
 }
 
+function providerMapFromLayer(layer) {
+  const config=layer?.config;
+  if (!config || typeof config!=='object') return null;
+  const providers=config.model_providers ?? config.modelProviders;
+  return providers&&typeof providers==='object' ? providers : null;
+}
+
+function layerSourceType(layer) {
+  return String(layer?.name?.type ?? layer?.name ?? '').trim();
+}
+
+function hasExternalAccountProviderOverride(result) {
+  const layers=Array.isArray(result?.layers)?result.layers:[];
+  for (const layer of layers) {
+    const source=layerSourceType(layer);
+    if (source==='packagedDefaults' || source==='sessionFlags') continue;
+    const providers=providerMapFromLayer(layer);
+    if (providers && Object.prototype.hasOwnProperty.call(providers,ACCOUNT_PROVIDER_ID)) return true;
+  }
+  return false;
+}
+
 function drainableChildren(client) {
   const candidates=[client?.child,client?.appServerClient?.child,client?.execClient?.child];
   if (client?.execClient?.children instanceof Set) candidates.push(...client.execClient.children);
@@ -215,17 +235,11 @@ async function waitForChildExit(child) {
 
 async function closeAndDrainClient(client) {
   if (!client?.close) return;
-  // Capture every transport child before close(). During profile switching the
-  // launch-profile provider already points at the candidate profile, so a
-  // mode-sensitive client.child getter can otherwise hide the still-running
-  // transport from the previous profile.
   const children=drainableChildren(client);
   client.close();
   await Promise.all(children.map(waitForChildExit));
 }
 
-// Compatibility helper for the original one-account/one-custom API shape. It is
-// intentionally kept at the extension boundary; Task Core never consumes it.
 export function normalizeCodexConnectionSettings(value = {}, current = DEFAULT_STATE) {
   const mode=value.mode == null ? current.mode : text(value.mode,32);
   if (!['account','custom'].includes(mode)) throw new Error('EXECUTOR_CONNECTION_MODE_INVALID');
@@ -339,8 +353,6 @@ export class CodexConnectionSettings {
     const active=activePrivateProfile(this.value);
     if (active?.kind==='custom') {
       if (!text(active.defaultModel,200)) throw defaultModelRequired();
-      // Production CodexTransportClient owns this runtime acceptance. Small
-      // configuration-only test doubles may omit it; real built-in wiring does not.
       if (typeof this.client.verifyConnection!=='function') return null;
       try {
         return await this.client.verifyConnection({model:active.defaultModel,timeoutMs:60_000});
@@ -355,9 +367,9 @@ export class CodexConnectionSettings {
       if (account?.requiresOpenaiAuth!==true) throw accountProviderInvalid();
       if (!account?.account) throw accountAuthRequired();
       let config;
-      try { config=await this.client.request('config/read',{},5_000); }
+      try { config=await this.client.request('config/read',{includeLayers:true},5_000); }
       catch (error) { throw accountProviderInvalid(error); }
-      if (providerIdFromConfig(config)!==ACCOUNT_PROVIDER_ID) throw accountProviderInvalid();
+      if (providerIdFromConfig(config)!==ACCOUNT_PROVIDER_ID || hasExternalAccountProviderOverride(config)) throw accountProviderInvalid();
       return { account, providerId:ACCOUNT_PROVIDER_ID };
     } catch (error) {
       if (error?.message==='EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID') throw error;
@@ -497,4 +509,4 @@ export class CodexConnectionSettings {
   }
 }
 
-export { CUSTOM_PROVIDER_ID, CUSTOM_ENV_KEY, ACCOUNT_PROVIDER_ID, ACCOUNT_PROFILE_ID, LEGACY_CUSTOM_PROFILE_ID, STORE_SCHEMA_VERSION, CONNECTION_PRESENTATION, closeAndDrainClient, providerIdForProfile };
+export { CUSTOM_PROVIDER_ID, CUSTOM_ENV_KEY, ACCOUNT_PROVIDER_ID, ACCOUNT_PROFILE_ID, LEGACY_CUSTOM_PROFILE_ID, STORE_SCHEMA_VERSION, CONNECTION_PRESENTATION, closeAndDrainClient, providerIdForProfile, hasExternalAccountProviderOverride };
