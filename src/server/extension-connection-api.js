@@ -13,9 +13,10 @@ const CLIENT_ERRORS=new Set([
 
 function statusFor(message) {
   if (CLIENT_ERRORS.has(message)) return 400;
+  if (message==='EXECUTOR_CONNECTION_AUTH_REQUIRED') return 401;
   if (message==='EXECUTOR_CONNECTION_PROFILE_NOT_FOUND') return 404;
   if (message==='EXECUTOR_CONNECTION_BUSY'||message==='EXECUTOR_CONNECTION_ACTIVE_PROFILE_DELETE') return 409;
-  if (message==='EXECUTOR_CONNECTION_APPLY_FAILED') return 502;
+  if (message==='EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID'||message==='EXECUTOR_CONNECTION_APPLY_FAILED') return 502;
   return 500;
 }
 
