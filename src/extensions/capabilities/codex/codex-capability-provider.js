@@ -141,8 +141,9 @@ export class CodexCapabilityProvider extends CapabilityProviderPort {
     this.inFlight=this.performBaseDiscovery();
     try {
       const snapshot=await this.inFlight;
-      if (backgroundRefresh && snapshot?.execution?.connected) {
-        // Model catalog refresh is enhancement work, never the execution gate.
+      if (backgroundRefresh && snapshot?.execution?.ready) {
+        // Model catalog refresh is enhancement work and may run only after the
+        // connection/authentication gate itself is known ready.
         void this.refresh({ reason:'startup-background', manual:false }).catch(()=>{});
       }
       return snapshot;
@@ -324,7 +325,7 @@ export class CodexCapabilityProvider extends CapabilityProviderPort {
       this.client.recordDiagnostic?.('capability-refresh-start',{reason,source,manual:Boolean(manual),generation:this.client.connectionGeneration??null,hasCurrent:Boolean(previous)});
       try {
         const base=await this.initialize({backgroundRefresh:false});
-        if (!base?.execution?.connected) throw new Error(base?.execution?.error||'Codex is not connected');
+        if (!base?.execution?.ready) throw new Error(base?.execution?.error||'Codex connection is not ready');
         const unsupported=[];
         const [configResult,modelsResult]=await Promise.all([
           optionalRpc(this.client,'config/read',{},2_500,unsupported),
