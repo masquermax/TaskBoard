@@ -172,6 +172,11 @@ function accountProviderInvalid(cause = null) {
   return error;
 }
 
+function providerIdFromConfig(result) {
+  const value=result?.config?.model_provider ?? result?.config?.modelProvider ?? result?.model_provider ?? result?.modelProvider;
+  return value == null ? null : String(value);
+}
+
 function drainableChildren(client) {
   const candidates=[client?.child,client?.appServerClient?.child,client?.execClient?.child];
   if (client?.execClient?.children instanceof Set) candidates.push(...client.execClient.children);
@@ -322,7 +327,11 @@ export class CodexConnectionSettings {
       const account=await this.client.request('account/read',{refreshToken:true},15_000);
       if (account?.requiresOpenaiAuth!==true) throw accountProviderInvalid();
       if (!account?.account) throw accountAuthRequired();
-      return account;
+      let config;
+      try { config=await this.client.request('config/read',{},5_000); }
+      catch (error) { throw accountProviderInvalid(error); }
+      if (providerIdFromConfig(config)!==ACCOUNT_PROVIDER_ID) throw accountProviderInvalid();
+      return { account, providerId:ACCOUNT_PROVIDER_ID };
     } catch (error) {
       if (error?.message==='EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID') throw error;
       if (isAccountAuthFailure(error)) throw accountAuthRequired(error);
