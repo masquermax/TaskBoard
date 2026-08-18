@@ -17,8 +17,6 @@ const errorCopy={
   EXECUTOR_CONNECTION_PROFILE_DELETE_INVALID:'这个 AI 连接不能删除',
   EXECUTOR_CONNECTION_ACTION_INVALID:'AI 连接操作无效',
   EXECUTOR_CONNECTION_BUSY:'当前仍有 AI Turn 在执行，请等待任务收敛后再切换连接',
-  EXECUTOR_CONNECTION_AUTH_REQUIRED:'Codex 当前登录已失效或未登录，请先在 Codex 重新登录，再应用这个连接',
-  EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID:'Codex 当前账号没有落到内置 OpenAI provider，已拒绝使用可能继承的自定义 Provider',
   EXECUTOR_CONNECTION_APPLY_FAILED:'新 AI 连接未能启动，已自动恢复原配置',
   EXECUTOR_CONNECTION_UNAVAILABLE:'当前 Executor 不提供可配置的连接设置',
 };
@@ -37,7 +35,7 @@ function api(path,options={}){
 }
 
 function toast(message){const node=$('toast');if(!node)return;node.textContent=message;node.classList.add('show');setTimeout(()=>node.classList.remove('show'),2600);}
-function readable(error){return errorCopy[error?.message]||error?.message||'操作失败';}
+function readable(error){const code=error?.message;return presentationState?.errors?.[code]||errorCopy[code]||code||'操作失败';}
 function escapeHtml(value){return String(value??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 function safeKey(value){return String(value||'field').replace(/[^A-Za-z0-9_-]/g,'_');}
 function fieldId(field){return `connection-field-${safeKey(field?.key)}`;}
