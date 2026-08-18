@@ -166,6 +166,35 @@ test('revoked Codex account fails during Apply with 401 instead of waiting for a
   }finally{x.client.close();rmSync(dir,{recursive:true,force:true});}
 });
 
+test('failed custom -> revoked Codex account Apply rolls back both persisted profile selection and live transport',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'taskboard-profile-account-rollback-'));
+  const revoked=new Error('Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.');
+  const x=realTransportRig(dir,{accountError:revoked});
+  try{
+    const custom=await call(x.handler,'PUT',{
+      action:'saveProfile',
+      profile:{id:'company',name:'Company API',baseUrl:'https://company.example/v1',apiKey:'company-secret',defaultModel:'company-model'},
+      select:true,
+    });
+    assert.equal(custom.status,200);
+    assert.equal(x.client.connectedMode,'custom');
+
+    const failed=await call(x.handler,'PUT',{action:'selectProfile',profileId:'account'});
+    assert.equal(failed.status,401);
+    assert.equal(failed.body.error,'EXECUTOR_CONNECTION_AUTH_REQUIRED');
+
+    const state=x.settings.getPublic();
+    assert.equal(state.activeProfileId,'company','failed Apply must restore the previous persisted active profile');
+    assert.equal(state.mode,'custom');
+    assert.equal(x.client.connectedMode,'custom','rollback must restart the previously working custom transport');
+    assert.equal(x.settings.launchProfile().providerId,'taskboard_company');
+    assert.equal(x.settings.launchProfile().env.TASKBOARD_CODEX_API_KEY,'company-secret');
+    assert.equal(JSON.stringify(state).includes('company-secret'),false,'rollback public state must still not expose the custom secret');
+    assert.deepEqual(x.appServer.requests,[{method:'account/read',params:{refreshToken:true}}]);
+    assert.equal(await x.client.runTurn({}),'exec-result','the next Turn after failed Apply must keep using the restored custom transport');
+  }finally{x.client.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('Codex account profile rejects a no-auth provider instead of silently accepting inherited custom provider semantics',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-profile-account-provider-'));
   const x=realTransportRig(dir,{accountResponse:{requiresOpenaiAuth:false,account:null}});
