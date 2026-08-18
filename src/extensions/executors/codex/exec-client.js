@@ -1,0 +1,364 @@
+import { spawn, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import readline from 'node:readline';
+
+function childOptions(extra = {}) {
+  return {
+    ...extra,
+    env: extra.env ?? process.env,
+    windowsHide: true,
+    shell: process.platform === 'win32',
+  };
+}
+
+function text(value) {
+  return String(value == null ? '' : value).trim();
+}
+
+function profileOf(provider) {
+  try {
+    return typeof provider === 'function' ? (provider() || {}) : {};
+  } catch {
+    return {};
+  }
+}
+
+function tomlKeySegment(value) {
+  const key=String(value);
+  return /^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key);
+}
+
+function tomlValue(value) {
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(tomlValue).join(',')}]`;
+  if (value == null) return '""';
+  throw new Error('CODEX_EXEC_CONFIG_VALUE_UNSUPPORTED');
+}
+
+function flattenConfig(value, prefix = [], output = []) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    output.push([prefix.map(tomlKeySegment).join('.'), tomlValue(value)]);
+    return output;
+  }
+  for (const [key,item] of Object.entries(value)) {
+    if (item && typeof item === 'object' && !Array.isArray(item)) flattenConfig(item,[...prefix,key],output);
+    else output.push([[...prefix,key].map(tomlKeySegment).join('.'),tomlValue(item)]);
+  }
+  return output;
+}
+
+function preparedRuntimeConfig(runtimeConfig, permissionProfile, runtimeWorkspaceRoots, networkAccess) {
+  const config=runtimeConfig&&typeof runtimeConfig==='object'
+    ? JSON.parse(JSON.stringify(runtimeConfig))
+    : {};
+  config.default_permissions=permissionProfile;
+  config.permissions=config.permissions&&typeof config.permissions==='object'?config.permissions:{};
+  const profile=config.permissions[permissionProfile]&&typeof config.permissions[permissionProfile]==='object'
+    ? config.permissions[permissionProfile]
+    : {};
+  config.permissions[permissionProfile]=profile;
+  profile.workspace_roots={};
+  for (const root of runtimeWorkspaceRoots) profile.workspace_roots[String(root)]=true;
+  profile.network=profile.network&&typeof profile.network==='object'?profile.network:{};
+  profile.network.enabled=networkAccess===true;
+  if (networkAccess===true) profile.network.domains={...(profile.network.domains||{}),'*':'allow'};
+  else if (profile.network.domains) delete profile.network.domains;
+  return config;
+}
+
+function outputError(event, stderr, code) {
+  const message=
+    event?.error?.message ||
+    event?.turn?.error?.message ||
+    event?.message ||
+    text(stderr) ||
+    `codex exec exited with code ${code ?? 'unknown'}`;
+  const error=new Error(message);
+  const status=Number(event?.error?.status ?? event?.status ?? event?.turn?.error?.status);
+  if (Number.isInteger(status)) error.status=status;
+  const requestId=event?.error?.request_id ?? event?.error?.requestId ?? event?.request_id ?? event?.requestId;
+  if (requestId) error.requestId=String(requestId);
+  return error;
+}
+
+function terminateProcessTree(child) {
+  if (!child) return;
+  if (process.platform === 'win32' && child.pid) {
+    try {
+      spawnSync('taskkill',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});
+      return;
+    } catch { /* fall through */ }
+  }
+  try { child.kill?.('SIGTERM'); } catch { /* ignore best-effort termination */ }
+}
+
+export function buildCodexExecInvocation({
+  launchProfile,
+  cwd,
+  schemaPath,
+  outputPath,
+  permissionProfile,
+  runtimeWorkspaceRoots,
+  runtimeConfig,
+  networkAccess=false,
+  model=null,
+  reasoningEffort=null,
+  inputItems=[],
+} = {}) {
+  if (String(launchProfile?.mode||'')!=='custom') throw new Error('CODEX_EXEC_CUSTOM_PROFILE_REQUIRED');
+  const roots=[...new Set((Array.isArray(runtimeWorkspaceRoots)?runtimeWorkspaceRoots:[])
+    .map(value=>text(value)).filter(Boolean))];
+  if (!text(permissionProfile) || !roots.length) throw new Error('CODEX_EXECUTION_GRANT_REQUIRED');
+  const images=[];
+  for (const item of Array.isArray(inputItems)?inputItems:[]) {
+    if (item?.type!=='localImage' || !text(item.path)) throw new Error('CODEX_EXEC_INPUT_UNSUPPORTED');
+    images.push(String(item.path));
+  }
+
+  const args=[
+    '--ask-for-approval','never',
+    'exec',
+    '--ephemeral',
+    '--json',
+    '--color','never',
+    '--skip-git-repo-check',
+    '--ignore-user-config',
+    '-C',String(cwd),
+    '--output-schema',String(schemaPath),
+    '-o',String(outputPath),
+    ...(Array.isArray(launchProfile.args)?launchProfile.args.map(String):[]),
+  ];
+
+  const config=preparedRuntimeConfig(runtimeConfig,String(permissionProfile),roots,networkAccess===true);
+  for (const [key,value] of flattenConfig(config)) args.push('-c',`${key}=${value}`);
+  if (model) args.push('-m',String(model));
+  if (reasoningEffort) args.push('-c',`model_reasoning_effort=${JSON.stringify(String(reasoningEffort))}`);
+  for (const image of images) args.push('-i',image);
+  args.push('-');
+
+  return {
+    args,
+    env:{...(launchProfile.env&&typeof launchProfile.env==='object'?launchProfile.env:{})},
+  };
+}
+
+export class CodexExecClient {
+  constructor({
+    runtimeResolver,
+    launchProfileProvider=null,
+    diagnosticLogger=null,
+    spawnProcess=spawn,
+    terminateProcess=terminateProcessTree,
+    turnEventTimeoutMs=30*60*1000,
+    subagentExecutionWindowMs=null,
+  } = {}) {
+    this.runtimeResolver=runtimeResolver;
+    this.launchProfileProvider=launchProfileProvider;
+    this.diagnosticLogger=diagnosticLogger||(()=>{});
+    this.spawnProcess=spawnProcess;
+    this.terminateProcess=terminateProcess;
+    this.turnEventTimeoutMs=Math.max(1_000,Number(turnEventTimeoutMs)||30*60*1000);
+    this.subagentExecutionWindowMs=Math.max(1_000,Number(subagentExecutionWindowMs)||this.turnEventTimeoutMs);
+    this.children=new Set();
+    this.activeTurnCount=0;
+  }
+
+  get child() {
+    return [...this.children][0] || null;
+  }
+
+  recordDiagnostic(event,data={}) {
+    try { this.diagnosticLogger?.(event,data); } catch { /* diagnostics never affect execution */ }
+  }
+
+  close() {
+    for (const child of [...this.children]) this.terminateProcess(child);
+  }
+
+  async runTurn({
+    cwd,
+    prompt,
+    inputItems=[],
+    outputSchema,
+    model=null,
+    reasoningEffort=null,
+    networkAccess=false,
+    permissionProfile=null,
+    runtimeWorkspaceRoots=[],
+    runtimeConfig=null,
+    onProgress=null,
+    onExecutionStarted=null,
+    signal=null,
+    diagnosticContext=null,
+  } = {}) {
+    if (signal?.aborted) {
+      const error=new Error('Execution interrupted');
+      error.interrupted=true;
+      throw error;
+    }
+    if (!this.runtimeResolver?.requireReady) {
+      const error=new Error('CODEX_RUNTIME_UNAVAILABLE: runtime resolver is missing');
+      error.runtimeUnavailable=true;
+      throw error;
+    }
+
+    const runtime=await this.runtimeResolver.requireReady();
+    const launchProfile=profileOf(this.launchProfileProvider);
+    if (String(launchProfile.mode||'')!=='custom') throw new Error('CODEX_EXEC_CUSTOM_PROFILE_REQUIRED');
+    const id=randomUUID();
+    const schemaPath=resolve(cwd,`.taskboard-exec-${id}.schema.json`);
+    const outputPath=resolve(cwd,`.taskboard-exec-${id}.result.json`);
+    writeFileSync(schemaPath,`${JSON.stringify(outputSchema)}\n`,'utf8');
+
+    const invocation=buildCodexExecInvocation({
+      launchProfile,cwd,schemaPath,outputPath,permissionProfile,runtimeWorkspaceRoots,runtimeConfig,
+      networkAccess,model,reasoningEffort,inputItems,
+    });
+    const routeMeta={
+      taskId:diagnosticContext?.taskId||null,
+      workUnitId:diagnosticContext?.workUnitId||null,
+      role:diagnosticContext?.role||null,
+      routeReason:diagnosticContext?.routeReason||null,
+      requestedModel:model||null,
+      configuredDefaultModel:diagnosticContext?.configuredDefaultModel||null,
+      reasoningEffort:reasoningEffort||null,
+      inputBytes:Buffer.byteLength(String(prompt||''),'utf8'),
+    };
+    this.recordDiagnostic('turn-route',{...routeMeta,transport:'codex-exec',permissionProfile,runtimeWorkspaceRootCount:runtimeWorkspaceRoots.length});
+    this.recordDiagnostic('exec-spawn',{
+      command:runtime.command,
+      version:runtime.version||null,
+      providerId:launchProfile.providerId||null,
+      profileId:launchProfile.profileId||null,
+      requestedModel:model||null,
+      secretEnvKeys:Object.keys(invocation.env),
+    });
+
+    let child=null;
+    let stderr='';
+    let failureEvent=null;
+    let finalAgentMessage='';
+    let threadId=null;
+    let turnId=null;
+    let executionStarted=false;
+    let interrupted=false;
+    let timedOut=false;
+    const role=diagnosticContext?.role||'root';
+    const timeoutMs=role==='subagent'
+      ? Math.max(1_000,Math.floor((this.subagentExecutionWindowMs*2)/3))
+      : this.turnEventTimeoutMs;
+
+    try {
+      child=this.spawnProcess(runtime.command,invocation.args,childOptions({
+        stdio:['pipe','pipe','pipe'],
+        env:{...process.env,...invocation.env},
+      }));
+      this.children.add(child);
+
+      const startExecution=(event={})=>{
+        if (executionStarted) return;
+        executionStarted=true;
+        this.activeTurnCount+=1;
+        threadId=event.thread_id||event.threadId||threadId;
+        turnId=event.turn_id||event.turnId||turnId;
+        this.recordDiagnostic('turn-started',{...routeMeta,transport:'codex-exec',threadId,turnId,resolvedModel:null,activeTurnCount:this.activeTurnCount});
+        onExecutionStarted?.({threadId,turnId,requestedModel:model||null,resolvedModel:null,reasoningEffort:reasoningEffort||null});
+        onProgress?.({summary:'Codex 正在执行',detail:role==='subagent'?'模型正在执行当前 Work Unit。':role==='validator'?'模型正在认证当前证明关系。':'模型正在进行 Task 级判断。'});
+      };
+
+      const rl=readline.createInterface({input:child.stdout});
+      rl.on('line',line=>{
+        let event;
+        try { event=JSON.parse(line); } catch { return; }
+        const type=String(event?.type||'');
+        if (type==='thread.started') {
+          threadId=event.thread_id||event.threadId||threadId;
+          onProgress?.({summary:'Codex 已连接',detail:'正在建立本轮执行上下文。'});
+        } else if (type==='turn.started') {
+          startExecution(event);
+        } else if (type==='item.started' || type==='item.completed') {
+          const item=event?.item||{};
+          const itemType=String(item.type||'');
+          if (type==='item.completed' && (itemType==='agent_message'||itemType==='agentMessage') && item.text) finalAgentMessage=String(item.text);
+          if (type==='item.started' && /command/i.test(itemType)) onProgress?.({summary:'正在核对证据',detail:'Codex 正在执行当前授权范围内的命令。'});
+          if (type==='item.started' && /file.change|fileChange/i.test(itemType)) onProgress?.({summary:'正在应用变更',detail:'Codex 正在修改当前 Work Unit 明确授权的文件范围。'});
+        } else if (type==='turn.failed' || type==='error') {
+          failureEvent=event;
+        } else if (type==='turn.completed') {
+          if (!executionStarted) startExecution(event);
+        }
+      });
+      child.stderr?.on('data',chunk=>{
+        stderr=(stderr+chunk.toString()).slice(-20_000);
+      });
+
+      const abort=()=>{
+        if (interrupted) return;
+        interrupted=true;
+        this.terminateProcess(child);
+      };
+      signal?.addEventListener?.('abort',abort,{once:true});
+      if (signal?.aborted) abort();
+
+      child.stdin?.write(String(prompt||''));
+      child.stdin?.end();
+
+      const exitCode=await new Promise((resolveExit,rejectExit)=>{
+        let settled=false;
+        const finish=(fn,value)=>{
+          if (settled) return;
+          settled=true;
+          fn(value);
+        };
+        child.once?.('error',error=>finish(rejectExit,error));
+        child.once?.('exit',code=>finish(resolveExit,code));
+        const timer=setTimeout(()=>{
+          if (settled) return;
+          timedOut=true;
+          this.terminateProcess(child);
+        },timeoutMs);
+        timer?.unref?.();
+        child.once?.('exit',()=>clearTimeout(timer));
+        child.once?.('error',()=>clearTimeout(timer));
+      });
+
+      if (interrupted || signal?.aborted) {
+        const error=new Error('Execution interrupted');
+        error.interrupted=true;
+        throw error;
+      }
+      if (timedOut) {
+        const error=new Error(role==='subagent'
+          ? 'WORK_UNIT_EXECUTION_BOUNDARY: Work Unit reached its technical execution lease.'
+          : 'Timed out waiting for Codex exec completion');
+        if (role==='subagent') {
+          error.nonRetryable=true;
+          error.executionBoundary=true;
+        }
+        throw error;
+      }
+      if (failureEvent || exitCode!==0) throw outputError(failureEvent,stderr,exitCode);
+      if (!executionStarted) startExecution({});
+
+      let result=existsSync(outputPath)?readFileSync(outputPath,'utf8').trim():'';
+      if (!result && finalAgentMessage) result=finalAgentMessage.trim();
+      if (!result) throw new Error('Codex exec completed without a final structured result');
+      this.recordDiagnostic('turn-completed',{...routeMeta,transport:'codex-exec',threadId,turnId,activeTurnCount:this.activeTurnCount});
+      onProgress?.({summary:'Codex 本轮完成',detail:role==='subagent'?'Work Unit 结果已交回 Root。':role==='validator'?'Validator 本轮认证已完成。':'Root 本轮判断已完成。'});
+      return result;
+    } catch (error) {
+      this.recordDiagnostic('turn-failed',{...routeMeta,transport:'codex-exec',threadId,turnId,activeTurnCount:this.activeTurnCount,error:error?.message||String(error)});
+      throw error;
+    } finally {
+      if (child) this.children.delete(child);
+      if (executionStarted) this.activeTurnCount=Math.max(0,this.activeTurnCount-1);
+      this.recordDiagnostic('turn-released',{...routeMeta,transport:'codex-exec',threadId,turnId,activeTurnCount:this.activeTurnCount});
+      try { rmSync(schemaPath,{force:true}); } catch { /* ignore */ }
+      try { rmSync(outputPath,{force:true}); } catch { /* ignore */ }
+    }
+  }
+}
