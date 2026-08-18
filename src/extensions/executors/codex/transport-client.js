@@ -1,3 +1,5 @@
+import { verifyCustomProviderAcceptance } from './provider-acceptance.js';
+
 function profileOf(provider) {
   try { return typeof provider==='function' ? (provider()||{}) : {}; }
   catch { return {}; }
@@ -94,6 +96,21 @@ export class CodexTransportClient {
     this.appServerClient?.close?.();
     this.initialized=false;
     this.connectedMode=null;
+  }
+
+  async verifyConnection({model=null,timeoutMs=60_000}={}) {
+    if (!this.isCustom()) return {ok:true,mode:'account'};
+    await this.connect();
+    const selectedModel=model||configValue(this.profile()?.args,'model');
+    const result=await verifyCustomProviderAcceptance({execClient:this.execClient,model:selectedModel,timeoutMs});
+    this.recordDiagnostic('exec-provider-acceptance',{
+      generation:this.connectionGeneration,
+      profileId:this.profile()?.profileId||null,
+      providerId:this.profile()?.providerId||null,
+      model:selectedModel||null,
+      ok:true,
+    });
+    return {...result,mode:'custom'};
   }
 
   async request(method,params={},timeoutMs=30_000) {
