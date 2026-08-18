@@ -8,6 +8,11 @@ import { createExtensionConnectionHandler } from '../src/server/extension-connec
 import { CodexConnectionSettings } from '../src/extensions/config/codex/codex-connection-settings.js';
 import { CodexTransportClient } from '../src/extensions/executors/codex/transport-client.js';
 
+const ACCOUNT_VALIDATION_REQUESTS=Object.freeze([
+  {method:'account/read',params:{refreshToken:true}},
+  {method:'config/read',params:{}},
+]);
+
 function request(method,body=null){
   const payload=body==null?'':JSON.stringify(body);
   const req=Readable.from(payload?[Buffer.from(payload)]:[]);
@@ -24,10 +29,12 @@ function runtime(){
 async function call(handler,method,body=null){const res=response();await handler(request(method,body),res);return{status:res.out.status,body:JSON.parse(res.out.body||'{}')};}
 
 class ProfileAwareAppServer {
-  constructor({accountResponse=null,accountError=null}={}){
+  constructor({accountResponse=null,accountError=null,configResponse=null,configError=null}={}){
     this.connects=0;this.runs=0;this.probes=0;this.initialized=false;this.activeTurnCount=0;this.child=null;this.version='codex-test';this.command='codex';this.runtimeResolver={};this.listeners=[];this.requests=[];
     this.accountResponse=accountResponse||{requiresOpenaiAuth:true,account:{type:'chatgpt',planType:'plus'}};
     this.accountError=accountError;
+    this.configResponse=configResponse||{config:{model_provider:'openai'}};
+    this.configError=configError;
   }
   onConnectionGeneration(listener){this.listeners.push(listener);return()=>{};}
   async probeRuntime(){this.probes+=1;return{available:true,version:'codex-test'};}
@@ -37,6 +44,10 @@ class ProfileAwareAppServer {
     if(method==='account/read'){
       if(this.accountError)throw this.accountError;
       return this.accountResponse;
+    }
+    if(method==='config/read'){
+      if(this.configError)throw this.configError;
+      return this.configResponse;
     }
     throw new Error(`unexpected request ${method}`);
   }
@@ -126,7 +137,7 @@ test('UI-equivalent custom -> Codex account switch changes the real transport, f
     assert.equal(JSON.stringify(account.body).includes('company-secret'),false);
     assert.equal(x.client.connectedMode,'account','runtime restart must bind the account transport, not retain custom exec');
     assert.equal(x.appServer.connects,1,'account selection must initialize the account app-server transport');
-    assert.deepEqual(x.appServer.requests,[{method:'account/read',params:{refreshToken:true}}],'account apply must validate the real current Codex login');
+    assert.deepEqual(x.appServer.requests,ACCOUNT_VALIDATION_REQUESTS,'account apply must validate both current login and the runtime-resolved provider');
 
     const launch=x.settings.launchProfile();
     assert.equal(launch.mode,'account');
@@ -141,7 +152,7 @@ test('UI-equivalent custom -> Codex account switch changes the real transport, f
   }finally{x.client.close();rmSync(dir,{recursive:true,force:true});}
 });
 
-test('re-applying unchanged Codex account is a real auth check rather than a no-op',async()=>{
+test('re-applying unchanged Codex account is a real auth and provider check rather than a no-op',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-profile-account-revalidate-'));
   const x=realTransportRig(dir);
   try{
@@ -149,7 +160,7 @@ test('re-applying unchanged Codex account is a real auth check rather than a no-
     assert.equal(result.status,200);
     assert.equal(result.body.connection.activeProfileId,'account');
     assert.equal(x.appServer.connects,1);
-    assert.deepEqual(x.appServer.requests,[{method:'account/read',params:{refreshToken:true}}]);
+    assert.deepEqual(x.appServer.requests,ACCOUNT_VALIDATION_REQUESTS);
   }finally{x.client.close();rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -202,5 +213,17 @@ test('Codex account profile rejects a no-auth provider instead of silently accep
     const result=await call(x.handler,'PUT',{action:'selectProfile',profileId:'account'});
     assert.equal(result.status,502);
     assert.equal(result.body.error,'EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID');
+    assert.deepEqual(x.appServer.requests,[{method:'account/read',params:{refreshToken:true}}]);
+  }finally{x.client.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('Codex account profile rejects an authenticated inherited custom provider when runtime config/read does not resolve to builtin openai',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'taskboard-profile-account-provider-runtime-'));
+  const x=realTransportRig(dir,{configResponse:{config:{model_provider:'OpenAI'}}});
+  try{
+    const result=await call(x.handler,'PUT',{action:'selectProfile',profileId:'account'});
+    assert.equal(result.status,502);
+    assert.equal(result.body.error,'EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID');
+    assert.deepEqual(x.appServer.requests,ACCOUNT_VALIDATION_REQUESTS);
   }finally{x.client.close();rmSync(dir,{recursive:true,force:true});}
 });
