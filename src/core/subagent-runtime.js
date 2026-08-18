@@ -13,6 +13,19 @@ function normalizeDiscoveries(values=[]){
   })).filter(item=>item.summary&&item.whyRelevant&&item.suggestedNextQuestion);
 }
 
+function normalizeEffectActuationClosure(value,delegation,evidence=[]){
+  const expectedAttemptId=text(delegation?.recoveryEffectAttemptId);
+  if(!expectedAttemptId||workMayMutate(delegation)||!value||typeof value!=='object')return null;
+  if(text(value.effectAttemptId)!==expectedAttemptId||value.terminal!==true||value.canMutate!==false)return null;
+  const directEvidenceIds=new Set((Array.isArray(evidence)?evidence:[])
+    .filter(item=>item?.strength==='direct')
+    .map(item=>text(item?.id))
+    .filter(Boolean));
+  const evidenceIds=strings(value.evidenceIds);
+  if(!evidenceIds.length||evidenceIds.some(id=>!directEvidenceIds.has(id)))return null;
+  return {effectAttemptId:expectedAttemptId,terminal:true,canMutate:false,evidenceIds};
+}
+
 function boundedNonConvergence(delegation){
   return {
     delegationId:text(delegation?.id),
@@ -90,10 +103,11 @@ export class SubagentRuntime {
       statement:text(item?.statement),
       evidenceIds:strings(item?.evidenceIds).filter(id=>evidenceIds.has(id)),
     })).filter(item=>item.id&&item.statement);
+    const effectActuationClosure=normalizeEffectActuationClosure(raw?.effectActuationClosure,delegation,evidence);
 
     // Runtime allow-list: a custom Executor cannot smuggle Task-level claims,
-    // gaps, recommendations, Gateway controls, or a different Work Unit identity
-    // through the Subagent result surface.
+    // gaps, recommendations, Gateway controls, a different Work Unit identity,
+    // or an unbound/indirect recovery-closure assertion through the Subagent result surface.
     return {
       delegationId:text(delegation?.id),
       result:text(raw?.result),
@@ -102,6 +116,7 @@ export class SubagentRuntime {
       discoveries:normalizeDiscoveries(raw?.discoveries),
       blocker:text(raw?.blocker)||null,
       uncertainty:text(raw?.uncertainty)||null,
+      ...(effectActuationClosure?{effectActuationClosure}:{}),
     };
   }
 }
