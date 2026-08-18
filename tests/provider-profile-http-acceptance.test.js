@@ -10,7 +10,7 @@ import { CodexTransportClient } from '../src/extensions/executors/codex/transpor
 
 const ACCOUNT_VALIDATION_REQUESTS=Object.freeze([
   {method:'account/read',params:{refreshToken:true}},
-  {method:'config/read',params:{}},
+  {method:'config/read',params:{includeLayers:true}},
 ]);
 
 function request(method,body=null){
@@ -33,7 +33,7 @@ class ProfileAwareAppServer {
     this.connects=0;this.runs=0;this.probes=0;this.initialized=false;this.activeTurnCount=0;this.child=null;this.version='codex-test';this.command='codex';this.runtimeResolver={};this.listeners=[];this.requests=[];
     this.accountResponse=accountResponse||{requiresOpenaiAuth:true,account:{type:'chatgpt',planType:'plus'}};
     this.accountError=accountError;
-    this.configResponse=configResponse||{config:{model_provider:'openai'}};
+    this.configResponse=configResponse||{config:{model_provider:'openai'},layers:[]};
     this.configError=configError;
   }
   onConnectionGeneration(listener){this.listeners.push(listener);return()=>{};}
@@ -195,8 +195,6 @@ test('UI-equivalent custom -> Codex account switch changes the real transport, f
     assert.equal(x.exec.runs,2);
     assert.equal(x.appServer.runs,0);
 
-    // This is the exact payload emitted by the settings UI when the built-in
-    // non-editable "Codex 当前账号" option is selected and 应用 AI 连接 is clicked.
     const account=await call(x.handler,'PUT',{action:'selectProfile',profileId:'account'});
     assert.equal(account.status,200);
     assert.equal(account.body.connection.activeProfileId,'account');
@@ -204,12 +202,12 @@ test('UI-equivalent custom -> Codex account switch changes the real transport, f
     assert.equal(JSON.stringify(account.body).includes('company-secret'),false);
     assert.equal(x.client.connectedMode,'account','runtime restart must bind the account transport, not retain custom exec');
     assert.equal(x.appServer.connects,1,'account selection must initialize the account app-server transport');
-    assert.deepEqual(x.appServer.requests,ACCOUNT_VALIDATION_REQUESTS,'account apply must validate both current login and the runtime-resolved provider');
+    assert.deepEqual(x.appServer.requests,ACCOUNT_VALIDATION_REQUESTS,'account apply must validate current login, runtime provider and config provenance');
 
     const launch=x.settings.launchProfile();
     assert.equal(launch.mode,'account');
     assert.equal(launch.providerId,'openai');
-    assert.deepEqual(launch.args,['-c','model_provider="openai"'],'account mode must override a user-level custom model_provider');
+    assert.deepEqual(launch.args,['-c','model_provider="openai"'],'account mode must override a user-level custom model_provider selection');
     assert.deepEqual(launch.env,{},'inactive custom API keys must not be projected into the account child process');
 
     const execRunsBefore=x.exec.runs;
@@ -286,7 +284,25 @@ test('Codex account profile rejects a no-auth provider instead of silently accep
 
 test('Codex account profile rejects an authenticated inherited custom provider when runtime config/read does not resolve to builtin openai',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-profile-account-provider-runtime-'));
-  const x=realTransportRig(dir,{configResponse:{config:{model_provider:'OpenAI'}}});
+  const x=realTransportRig(dir,{configResponse:{config:{model_provider:'OpenAI'},layers:[]}});
+  try{
+    const result=await call(x.handler,'PUT',{action:'selectProfile',profileId:'account'});
+    assert.equal(result.status,502);
+    assert.equal(result.body.error,'EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID');
+    assert.deepEqual(x.appServer.requests,ACCOUNT_VALIDATION_REQUESTS);
+  }finally{x.client.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('Codex account profile rejects a user-layer redefinition of model_providers.openai even when model_provider resolves to openai',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'taskboard-profile-account-provider-layer-'));
+  const x=realTransportRig(dir,{configResponse:{
+    config:{model_provider:'openai'},
+    layers:[
+      {name:{type:'packagedDefaults'},config:{}},
+      {name:{type:'user',file:'/home/test/.codex/config.toml'},config:{model_providers:{openai:{base_url:'https://custom.example/v1',requires_openai_auth:false}}}},
+      {name:{type:'sessionFlags'},config:{model_provider:'openai'}},
+    ],
+  }});
   try{
     const result=await call(x.handler,'PUT',{action:'selectProfile',profileId:'account'});
     assert.equal(result.status,502);
