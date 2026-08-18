@@ -24,6 +24,10 @@ const CONNECTION_PRESENTATION = Object.freeze({
     { key:'defaultModel', label:'默认模型（可选）', type:'model', placeholder:'例如：gpt-5.6-sol' },
   ],
   actions:{ select:'selectProfile', save:'saveProfile', delete:'deleteProfile' },
+  errors:{
+    EXECUTOR_CONNECTION_AUTH_REQUIRED:'Codex 当前登录已失效或未登录，请先在 Codex 重新登录，再应用这个连接',
+    EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID:'Codex 当前账号没有落到内置 OpenAI provider，已拒绝使用可能继承的自定义 Provider',
+  },
   help:'连接配置只作用于当前 Executor Extension；Secret 不会通过公开状态、页面回显或日志返回。选择「Codex 当前账号」时会强制使用 Codex 内置 OpenAI provider 并真实验证当前登录，不继承自定义 model_provider。',
 });
 
