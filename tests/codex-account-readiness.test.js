@@ -24,12 +24,14 @@ function openAiConfig(method){
 test('account capability discovery force-refreshes Codex auth and exposes a revoked login as not ready before any Turn',async()=>{
   const client=new CapabilityClient({handler(method){
     if(method==='account/read')throw new Error(REVOKED);
+    if(method==='model/list')throw new Error('model/list must not run when account auth is invalid');
     return openAiConfig(method);
   }});
   const capabilityProvider=new CodexCapabilityProvider({client});
-  const capability=await capabilityProvider.initialize({backgroundRefresh:false});
+  const capability=await capabilityProvider.initialize({backgroundRefresh:true});
   const authRead=client.calls.find(call=>call.method==='account/read');
   assert.deepEqual(authRead?.params,{refreshToken:true},'account startup discovery must validate the real refresh token, not only read cached account metadata');
+  assert.equal(client.calls.some(call=>call.method==='model/list'),false,'invalid account auth must stop background model catalog refresh before it creates a second failure path');
   assert.equal(capability.execution.connected,true);
   assert.equal(capability.execution.ready,false);
   assert.equal(capability.provider.requiresOpenaiAuth,true);
