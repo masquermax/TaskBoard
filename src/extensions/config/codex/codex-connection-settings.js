@@ -21,14 +21,16 @@ const CONNECTION_PRESENTATION = Object.freeze({
     { key:'name', label:'连接名称', type:'text', placeholder:'例如：公司 API', required:true },
     { key:'baseUrl', label:'API 地址', type:'url', placeholder:'https://api.example.com/v1', required:true },
     { key:'apiKey', label:'API Key', type:'secret', placeholder:'留空表示保留已保存的 Key', configuredKey:'apiKeyConfigured' },
-    { key:'defaultModel', label:'默认模型（可选）', type:'model', placeholder:'例如：gpt-5.6-sol' },
+    { key:'defaultModel', label:'默认模型', type:'model', placeholder:'例如：gpt-5.6-sol', required:true },
   ],
   actions:{ select:'selectProfile', save:'saveProfile', delete:'deleteProfile' },
   errors:{
     EXECUTOR_CONNECTION_AUTH_REQUIRED:'Codex 当前登录已失效或未登录，请先在 Codex 重新登录，再应用这个连接',
     EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID:'Codex 当前账号没有落到内置 OpenAI provider，已拒绝使用可能继承的自定义 Provider',
+    EXECUTOR_CONNECTION_DEFAULT_MODEL_REQUIRED:'自定义连接必须填写一个实际模型，TaskBoard 才能在应用时完成真实 Provider 验证',
+    EXECUTOR_CONNECTION_PROVIDER_VALIDATION_FAILED:'自定义 AI 连接没有通过真实模型调用验证，请检查 API 地址、API Key、模型及上游服务状态',
   },
-  help:'连接配置只作用于当前 Executor Extension；Secret 不会通过公开状态、页面回显或日志返回。选择「Codex 当前账号」时会强制使用 Codex 内置 OpenAI provider 并真实验证当前登录，不继承自定义 model_provider。',
+  help:'连接配置只作用于当前 Executor Extension；Secret 不会通过公开状态、页面回显或日志返回。Codex 当前账号会验证真实登录；自定义连接会用所填模型执行一次最小 Provider acceptance，通过后才视为已应用。',
 });
 
 function text(value, max = 2048) {
@@ -168,6 +170,18 @@ function accountAuthRequired(cause = null) {
 
 function accountProviderInvalid(cause = null) {
   const error=new Error('EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID');
+  if (cause) error.cause=cause;
+  return error;
+}
+
+function defaultModelRequired(cause = null) {
+  const error=new Error('EXECUTOR_CONNECTION_DEFAULT_MODEL_REQUIRED');
+  if (cause) error.cause=cause;
+  return error;
+}
+
+function providerValidationFailed(cause = null) {
+  const error=new Error('EXECUTOR_CONNECTION_PROVIDER_VALIDATION_FAILED');
   if (cause) error.cause=cause;
   return error;
 }
@@ -322,7 +336,20 @@ export class CodexConnectionSettings {
   async verifyActiveConnection({ connect=true } = {}) {
     if (!this.client) return null;
     if (connect) await this.client.connect();
-    if (this.launchProfile().mode!=='account' || !this.client.request) return null;
+    const active=activePrivateProfile(this.value);
+    if (active?.kind==='custom') {
+      if (!text(active.defaultModel,200)) throw defaultModelRequired();
+      // Production CodexTransportClient owns this runtime acceptance. Small
+      // configuration-only test doubles may omit it; real built-in wiring does not.
+      if (typeof this.client.verifyConnection!=='function') return null;
+      try {
+        return await this.client.verifyConnection({model:active.defaultModel,timeoutMs:60_000});
+      } catch (error) {
+        if (error?.message==='CODEX_PROVIDER_ACCEPTANCE_MODEL_REQUIRED') throw defaultModelRequired(error);
+        throw providerValidationFailed(error);
+      }
+    }
+    if (!this.client.request) return null;
     try {
       const account=await this.client.request('account/read',{refreshToken:true},15_000);
       if (account?.requiresOpenaiAuth!==true) throw accountProviderInvalid();
@@ -364,14 +391,14 @@ export class CodexConnectionSettings {
       const candidate={schemaVersion:STORE_SCHEMA_VERSION,activeProfileId,profiles};
       const afterActive=activePrivateProfile(candidate);
       const runtimeImpact=activeProfileId!==this.value.activeProfileId || (profile.id===this.value.activeProfileId && JSON.stringify(beforeActive)!==JSON.stringify(afterActive));
-      return {candidate,runtimeImpact,revalidate:false,reason:'provider-profile-changed'};
+      return {candidate,runtimeImpact,revalidate:next.select===true,reason:'provider-profile-changed'};
     }
     if (next.action==='selectProfile') {
       const profileId=text(next.profileId,64);
       if (profileId!==ACCOUNT_PROFILE_ID && !this.value.profiles.some(profile=>profile.id===profileId)) throw new Error('EXECUTOR_CONNECTION_PROFILE_NOT_FOUND');
       const candidate={...clone(this.value),activeProfileId:profileId};
       const unchanged=profileId===this.value.activeProfileId;
-      return {candidate,runtimeImpact:!unchanged,revalidate:unchanged&&profileId===ACCOUNT_PROFILE_ID,reason:'provider-profile-changed'};
+      return {candidate,runtimeImpact:!unchanged,revalidate:unchanged,reason:'provider-profile-changed'};
     }
     if (next.action==='deleteProfile') {
       const profileId=text(next.profileId,64);
@@ -411,7 +438,7 @@ export class CodexConnectionSettings {
     const activeProfileId=legacy.mode==='custom' ? targetProfile.id : ACCOUNT_PROFILE_ID;
     const candidate={schemaVersion:STORE_SCHEMA_VERSION,activeProfileId,profiles};
     const runtimeImpact=JSON.stringify(activePrivateProfile(candidate))!==JSON.stringify(activePrivateProfile(this.value));
-    return {candidate,runtimeImpact,revalidate:false,reason:'provider-profile-changed'};
+    return {candidate,runtimeImpact,revalidate:true,reason:'provider-profile-changed'};
   }
 
   async update(next = {}) {
@@ -458,6 +485,8 @@ export class CodexConnectionSettings {
         let wrapped;
         if (isAccountAuthFailure(error)) wrapped=accountAuthRequired(error);
         else if (error?.message==='EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID') wrapped=accountProviderInvalid(error);
+        else if (error?.message==='EXECUTOR_CONNECTION_DEFAULT_MODEL_REQUIRED') wrapped=defaultModelRequired(error);
+        else if (error?.message==='EXECUTOR_CONNECTION_PROVIDER_VALIDATION_FAILED') wrapped=providerValidationFailed(error.cause||error);
         else { wrapped=new Error('EXECUTOR_CONNECTION_APPLY_FAILED');wrapped.cause=error; }
         wrapped.rollbackError=rollbackError;
         throw wrapped;
