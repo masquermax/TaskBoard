@@ -7,7 +7,16 @@ import { CodexConnectionSettings, providerIdForProfile } from '../src/extensions
 
 function runtime(){
   let connects=0,closes=0,invalidations=[];
-  const client={activeTurnCount:0,close(){closes++;},async connect(){connects++;}};
+  const client={
+    activeTurnCount:0,
+    close(){closes++;},
+    async connect(){connects++;},
+    async request(method){
+      if(method==='account/read')return{requiresOpenaiAuth:true,account:{type:'chatgpt'}};
+      if(method==='config/read')return{config:{model_provider:'openai'}};
+      throw new Error(`unexpected request ${method}`);
+    },
+  };
   const capabilityProvider={invalidate(reason){invalidations.push(reason);},async initialize(){return{execution:{connected:true}};}};
   return{client,capabilityProvider,counts:()=>({connects,closes,invalidations:[...invalidations]})};
 }
