@@ -14,7 +14,9 @@
     "start": "node src/server/index.js",
     "start:mock": "node src/server/mock.js",
     "test": "node --test",
+    "test:connection-acceptance": "node --test tests/provider-profile-http-acceptance.test.js tests/provider-profile-ui-contract.test.js tests/codex-account-readiness.test.js tests/codex-connection-drain.test.js tests/codex-connection-gate.test.js tests/codex-connection-settings.test.js tests/codex-exec-client.test.js tests/codex-transport-client.test.js tests/codex-runtime-failure.test.js tests/retry-policy.test.js tests/auth-failure-scheduler.test.js",
     "check": "node scripts/check-syntax.mjs",
+    "verify:connection": "npm run check && npm run test:connection-acceptance",
     "verify": "npm run check && npm test"
   },
   "engines": {
