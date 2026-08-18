@@ -8,7 +8,16 @@ import { CodexConnectionSettings, ACCOUNT_PROVIDER_ID, CUSTOM_ENV_KEY, CUSTOM_PR
 
 function runtime({failFirstConnect=false}={}){
   let connects=0,closes=0,invalidations=0;
-  const client={activeTurnCount:0,close(){closes++;},async connect(){connects++;if(failFirstConnect&&connects===1)throw new Error('bad launch');}};
+  const client={
+    activeTurnCount:0,
+    close(){closes++;},
+    async connect(){connects++;if(failFirstConnect&&connects===1)throw new Error('bad launch');},
+    async request(method){
+      if(method==='account/read')return{requiresOpenaiAuth:true,account:{type:'chatgpt'}};
+      if(method==='config/read')return{config:{model_provider:'openai'}};
+      throw new Error(`unexpected request ${method}`);
+    },
+  };
   const capabilityProvider={invalidate(){invalidations++;},async initialize(){return{execution:{connected:true}};}};
   return{client,capabilityProvider,counts:()=>({connects,closes,invalidations})};
 }
