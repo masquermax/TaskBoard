@@ -14,7 +14,7 @@ function runtime({failFirstConnect=false}={}){
     async connect(){connects++;if(failFirstConnect&&connects===1)throw new Error('bad launch');},
     async request(method){
       if(method==='account/read')return{requiresOpenaiAuth:true,account:{type:'chatgpt'}};
-      if(method==='config/read')return{config:{model_provider:'openai'}};
+      if(method==='config/read')return{config:{model_provider:'openai'},layers:[]};
       throw new Error(`unexpected request ${method}`);
     },
   };
@@ -59,7 +59,7 @@ test('custom API settings keep the key out of CLI args/public API and keep Codex
 
 test('blank API key preserves an existing secret and explicit clear is supported in account mode',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-connection-'));const file=join(dir,'codex.json');const rt=runtime();
-  try{const settings=new CodexConnectionSettings({file}).bindRuntime(rt);await settings.update({mode:'custom',baseUrl:'https://gateway.example/v1',apiKey:'first'});await settings.update({mode:'custom',baseUrl:'https://gateway.example/v1',apiKey:'',defaultModel:'m2'});assert.equal(settings.launchProfile().env[CUSTOM_ENV_KEY],'first');const account=await settings.update({mode:'account',clearApiKey:true});assertAccountState(account);const disk=JSON.parse(readFileSync(file,'utf8'));assert.equal(disk.activeProfileId,'account');assert.equal(disk.profiles.some(profile=>profile.id==='custom-default'),false,'explicit legacy clear removes the stored singleton secret/profile');}
+  try{const settings=new CodexConnectionSettings({file}).bindRuntime(rt);await settings.update({mode:'custom',baseUrl:'https://gateway.example/v1',apiKey:'first',defaultModel:'m1'});await settings.update({mode:'custom',baseUrl:'https://gateway.example/v1',apiKey:'',defaultModel:'m2'});assert.equal(settings.launchProfile().env[CUSTOM_ENV_KEY],'first');const account=await settings.update({mode:'account',clearApiKey:true});assertAccountState(account);const disk=JSON.parse(readFileSync(file,'utf8'));assert.equal(disk.activeProfileId,'account');assert.equal(disk.profiles.some(profile=>profile.id==='custom-default'),false,'explicit legacy clear removes the stored singleton secret/profile');}
   finally{rmSync(dir,{recursive:true,force:true});}
 });
 
