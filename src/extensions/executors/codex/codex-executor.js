@@ -120,12 +120,30 @@ export class CodexExecutor extends ExecutorPort {
   environmentCapabilities(){if(!this.environmentSnapshot){this.environmentSnapshot=this.environmentProbe();this.client.recordDiagnostic?.('environment-capability-snapshot',this.environmentSnapshot);}return this.environmentSnapshot;}
   readiness(){
     const current=this.client.scanRuntime?.()||this.client.runtimeStatus?.();
-    if(!current)return{ready:true,preparing:false,reason:null,message:null};
-    if(current.available)return{ready:true,preparing:false,reason:null,message:null};
-    this.client.startRuntimePreparation?.();
-    const next=this.client.runtimeStatus?.()||current;
-    if(next.preparing)return{ready:false,preparing:true,reason:'executor-runtime-preparing',message:'Codex 执行组件正在后台准备，无需操作。'};
-    return{ready:false,preparing:false,reason:'executor-runtime-unavailable',message:'Codex 执行组件当前未就绪。请检查网络或本机 Codex 环境，恢复后 Scheduler 会自动继续。'};
+    if(current&&!current.available){
+      this.client.startRuntimePreparation?.();
+      const next=this.client.runtimeStatus?.()||current;
+      if(next.preparing)return{ready:false,preparing:true,reason:'executor-runtime-preparing',message:'Codex 执行组件正在后台准备，无需操作。'};
+      return{ready:false,preparing:false,reason:'executor-runtime-unavailable',message:'Codex 执行组件当前未就绪。请检查网络或本机 Codex 环境，恢复后 Scheduler 会自动继续。'};
+    }
+    if(this.capabilityProvider){
+      const capability=this.capabilityProvider.snapshot?.()||null;
+      if(!capability){
+        void this.capabilityProvider.initialize?.({backgroundRefresh:true})?.catch?.(()=>{});
+        return{ready:false,preparing:true,reason:'executor-connection-preparing',message:'Codex 连接正在验证，验证完成后任务会自动继续。'};
+      }
+      if(capability.execution?.connected===false){
+        void this.capabilityProvider.initialize?.({backgroundRefresh:true})?.catch?.(()=>{});
+        return{ready:false,preparing:true,reason:'executor-connection-preparing',message:'Codex 连接正在恢复，恢复后任务会自动继续。'};
+      }
+      if(capability.execution?.ready===false){
+        const authRequired=capability.provider?.requiresOpenaiAuth===true;
+        return authRequired
+          ? {ready:false,preparing:false,reason:'executor-auth-required',message:'Codex 当前登录已失效或未登录，请先在 Codex 重新登录，再到简易配置点击「应用 AI 连接」。'}
+          : {ready:false,preparing:false,reason:'executor-connection-not-ready',message:'当前 AI 连接尚未通过 Runtime 验证，请检查连接配置后重新应用。'};
+      }
+    }
+    return{ready:true,preparing:false,reason:null,message:null};
   }
   async health(){
     const runtime=this.client.scanRuntime?.()||this.client.runtimeStatus?.();
