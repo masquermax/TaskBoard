@@ -168,10 +168,13 @@ function accountProviderInvalid(cause = null) {
   return error;
 }
 
-async function closeAndDrainClient(client) {
-  if (!client?.close) return;
-  const child=client.child||null;
-  client.close();
+function drainableChildren(client) {
+  const candidates=[client?.child,client?.appServerClient?.child,client?.execClient?.child];
+  if (client?.execClient?.children instanceof Set) candidates.push(...client.execClient.children);
+  return [...new Set(candidates.filter(Boolean))];
+}
+
+async function waitForChildExit(child) {
   if (!child?.once || child.exitCode != null) return;
   await new Promise(resolveExit => {
     let settled=false;
@@ -185,6 +188,17 @@ async function closeAndDrainClient(client) {
     child.once('exit',finish);
     child.once('error',finish);
   });
+}
+
+async function closeAndDrainClient(client) {
+  if (!client?.close) return;
+  // Capture every transport child before close(). During profile switching the
+  // launch-profile provider already points at the candidate profile, so a
+  // mode-sensitive client.child getter can otherwise hide the still-running
+  // transport from the previous profile.
+  const children=drainableChildren(client);
+  client.close();
+  await Promise.all(children.map(waitForChildExit));
 }
 
 // Compatibility helper for the original one-account/one-custom API shape. It is
