@@ -31,6 +31,10 @@ function requestIdOf(error) {
   return null;
 }
 
+function isAuthenticationFailure(message) {
+  return /not authenticated|authentication required|login required|unauthenticated|unauthorized|refresh token.*revoked|access token.*could not be refreshed|log out.*sign in again|sign in again/i.test(String(message||''));
+}
+
 export function normalizeCodexRuntimeFailure(error) {
   const target=error instanceof Error ? error : new Error(messageOf(error));
   if (runtimeFailureOf(target)) return target;
@@ -40,7 +44,7 @@ export function normalizeCodexRuntimeFailure(error) {
 
   if (target.interrupted || target.name==='AbortError' || /\baborted\b|\binterrupted\b/i.test(message)) {
     code=RuntimeFailureCode.ABORTED;
-  } else if (status===401 || /not authenticated|authentication required|login required|unauthenticated|unauthorized/i.test(message)) {
+  } else if (status===401 || isAuthenticationFailure(message)) {
     code=RuntimeFailureCode.AUTH_REQUIRED;
   } else if (status===403 || /\bforbidden\b|upstream.*reject|request.*rejected/i.test(message)) {
     code=RuntimeFailureCode.UPSTREAM_REJECTED;
