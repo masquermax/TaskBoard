@@ -41,13 +41,17 @@ function classifyRuntimeFailure(failure, message) {
   }
 }
 
+function isAuthenticationFailureMessage(message) {
+  return /not authenticated|authentication required|login required|unauthenticated|\b401\b|unauthorized|refresh token.*revoked|access token.*could not be refreshed|log out.*sign in again|sign in again/i.test(String(message||''));
+}
+
 export function classifyRetry(error) {
   const message = messageOf(error);
   if (error?.executionBoundary) return { retryable:false, reason:'Work Unit 已达到执行边界', message };
   if (error?.nonRetryable) return { retryable: false, reason: '确定性执行错误', message };
   const runtimeFailure = runtimeFailureOf(error);
   if (runtimeFailure) return classifyRuntimeFailure(runtimeFailure, message);
-  if (error?.authRequired || /not authenticated|authentication required|login required|unauthenticated|\b401\b|unauthorized/i.test(message)) {
+  if (error?.authRequired || isAuthenticationFailureMessage(message)) {
     return { retryable: false, reason: '执行环境需要重新登录或授权', message };
   }
   if (error?.upstreamRejected || /\b403\b|forbidden/i.test(message)) {
@@ -90,7 +94,7 @@ export function suspendedInstruction(reason, message, failureCount) {
   const prefix = failureCount >= MAX_TOTAL_ATTEMPTS
     ? `${reason}，已连续执行失败 ${failureCount} 次，系统已停止自动重试。`
     : `${reason}，继续自动重试无法解决。`;
-  return `${prefix}\n${message}\n请稍后点击右上角 ↻ 重试按钮重新尝试。`;
+  return `${prefix}\n${message}\n请处理上面的执行环境问题后，再点击右上角 ↻ 重试按钮。`;
 }
 
 export function waitingRetryInstruction(reason, message, failureCount, delayMs) {
