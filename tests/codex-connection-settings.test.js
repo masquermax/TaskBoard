@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { CodexConnectionSettings, CUSTOM_ENV_KEY, CUSTOM_PROVIDER_ID, closeAndDrainClient, normalizeCodexConnectionSettings } from '../src/extensions/config/codex/codex-connection-settings.js';
+import { CodexConnectionSettings, ACCOUNT_PROVIDER_ID, CUSTOM_ENV_KEY, CUSTOM_PROVIDER_ID, closeAndDrainClient, normalizeCodexConnectionSettings } from '../src/extensions/config/codex/codex-connection-settings.js';
 
 function runtime({failFirstConnect=false}={}){
   let connects=0,closes=0,invalidations=0;
@@ -22,11 +22,24 @@ function assertAccountState(state){
   assert.equal(state.apiKeyConfigured,false);
   assert.equal(state.profiles[0].id,'account');
   assert.equal(state.profiles[0].builtin,true);
+  assert.equal(state.profiles[0].providerId,ACCOUNT_PROVIDER_ID);
 }
 
-test('Codex connection defaults to the existing account without creating a secret file',()=>{
+test('Codex connection defaults to the existing account without creating a secret file and pins the builtin provider',()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-connection-'));const file=join(dir,'codex.json');
-  try{const settings=new CodexConnectionSettings({file});assertAccountState(settings.getPublic());assert.equal(settings.getPublic().profiles.length,1);assert.equal(existsSync(file),false);assert.deepEqual(settings.launchProfile(),{mode:'account',profileId:'account',providerId:null,args:[],env:{}});}finally{rmSync(dir,{recursive:true,force:true});}
+  try{
+    const settings=new CodexConnectionSettings({file});
+    assertAccountState(settings.getPublic());
+    assert.equal(settings.getPublic().profiles.length,1);
+    assert.equal(existsSync(file),false);
+    assert.deepEqual(settings.launchProfile(),{
+      mode:'account',
+      profileId:'account',
+      providerId:ACCOUNT_PROVIDER_ID,
+      args:['-c','model_provider="openai"'],
+      env:{},
+    });
+  }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
 test('custom API settings keep the key out of CLI args/public API and keep Codex default secret-name filtering enabled',async()=>{
