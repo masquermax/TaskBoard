@@ -17,6 +17,8 @@ const errorCopy={
   EXECUTOR_CONNECTION_PROFILE_DELETE_INVALID:'这个 AI 连接不能删除',
   EXECUTOR_CONNECTION_ACTION_INVALID:'AI 连接操作无效',
   EXECUTOR_CONNECTION_BUSY:'当前仍有 AI Turn 在执行，请等待任务收敛后再切换连接',
+  EXECUTOR_CONNECTION_AUTH_REQUIRED:'Codex 当前登录已失效或未登录，请先在 Codex 重新登录，再应用这个连接',
+  EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID:'Codex 当前账号没有落到内置 OpenAI provider，已拒绝使用可能继承的自定义 Provider',
   EXECUTOR_CONNECTION_APPLY_FAILED:'新 AI 连接未能启动，已自动恢复原配置',
   EXECUTOR_CONNECTION_UNAVAILABLE:'当前 Executor 不提供可配置的连接设置',
 };
