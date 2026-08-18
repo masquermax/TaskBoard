@@ -1,4 +1,5 @@
 import { SourceTraceVerifier } from '../governance/source-trace-verifier.js';
+import { competingEffectAttempts } from './effect-recovery.js';
 import { scopeTaskInputs } from './task-input-scope.js';
 import { workMayMutate } from './work-capability.js';
 
@@ -13,10 +14,12 @@ function normalizeDiscoveries(values=[]){
   })).filter(item=>item.summary&&item.whyRelevant&&item.suggestedNextQuestion);
 }
 
-function normalizeEffectActuationClosure(value,delegation,evidence=[]){
-  const expectedAttemptId=text(delegation?.recoveryEffectAttemptId);
-  if(!expectedAttemptId||workMayMutate(delegation)||!value||typeof value!=='object')return null;
-  if(text(value.effectAttemptId)!==expectedAttemptId||value.terminal!==true||value.canMutate!==false)return null;
+function normalizeEffectActuationClosure(value,task,delegation,evidence=[]){
+  const attempts=competingEffectAttempts(task?.executionState);
+  if(task?.executionState?.retry?.scope!=='effect-recovery-observe'||attempts.length!==1||workMayMutate(delegation)||!value||typeof value!=='object')return null;
+  const expectedAttemptId=text(attempts[0]?.id);
+  const claimedAttemptId=text(value?.effectAttemptId);
+  if(!expectedAttemptId||(claimedAttemptId&&claimedAttemptId!==expectedAttemptId)||value.terminal!==true||value.canMutate!==false)return null;
   const directEvidenceIds=new Set((Array.isArray(evidence)?evidence:[])
     .filter(item=>item?.strength==='direct')
     .map(item=>text(item?.id))
@@ -33,7 +36,7 @@ function boundedNonConvergence(delegation){
     evidence:[],
     findings:[],
     discoveries:[],
-    blocker:'WORK_UNIT_NON_CONVERGENT: 当前 Work Unit 在技术执行租约内未满足停止条件；Root 应缩小或拆分工作边界，而不是原样重放。',
+    blocker:'WORK_UNIT_NON_CONVERGENT: 当前 Work Unit 在技术执行边界内未满足停止条件；Root 应缩小或拆分工作边界，而不是原样重放。',
     uncertainty:'当前 expectedOutput 尚未在受限执行窗口内建立；没有新的 Task 级结论被认证。',
   };
 }
@@ -103,11 +106,13 @@ export class SubagentRuntime {
       statement:text(item?.statement),
       evidenceIds:strings(item?.evidenceIds).filter(id=>evidenceIds.has(id)),
     })).filter(item=>item.id&&item.statement);
-    const effectActuationClosure=normalizeEffectActuationClosure(raw?.effectActuationClosure,delegation,evidence);
+    const effectActuationClosure=normalizeEffectActuationClosure(raw?.effectActuationClosure,task,delegation,evidence);
 
     // Runtime allow-list: a custom Executor cannot smuggle Task-level claims,
     // gaps, recommendations, Gateway controls, a different Work Unit identity,
     // or an unbound/indirect recovery-closure assertion through the Subagent result surface.
+    // The exact old effectAttemptId is injected from TaskBoard's durable recovery state,
+    // never trusted from Root/Executor prose or a free-form result field.
     return {
       delegationId:text(delegation?.id),
       result:text(raw?.result),
