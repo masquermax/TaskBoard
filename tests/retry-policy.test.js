@@ -15,7 +15,12 @@ test('Work Unit execution boundary is a distinct non-retryable runtime outcome',
 });
 
 test('explicit authentication failures remain auth-required',()=>{
-  for(const message of ['401 Unauthorized','not authenticated','login required']){
+  for(const message of [
+    '401 Unauthorized',
+    'not authenticated',
+    'login required',
+    'Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.',
+  ]){
     assert.deepEqual(classifyRetry(new Error(message)),{retryable:false,reason:'执行环境需要重新登录或授权',message});
   }
 });
