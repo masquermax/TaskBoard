@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 
 const CUSTOM_PROVIDER_ID = 'taskboard_custom';
 const CUSTOM_ENV_KEY = 'TASKBOARD_CODEX_API_KEY';
+const ACCOUNT_PROVIDER_ID = 'openai';
 const DEFAULT_STATE = Object.freeze({ mode:'account', baseUrl:'', defaultModel:'', apiKey:'' });
 const ACCOUNT_PROFILE_ID = 'account';
 const LEGACY_CUSTOM_PROFILE_ID = 'custom-default';
@@ -23,7 +24,7 @@ const CONNECTION_PRESENTATION = Object.freeze({
     { key:'defaultModel', label:'默认模型（可选）', type:'model', placeholder:'例如：gpt-5.6-sol' },
   ],
   actions:{ select:'selectProfile', save:'saveProfile', delete:'deleteProfile' },
-  help:'连接配置只作用于当前 Executor Extension；Secret 不会通过公开状态、页面回显或日志返回。选择「Codex 当前账号」并应用时会真实验证当前 Codex 登录。',
+  help:'连接配置只作用于当前 Executor Extension；Secret 不会通过公开状态、页面回显或日志返回。选择「Codex 当前账号」时会强制使用 Codex 内置 OpenAI provider 并真实验证当前登录，不继承自定义 model_provider。',
 });
 
 function text(value, max = 2048) {
@@ -66,7 +67,7 @@ function providerIdForProfile(profileId) {
 }
 
 function accountPublic() {
-  return { id:ACCOUNT_PROFILE_ID, name:'Codex 当前账号', kind:'account', builtin:true, editable:false, deletable:false, baseUrl:'', defaultModel:'', apiKeyConfigured:false };
+  return { id:ACCOUNT_PROFILE_ID, name:'Codex 当前账号', kind:'account', builtin:true, editable:false, deletable:false, baseUrl:'', defaultModel:'', apiKeyConfigured:false, providerId:ACCOUNT_PROVIDER_ID };
 }
 
 function normalizeCustomProfile(value = {}, current = null) {
@@ -161,6 +162,12 @@ function accountAuthRequired(cause = null) {
   return error;
 }
 
+function accountProviderInvalid(cause = null) {
+  const error=new Error('EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID');
+  if (cause) error.cause=cause;
+  return error;
+}
+
 async function closeAndDrainClient(client) {
   if (!client?.close) return;
   const child=client.child||null;
@@ -231,7 +238,15 @@ export class CodexConnectionSettings {
 
   launchProfile() {
     const active=activePrivateProfile(this.value);
-    if (!active || active.kind!=='custom') return { mode:'account', profileId:ACCOUNT_PROFILE_ID, providerId:null, args:[], env:{} };
+    if (!active || active.kind!=='custom') {
+      return {
+        mode:'account',
+        profileId:ACCOUNT_PROFILE_ID,
+        providerId:ACCOUNT_PROVIDER_ID,
+        args:['-c',`model_provider=${tomlString(ACCOUNT_PROVIDER_ID)}`],
+        env:{},
+      };
+    }
     const providerId=providerIdForProfile(active.id);
     const args=[
       '-c',`model_provider=${tomlString(providerId)}`,
@@ -287,9 +302,11 @@ export class CodexConnectionSettings {
     if (this.launchProfile().mode!=='account' || !this.client.request) return null;
     try {
       const account=await this.client.request('account/read',{refreshToken:true},15_000);
-      if (account?.requiresOpenaiAuth===true && !account?.account) throw accountAuthRequired();
+      if (account?.requiresOpenaiAuth!==true) throw accountProviderInvalid();
+      if (!account?.account) throw accountAuthRequired();
       return account;
     } catch (error) {
+      if (error?.message==='EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID') throw error;
       if (isAccountAuthFailure(error)) throw accountAuthRequired(error);
       throw error;
     }
@@ -384,9 +401,7 @@ export class CodexConnectionSettings {
           return this.getPublic();
         } catch (error) {
           if (isAccountAuthFailure(error)) throw accountAuthRequired(error);
-          const wrapped=new Error('EXECUTOR_CONNECTION_APPLY_FAILED');
-          wrapped.cause=error;
-          throw wrapped;
+          throw error;
         }
       }
       if (!runtimeImpact) {
@@ -408,8 +423,10 @@ export class CodexConnectionSettings {
         let rollbackError=null;
         try { await this.restartRuntime('connection-settings-rollback'); }
         catch (rollback) { rollbackError=rollback?.message||String(rollback); }
-        const wrapped=isAccountAuthFailure(error) ? accountAuthRequired(error) : new Error('EXECUTOR_CONNECTION_APPLY_FAILED');
-        if (!wrapped.cause) wrapped.cause=error;
+        let wrapped;
+        if (isAccountAuthFailure(error)) wrapped=accountAuthRequired(error);
+        else if (error?.message==='EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID') wrapped=accountProviderInvalid(error);
+        else { wrapped=new Error('EXECUTOR_CONNECTION_APPLY_FAILED');wrapped.cause=error; }
         wrapped.rollbackError=rollbackError;
         throw wrapped;
       }
@@ -419,4 +436,4 @@ export class CodexConnectionSettings {
   }
 }
 
-export { CUSTOM_PROVIDER_ID, CUSTOM_ENV_KEY, ACCOUNT_PROFILE_ID, LEGACY_CUSTOM_PROFILE_ID, STORE_SCHEMA_VERSION, CONNECTION_PRESENTATION, closeAndDrainClient, providerIdForProfile };
+export { CUSTOM_PROVIDER_ID, CUSTOM_ENV_KEY, ACCOUNT_PROVIDER_ID, ACCOUNT_PROFILE_ID, LEGACY_CUSTOM_PROFILE_ID, STORE_SCHEMA_VERSION, CONNECTION_PRESENTATION, closeAndDrainClient, providerIdForProfile };
