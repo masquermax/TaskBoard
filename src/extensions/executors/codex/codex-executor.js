@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { extname, resolve } from 'node:path';
 import { ExecutorPort } from '../../../core/executor-port.js';
 import { taskInputCatalog } from '../../../core/task-input-scope.js';
+import { unresolvedEffectAttempts } from '../../../core/effect-recovery.js';
 import { CodexAppServerClient } from './app-server-client.js';
 import {
   analysisFieldsSchema,
@@ -75,6 +76,20 @@ const subagentSchema = {
 function isSupportedLocalImage(attachment){const ext=extname(attachment.name||'').toLowerCase();return ['.png','.jpg','.jpeg','.gif','.webp'].includes(ext)||['image/png','image/jpeg','image/gif','image/webp'].includes(String(attachment.mimeType||'').toLowerCase());}
 function safeParse(text){const parsed=JSON.parse(text);if(!parsed||typeof parsed!=='object')throw new Error('Invalid structured Codex response');return parsed;}
 function policyPrompt(policyContext){return policyContext?.prompt?.trim()||'TASKBOARD ROLE CONTEXT\nUse the structured runtime protocol supplied for this call.';}
+function recoveryPrompt(task){
+  const attempts=unresolvedEffectAttempts(task?.executionState);
+  if(!attempts.length)return'';
+  const summary=attempts.map(item=>({
+    id:item.id,
+    workUnitId:item.workUnitId||null,
+    projectAccess:item.projectAccess??'unknown',
+    networkAccess:item.networkAccess??null,
+    inputRefs:Array.isArray(item.inputRefs)?item.inputRefs:[],
+    admittedAt:item.admittedAt||null,
+    reason:item.reason||null,
+  }));
+  return `\nRECOVERY OBSERVATION BOUNDARY — TaskBoard has an unresolved prior effect.\n- Transport/process loss does NOT prove the old effect failed, stopped, or left Reality unchanged. Effect outcome is UNKNOWN and old-mutator liveness is UNKNOWN unless independently proven otherwise.\n- Do not replay the old Work. Use only the minimum side-effect-free Work needed to reacquire current Reality / closure evidence. Runtime will reject new effect-capable admission while recovery remains unresolved.\n- A source-traced observation proves only what was observed at that boundary. Do not promote it into stable recovery truth, prior-effect attribution, or safe fresh actuation unless Evidence also establishes the required stability/liveness relation.\n- Do not route this technical unknown to Human unless the remaining missing information or choice is genuinely human-owned.\nUnresolved effect attempts:\n${JSON.stringify(summary,null,2)}\n`;
+}
 
 function commandProbe(command,args=['--version']){
   try{const result=spawnSync(command,args,{encoding:'utf8',timeout:3_000,windowsHide:true,shell:process.platform==='win32'});return result.status===0;}catch{return false;}
@@ -195,6 +210,7 @@ export class CodexExecutor extends ExecutorPort {
     const planningBlock=planningFeedback?.length?`\nWORK PLAN REPAIR — the Work Unit capability/dependency contract is invalid. Correct only these planning fields.\n${JSON.stringify(planningFeedback,null,2)}\n`:'';
     const validationBlock=validationFeedback?.length?`\nVALIDATOR FEEDBACK — the candidate content was not fully certifiable. Correct only the listed proof-boundary issues and preserve already certified content.\n${JSON.stringify(validationFeedback,null,2)}\nPrevious candidate:\n${JSON.stringify(previousDecision,null,2)}\n`:'';
     const authorityBlock=authorityHandoff?`\nCONTROL HANDOFF — the certified/narrowed content below is fixed input for this Turn. Choose the next Task control action from the certified state.\n`:'';
+    const recoveryBlock=recoveryPrompt(task);
     const skillCatalog=Array.isArray(policyContext?.skillCatalog)?policyContext.skillCatalog:[];
     return `${policyPrompt(policyContext)}
 
@@ -212,7 +228,7 @@ Structured analysis serialization when resultMode=analysis:
 - Claims cite Evidence; unknown relationships remain Gaps. A requirement statement proves what the requirement requires; it does not by itself prove that the implementation already behaves that way.
 - Recommendations remain optional advice and must not replace an unresolved business rule with a self-invented default.
 - steps[] cites one or more CONFIRMED Claims; finalResult stays null because TaskBoard renders the certified structure.
-${planningBlock}${validationBlock}${authorityBlock}
+${planningBlock}${validationBlock}${authorityBlock}${recoveryBlock}
 Task:\n${JSON.stringify({id:task.id,title:task.title,instruction:task.instruction},null,2)}
 
 Available Skills:\n${JSON.stringify(skillCatalog,null,2)}

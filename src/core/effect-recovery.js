@@ -9,8 +9,16 @@ export function unresolvedEffectAttempts(executionState){
   return (Array.isArray(attempts)?attempts:[]).filter(item=>item&&item.resolved!==true&&text(item.id)).map(clone);
 }
 
+export function competingEffectAttempts(executionState){
+  return unresolvedEffectAttempts(executionState).filter(item=>item.actuationClosed!==true);
+}
+
 export function hasUnresolvedEffectRecovery(executionState){
   return unresolvedEffectAttempts(executionState).length>0;
+}
+
+export function hasCompetingEffectActuation(executionState){
+  return competingEffectAttempts(executionState).length>0;
 }
 
 export function addUnresolvedEffectAttempt(executionState,attempt){
@@ -21,6 +29,32 @@ export function addUnresolvedEffectAttempt(executionState,attempt){
   if(!value.id)return state;
   if(!current.some(item=>item.id===value.id))current.push(value);
   state.recovery={...(state.recovery&&typeof state.recovery==='object'?state.recovery:{}),effectAttempts:current};
+  return state;
+}
+
+export function markEffectActuationClosed(executionState,closure={}){
+  const state=stateObject(executionState);
+  const effectAttemptId=text(closure?.effectAttemptId);
+  const evidenceIds=[...new Set((Array.isArray(closure?.evidenceIds)?closure.evidenceIds:[]).map(text).filter(Boolean))];
+  if(!effectAttemptId){const error=new Error('EFFECT_RECOVERY_CLOSURE_ID_REQUIRED');error.nonRetryable=true;throw error;}
+  if(closure?.terminal!==true||closure?.canMutate!==false){const error=new Error('EFFECT_RECOVERY_CLOSURE_NOT_TERMINAL');error.nonRetryable=true;throw error;}
+  if(!evidenceIds.length){const error=new Error('EFFECT_RECOVERY_CLOSURE_EVIDENCE_REQUIRED');error.nonRetryable=true;throw error;}
+  const recovery=state.recovery&&typeof state.recovery==='object'?{...state.recovery}:{};
+  const attempts=unresolvedEffectAttempts(state);
+  const index=attempts.findIndex(item=>item.id===effectAttemptId);
+  if(index<0){const error=new Error('EFFECT_RECOVERY_CLOSURE_IDENTITY_MISMATCH');error.nonRetryable=true;throw error;}
+  attempts[index]={
+    ...attempts[index],
+    actuationClosed:true,
+    actuationClosure:{
+      terminal:true,
+      canMutate:false,
+      evidenceIds,
+      observedAt:text(closure?.observedAt)||new Date().toISOString(),
+    },
+  };
+  recovery.effectAttempts=attempts;
+  state.recovery=recovery;
   return state;
 }
 
