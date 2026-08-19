@@ -56,11 +56,6 @@ function readTextSource(path){
   if(['.txt','.md','.csv','.json','.xml','.html','.htm','.js','.mjs','.cjs','.ts','.tsx','.jsx','.java','.jsp','.properties','.yml','.yaml','.sql','.py','.cs','.go','.rs','.c','.h','.cpp','.hpp','.sh','.ps1','.cmd','.bat','.vbs'].includes(ext))return readFileSync(path,'utf8');
   return null;
 }
-function isImageSource(path,attachment){
-  const ext=extname(path||attachment?.name||'').toLowerCase();
-  const mime=text(attachment?.mimeType).toLowerCase();
-  return ['.png','.jpg','.jpeg','.gif','.webp'].includes(ext)||['image/png','image/jpeg','image/gif','image/webp'].includes(mime);
-}
 function observationOccurs(raw,observation){const source=normalize(raw),needle=normalize(observation);return Boolean(source&&needle&&source.includes(needle));}
 function scopedRaw(raw,locator){
   const range=locatorLineRange(locator);
@@ -79,32 +74,43 @@ function sourceContext(raw,observation,locator){
   if(at>=0)return value.slice(Math.max(0,at-800),Math.min(value.length,at+needle.length+800)).slice(0,2400);
   return needle.slice(0,2400);
 }
+function traceable(reason,extra={}){return{checked:true,verified:false,traceable:true,reason,...extra};}
+function untraceable(reason,extra={}){return{checked:true,verified:false,traceable:false,reason,...extra};}
+function verified(extra={}){return{checked:true,verified:true,traceable:true,...extra};}
 
 /**
- * Resolve the traceable address back to source material owned by the Task.
- * This is intentionally deterministic and bounded: it never recursively scans
- * a project to guess which file the Agent meant.
+ * Validator is the invoice checker, not a second reasoning owner.
+ * This verifier answers only two deterministic questions:
+ * 1) does the cited source really exist inside the governed Task boundary?
+ * 2) when the Evidence claims DIRECT quotation-level support, does the cited
+ *    observation actually occur at that source anchor?
+ *
+ * A real source that cannot be mechanically checked is allowed only as INDIRECT
+ * material. A missing/fabricated/mismatched source is rejected instead of being
+ * kept as weak Evidence. No model turn is needed for this boundary.
  */
 export class SourceTraceVerifier{
   verifyEvidence({task,evidence,humanGatewayHistory=[]}={}){
-    if(!evidence||evidence.strength!==EvidenceStrength.DIRECT)return{checked:false,verified:true};
-    if(!task)return{checked:false,verified:true,reason:'No Task context supplied to source verifier.'};
+    if(!evidence||!task)return untraceable('Evidence 缺少当前 Task 或证据对象，无法核对来源。');
+    const direct=evidence.strength===EvidenceStrength.DIRECT;
     const locator=text(evidence.locator),observation=text(evidence.observation);
-    if(!locator||!observation)return{checked:true,verified:false,reason:'DIRECT Evidence 缺少可追溯地址或原始观察。'};
+    if(!locator)return untraceable('Evidence 没有可追溯 locator；无法形成来源凭证。');
+    if(!observation)return untraceable('Evidence 没有 source-near observation；无法核对来源内容。');
 
     if(evidence.sourceType===EvidenceSourceType.PROJECT_FILE){
       const part=sourcePathPart(locator);
-      if(!part)return{checked:true,verified:false,reason:'项目文件证据没有具体文件地址。'};
+      if(!part)return untraceable('项目文件 Evidence 没有具体文件地址。');
       const scopes=(task?.projectScopes||[]).map(s=>text(s?.path)).filter(Boolean);
       const candidates=[];
       if(isAbsolute(part))candidates.push(part);
       else for(const root of scopes)candidates.push(resolve(root,part));
       const path=candidates.find(candidate=>existsSync(candidate)&&scopes.some(root=>inside(root,candidate)));
-      if(!path)return{checked:true,verified:false,reason:'可追溯地址无法定位到当前 Project Scope 内的文件；Validator 不猜测文件位置。'};
+      if(!path)return untraceable('locator 无法定位到当前 Project Scope 内的真实文件；Validator 不猜测文件位置。');
       const raw=readTextSource(path);
-      if(raw==null)return{checked:true,verified:false,path,reason:'该项目文件类型当前不能机械核对原文，且没有对应的系统语义认证输入；不能仅凭 Agent 转述保留为 DIRECT Evidence。'};
-      if(!observationOccurs(scopedRaw(raw,locator),observation))return{checked:true,verified:false,reason:locatorLineRange(locator)?'原始项目文件的指定行范围中未找到该 observation；可追溯地址与原文不一致。':'原始项目文件中未找到该 observation；不能把 Agent 转述当作 DIRECT Evidence。'};
-      return{checked:true,verified:true,path,context:sourceContext(raw,observation,locator)};
+      if(raw==null)return traceable('来源文件真实存在，但当前类型不能机械核对 observation；仅可作为 INDIRECT 参考。',{path});
+      if(!direct)return traceable('来源文件真实存在；INDIRECT Evidence 不被升级为直接事实。',{path,context:sourceContext(raw,observation,locator)});
+      if(!observationOccurs(scopedRaw(raw,locator),observation))return untraceable(locatorLineRange(locator)?'指定行范围中不存在该 observation；来源凭证与原文不一致。':'文件中不存在该 observation；不能把 Agent 转述当作 DIRECT Evidence。',{path});
+      return verified({path,context:sourceContext(raw,observation,locator)});
     }
 
     if(evidence.sourceType===EvidenceSourceType.ATTACHMENT_TEXT){
@@ -112,83 +118,76 @@ export class SourceTraceVerifier{
       let attachment=attachments.find(a=>locator.includes(text(a?.name))||locator.includes(basename(text(a?.path))));
       if(!attachment&&attachments.length===1)attachment=attachments[0];
       const path=text(attachment?.path);
-      if(!path||!existsSync(path))return{checked:true,verified:false,reason:'附件文本证据地址无法定位到当前 Task 的附件。'};
+      if(!path||!existsSync(path))return untraceable('locator 无法定位到当前 Task 的真实附件。');
       const raw=readTextSource(path);
-      if(raw==null)return{checked:true,verified:false,path,reason:'该附件文本类型当前不能机械核对原文；如需视觉/二进制语义认证，应使用可由 Validator 读取的明确 source type，不能仅凭 Agent 转述保留为 DIRECT Evidence。'};
-      if(!observationOccurs(scopedRaw(raw,locator),observation))return{checked:true,verified:false,reason:locatorLineRange(locator)?'原始附件文本的指定行范围中未找到该 observation；可追溯地址与原文不一致。':'原始附件文本中未找到该 observation；不能把 Agent 转述当作 DIRECT Evidence。'};
-      return{checked:true,verified:true,path,context:sourceContext(raw,observation,locator)};
+      if(raw==null)return traceable('附件真实存在，但当前类型不能机械核对 observation；仅可作为 INDIRECT 参考。',{path});
+      if(!direct)return traceable('附件真实存在；INDIRECT Evidence 不被升级为直接事实。',{path,context:sourceContext(raw,observation,locator)});
+      if(!observationOccurs(scopedRaw(raw,locator),observation))return untraceable(locatorLineRange(locator)?'附件指定范围中不存在该 observation；来源凭证与原文不一致。':'附件原文中不存在该 observation；不能把 Agent 转述当作 DIRECT Evidence。',{path});
+      return verified({path,context:sourceContext(raw,observation,locator)});
     }
 
     if(evidence.sourceType===EvidenceSourceType.HUMAN){
       const resolved=(humanGatewayHistory||[]).filter(x=>x?.status==='RESOLVED');
-      const locatorText=text(locator);
-      const exactGateway=resolved.find(g=>text(g?.id)&&locatorText.includes(text(g.id)));
-      const matchingGateways=(exactGateway?[exactGateway]:resolved.filter(g=>observationOccurs(text(g?.answer),observation)));
-      if(matchingGateways.length===1){
-        const gateway=matchingGateways[0];
-        const material=[text(gateway?.question),text(gateway?.answer)].filter(Boolean).join('\n');
-        if(material&&observationOccurs(text(gateway?.answer),observation))return{
-          checked:true,verified:true,
-          gatewayId:text(gateway?.id)||null,
-          targetGapId:text(gateway?.targetGapId??gateway?.target_gap_id)||null,
-          context:sourceContext(material,observation,locator),
-        };
+      const exactGateway=resolved.find(g=>text(g?.id)&&locator.includes(text(g.id)));
+      if(exactGateway){
+        const answer=text(exactGateway?.answer),material=[text(exactGateway?.question),answer].filter(Boolean).join('\n');
+        if(!direct)return traceable('Human Gateway 来源真实存在；INDIRECT 转述不升级。',{gatewayId:text(exactGateway?.id)||null,targetGapId:text(exactGateway?.targetGapId??exactGateway?.target_gap_id)||null,context:sourceContext(material,observation,locator)});
+        if(!observationOccurs(answer,observation))return untraceable('Human Evidence 的 observation 不存在于 locator 指向的 Gateway 回答。',{gatewayId:text(exactGateway?.id)||null});
+        return verified({gatewayId:text(exactGateway?.id)||null,targetGapId:text(exactGateway?.targetGapId??exactGateway?.target_gap_id)||null,context:sourceContext(material,observation,locator)});
       }
       const instruction=text(task?.instruction);
-      if(instruction&&observationOccurs(instruction,observation))return{checked:true,verified:true,gatewayId:null,targetGapId:null,context:sourceContext(instruction,observation,locator)};
-      if(matchingGateways.length>1)return{checked:true,verified:false,reason:'Human Evidence 同时匹配多个已解决 Gateway；必须在 locator 中指明具体 Gateway id。'};
-      return{checked:true,verified:false,reason:'Human Evidence 的 observation 无法追溯到当前 Task 指令或某一个明确的已解决 Human Gateway 回答。'};
+      const instructionLocator=/task\s*instruction|instruction|任务内容/i.test(locator);
+      if(instructionLocator&&instruction){
+        if(!direct)return traceable('Task instruction 来源真实存在；INDIRECT 转述不升级。',{gatewayId:null,targetGapId:null,context:sourceContext(instruction,observation,locator)});
+        if(!observationOccurs(instruction,observation))return untraceable('Human Evidence 的 observation 不存在于 Task instruction。');
+        return verified({gatewayId:null,targetGapId:null,context:sourceContext(instruction,observation,locator)});
+      }
+      return untraceable('Human Evidence locator 没有指向当前 Task instruction 或明确的已解决 Human Gateway。');
     }
 
     if(evidence.sourceType===EvidenceSourceType.REFERENCE){
-      const material=(task?.references||[]).flatMap(r=>[text(r?.title),text(r?.final_result)]).filter(Boolean).join('\n');
-      if(material&&observationOccurs(material,observation))return{checked:true,verified:true,context:sourceContext(material,observation,locator)};
-      return{checked:true,verified:false,reason:'Reference Evidence 的 observation 无法追溯到当前 Task 引用的不可变结果。'};
+      const references=task?.references||[];
+      const reference=references.find(r=>locator.includes(text(r?.source_task_id))||locator.includes(text(r?.title))) || (references.length===1?references[0]:null);
+      if(!reference)return untraceable('Reference Evidence locator 没有指向当前 Task 的真实引用结果。');
+      const material=[text(reference?.title),text(reference?.final_result)].filter(Boolean).join('\n');
+      if(!direct)return traceable('Reference 来源真实存在；INDIRECT 转述不升级。',{context:sourceContext(material,observation,locator)});
+      if(!observationOccurs(material,observation))return untraceable('Reference Evidence 的 observation 不存在于 locator 指向的引用结果。');
+      return verified({context:sourceContext(material,observation,locator)});
     }
 
     if(evidence.sourceType===EvidenceSourceType.ATTACHMENT_VISUAL){
       const attachments=task?.attachments||[];
-      const attachment=attachments.find(a=>locator.includes(text(a?.name))||locator.includes(basename(text(a?.path)))) || (attachments.length===1?attachments[0]:null);
+      const attachment=attachments.find(a=>locator.includes(text(a?.name))||locator.includes(text(a?.id))||locator.includes(basename(text(a?.path)))) || (attachments.length===1?attachments[0]:null);
       const path=text(attachment?.path);
-      if(!path||!existsSync(path))return{checked:true,verified:false,reason:'附件视觉证据地址无法定位到当前 Task 的原始附件。'};
-      // Semantic Validator receives pixels, not a document/project browsing surface.
-      // If the cited visual is embedded inside a DOCX/PDF/etc. but TaskBoard has
-      // not resolved that exact visual into an image input, it cannot be certified
-      // by asking Validator to reopen/search the whole document.
-      if(!isImageSource(path,attachment))return{checked:true,verified:false,path,reason:'当前视觉证据位于非图片附件内部，TaskBoard 尚未解析出可直接交给 Validator 的精确像素输入；请改用可追溯文本证据或保留为待确认。'};
-      return{checked:false,verified:true,needsSemantic:true,path};
+      if(!path||!existsSync(path))return untraceable('视觉 Evidence locator 无法定位到当前 Task 的真实附件。');
+      return traceable('视觉来源真实存在，但 Validator 不解释像素语义；该结果只能作为 INDIRECT 参考，由 Root 决定如何表达。',{path});
     }
 
     if(evidence.sourceType===EvidenceSourceType.PROJECT_SEARCH||evidence.sourceType===EvidenceSourceType.RUNTIME){
-      // Search/runtime prose is not independently reproducible from an Agent
-      // statement. Until the system owns a persisted search/runtime record, it
-      // may be a clue but not DIRECT source truth.
-      return{checked:true,verified:false,reason:'当前没有系统持有的可回放 search/runtime 原始记录；不能把 Agent 对执行过程的转述作为 DIRECT Evidence。'};
+      return untraceable('当前没有系统持有的可回放 search/runtime 原始记录；Agent 对执行过程的转述没有真实来源凭证。');
     }
 
-    return{checked:false,verified:true};
+    return untraceable('Evidence sourceType 没有可核对的当前来源凭证。');
   }
 
   enforce({task,evidence=[],humanGatewayHistory=[]}={}){
-    const actions=[];const verifications=[];
-    const normalized=(Array.isArray(evidence)?evidence:[]).map(item=>{
-      // Source provenance is system-owned. Strip anything an Executor attempted
-      // to provide, then attach only metadata produced by this verifier.
+    const actions=[];const verifications=[];const normalized=[];
+    for(const item of Array.isArray(evidence)?evidence:[]){
+      // Source provenance is system-owned. Strip Executor-authored trace metadata.
       const { _sourceTrace:_untrustedSourceTrace, ...cleanItem }=item||{};
       const verdict=this.verifyEvidence({task,evidence:cleanItem,humanGatewayHistory});
       verifications.push({id:text(cleanItem?.id),...verdict});
-      if(!verdict.checked||verdict.verified){
-        const durableTrace=verdict.verified && (text(verdict.gatewayId)||verdict.needsSemantic===true) ? {
-          ...(text(verdict.gatewayId)?{gatewayId:text(verdict.gatewayId)}:{}),
-          ...(text(verdict.targetGapId)?{targetGapId:text(verdict.targetGapId)}:{}),
-          ...(verdict.needsSemantic===true?{needsSemantic:true}:{}),
-          ...(text(verdict.path)?{path:text(verdict.path)}:{}),
-        } : null;
-        return durableTrace?{...cleanItem,_sourceTrace:durableTrace}:cleanItem;
+      if(verdict.verified){
+        normalized.push(cleanItem);
+        continue;
       }
-      actions.push({action:'DOWNGRADE_UNVERIFIED_SOURCE_TRACE',target:text(cleanItem?.id),reason:verdict.reason});
-      return{...cleanItem,strength:'indirect'};
-    });
+      if(verdict.traceable){
+        actions.push({action:'DOWNGRADE_UNVERIFIED_SOURCE_TRACE',target:text(cleanItem?.id),reason:verdict.reason});
+        normalized.push({...cleanItem,strength:EvidenceStrength.INDIRECT});
+        continue;
+      }
+      actions.push({action:'REJECT_UNTRACEABLE_SOURCE',target:text(cleanItem?.id),reason:verdict.reason});
+    }
     return{evidence:normalized,actions,verifications};
   }
 }
