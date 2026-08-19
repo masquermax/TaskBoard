@@ -1,93 +1,101 @@
-import { ClaimLevel, normalizeAnalysisFields, GapKind, EvidenceSourceType } from './analysis-contract.js';
+import { ClaimLevel, EvidenceSourceType, normalizeAnalysisFields } from './analysis-contract.js';
 import { SourceTraceVerifier } from './source-trace-verifier.js';
-import { hasCertifiedKnowledge, normalizeCertifiedState, normalizeGapResolutions } from './certified-state.js';
-import { hasGovernedCandidateDelta } from './analysis-validator.js';
+import { normalizeCertifiedState, normalizeGapResolutions } from './certified-state.js';
 
 function text(value){return String(value==null?'':value).trim();}
-function uniqueStrings(values){return[...new Set((Array.isArray(values)?values:[]).map(text).filter(Boolean))];}
-function compactViolation(v){return{ruleId:v?.ruleId||null,target:v?.target||null,reason:text(v?.reason),action:v?.action||null};}
+function list(value){return Array.isArray(value)?value:[];}
+function uniqueStrings(values){return[...new Set(list(values).map(text).filter(Boolean))];}
 function copyAnalysis(result={}){
   const fields=normalizeAnalysisFields(result);
-  return{kind:result?.kind||null,summary:text(result?.summary),stageResult:result?.stageResult==null?null:text(result.stageResult),finalResult:result?.finalResult==null?null:text(result.finalResult),...fields,gateway:result?.gateway||null,gapResolutions:normalizeGapResolutions(result?.gapResolutions),delegations:Array.isArray(result?.delegations)?result.delegations:[]};
+  return{kind:result?.kind||null,summary:text(result?.summary),stageResult:result?.stageResult==null?null:text(result.stageResult),finalResult:result?.finalResult==null?null:text(result.finalResult),...fields,gateway:result?.gateway||null,gapResolutions:normalizeGapResolutions(result?.gapResolutions),delegations:list(result?.delegations)};
 }
-function itemKey(prefix,id,value){return`${prefix}:${text(id)}:${text(value)}`;}
-function mergeUniqueById(primary=[],supporting=[]){
-  const out=[],seen=new Set();
-  for(const item of [...(Array.isArray(primary)?primary:[]),...(Array.isArray(supporting)?supporting:[])]){const id=text(item?.id);if(!id||seen.has(id))continue;seen.add(id);out.push(item);}
-  return out;
-}
-function candidateIsEmpty(decision){return!hasGovernedCandidateDelta(decision);}
-function stateSupportForCandidate(currentState){const current=normalizeCertifiedState(currentState).current;return{evidence:current.evidence||[],claims:current.claims||[],gaps:current.gaps||[]};}
-function referencedEvidenceIds(candidate={}){return new Set([...(candidate?.claims||[]).flatMap(item=>item?.evidenceIds||[]),...(candidate?.gaps||[]).flatMap(item=>item?.evidenceIds||[]),...(candidate?.recommendations||[]).flatMap(item=>item?.evidenceIds||[]),...normalizeGapResolutions(candidate?.gapResolutions).flatMap(item=>item?.evidenceIds||[])].map(text).filter(Boolean));}
-function selectedAvailableEvidence(candidate={},availableEvidence=[]){const wanted=referencedEvidenceIds(candidate);return(Array.isArray(availableEvidence)?availableEvidence:[]).filter(item=>wanted.has(text(item?.id)));}
-function extractCandidateAfterValidation(validated,originalCandidate,support){
-  const candidateEvidenceIds=new Set((originalCandidate?.evidence||[]).map(item=>text(item?.id)).filter(Boolean));
-  const candidateClaimIds=new Set((originalCandidate?.claims||[]).map(item=>text(item?.id)).filter(Boolean));
-  const candidateGapIds=new Set((originalCandidate?.gaps||[]).map(item=>text(item?.id)).filter(Boolean));
-  const candidateRecIds=new Set((originalCandidate?.recommendations||[]).map(item=>text(item?.id)).filter(Boolean));
-  const candidateStepOrders=new Set((originalCandidate?.steps||[]).map(item=>Number(item?.order)).filter(Number.isInteger));
-  const supportGapIds=new Set((support?.gaps||[]).map(item=>text(item?.id)).filter(Boolean));
-  return{...validated,evidence:(validated.evidence||[]).filter(item=>candidateEvidenceIds.has(text(item?.id))),claims:(validated.claims||[]).filter(item=>candidateClaimIds.has(text(item?.id))),gaps:(validated.gaps||[]).filter(item=>candidateGapIds.has(text(item?.id))||!supportGapIds.has(text(item?.id))),recommendations:(validated.recommendations||[]).filter(item=>candidateRecIds.has(text(item?.id))),steps:(validated.steps||[]).filter(item=>candidateStepOrders.has(Number(item?.order))),gapResolutions:normalizeGapResolutions(originalCandidate?.gapResolutions)};
-}
+function byId(values=[]){return new Map(list(values).map(item=>[text(item?.id),item]).filter(([id])=>id));}
+function mergeUniqueById(...groups){const out=[],seen=new Set();for(const item of groups.flatMap(group=>list(group))){const id=text(item?.id);if(!id||seen.has(id))continue;seen.add(id);out.push(item);}return out;}
+function refsExist(ids,map){const refs=uniqueStrings(ids);return{refs,missing:refs.filter(id=>!map.has(id))};}
+function feedback(target,reason,action='REJECT_LEDGER_ENTRY'){return{ruleId:'C-003',target,reason,action};}
 
-/** Validator is the source-ledger accountant, not a reasoning Agent. */
-export class ValidatorRuntime{
-  constructor({analysisValidator=null,sourceTraceVerifier=new SourceTraceVerifier()}={}){this.analysisValidator=analysisValidator;this.sourceTraceVerifier=sourceTraceVerifier;}
+function ledgerViolations(decision,evidenceById,currentState){
+  const violations=[];
+  const claimById=byId([...list(normalizeCertifiedState(currentState).current.claims),...list(decision.claims)]);
+  const gapById=byId([...list(normalizeCertifiedState(currentState).current.gaps),...list(decision.gaps)]);
 
-  reviewRoot({decision,policyContext=null,seenKnowledgeKeys=new Set(),task=null,humanGatewayHistory=[],currentState=null,availableEvidence=[]}={}){
-    if(!this.analysisValidator){
-      if(!hasGovernedCandidateDelta(decision))return{outcome:'pass',decision,feedback:[],actions:[],commits:[],observedKnowledgeKeys:[]};
-      const feedback=[{ruleId:'C-003',target:'validator',reason:'Governed Candidate Delta requires Validator structural certification.',action:'REQUIRE_VALIDATOR'}];
-      return{outcome:'reject',decision,feedback,actions:[],commits:[],observedKnowledgeKeys:[]};
+  for(const claim of list(decision.claims)){
+    const id=text(claim?.id)||'claim';
+    if(!text(claim?.statement))violations.push(feedback(`claim:${id}`,'Claim 缺少 statement。'));
+    const checked=refsExist(claim?.evidenceIds,evidenceById);
+    if(!checked.refs.length)violations.push(feedback(`claim:${id}`,'Claim 没有真实来源凭证；未知内容必须由 Root 表达为 Gap。'));
+    if(checked.missing.length)violations.push(feedback(`claim:${id}`,`Claim 引用了不存在或已被来源核对拒绝的 Evidence：${checked.missing.join(', ')}。`));
+    if(claim?.level===ClaimLevel.CONFIRMED){
+      const indirect=checked.refs.map(ref=>evidenceById.get(ref)).filter(Boolean).filter(item=>item?.strength!=='direct');
+      if(indirect.length)violations.push(feedback(`claim:${id}`,`CONFIRMED 结论依赖未验证/INDIRECT 来源：${indirect.map(item=>text(item?.id)).filter(Boolean).join(', ')}；结论可信度不能高于来源。`,'REJECT_TRUST_ESCALATION'));
     }
+    for(const hop of list(claim?.hops)){
+      const hopChecked=refsExist(hop?.evidenceIds,evidenceById);
+      if(hopChecked.missing.length)violations.push(feedback(`claim:${id}`,`Claim hop ${text(hop?.from)||'?'} -> ${text(hop?.to)||'?'} 引用了不存在的 Evidence：${hopChecked.missing.join(', ')}。`));
+      if(claim?.level===ClaimLevel.CONFIRMED&&hopChecked.refs.some(ref=>evidenceById.get(ref)?.strength!=='direct'))violations.push(feedback(`claim:${id}`,'CONFIRMED hop 依赖 INDIRECT 来源；不能升级为已确认。','REJECT_TRUST_ESCALATION'));
+    }
+  }
 
-    const proposed=copyAnalysis(decision);proposed.gapResolutions=normalizeGapResolutions(decision?.gapResolutions);
+  for(const gap of list(decision.gaps)){
+    const id=text(gap?.id)||'gap',checked=refsExist(gap?.evidenceIds,evidenceById);
+    if(checked.missing.length)violations.push(feedback(`gap:${id}`,`Gap 引用了不存在的 Evidence：${checked.missing.join(', ')}。`));
+  }
+
+  for(const resolution of normalizeGapResolutions(decision?.gapResolutions)){
+    const id=text(resolution?.gapId)||'gap',checked=refsExist(resolution?.evidenceIds,evidenceById);
+    if(!gapById.has(id))violations.push(feedback(`gap:${id}`,'Gap resolution 指向不存在的 Gap。'));
+    if(checked.missing.length)violations.push(feedback(`gap:${id}`,`Gap resolution 引用了不存在的 Evidence：${checked.missing.join(', ')}。`));
+    if(checked.refs.length&&!checked.refs.some(ref=>evidenceById.get(ref)?.strength==='direct'))violations.push(feedback(`gap:${id}`,'Gap resolution 没有 DIRECT 来源凭证；不能把不确定性静默删除。','REJECT_TRUST_ESCALATION'));
+  }
+
+  for(const rec of list(decision.recommendations)){
+    const id=text(rec?.id)||'recommendation',evidence=refsExist(rec?.evidenceIds,evidenceById),gaps=uniqueStrings(rec?.gapIds).filter(ref=>!gapById.has(ref));
+    if(evidence.missing.length)violations.push(feedback(`recommendation:${id}`,`Recommendation 引用了不存在的 Evidence：${evidence.missing.join(', ')}。`));
+    if(gaps.length)violations.push(feedback(`recommendation:${id}`,`Recommendation 引用了不存在的 Gap：${gaps.join(', ')}。`));
+  }
+
+  for(const step of list(decision.steps)){
+    const missing=uniqueStrings(step?.sourceIds).filter(ref=>!claimById.has(ref));
+    if(missing.length)violations.push(feedback(`step:${step?.order??'?'}`,`Step 引用了不存在的 Claim：${missing.join(', ')}。`));
+  }
+  return violations;
+}
+
+/**
+ * Validator is an invoice checker, not a reasoning Agent.
+ * It verifies source existence/locator fidelity and reference integrity only.
+ * It never re-investigates, repairs Root prose, invents a Gap, or asks Root/model
+ * to reinterpret the same material. Root owns every semantic judgment.
+ */
+export class ValidatorRuntime{
+  constructor({sourceTraceVerifier=new SourceTraceVerifier()}={}){this.sourceTraceVerifier=sourceTraceVerifier;}
+
+  reviewRoot({decision,task=null,humanGatewayHistory=[],currentState=null,availableEvidence=[]}={}){
+    const proposed=copyAnalysis(decision);
+    const current=normalizeCertifiedState(currentState).current;
     const rootOwnedSourceTypes=new Set([EvidenceSourceType.HUMAN,EvidenceSourceType.REFERENCE]);
-    const rootEvidence=(proposed.evidence||[]).filter(item=>rootOwnedSourceTypes.has(item?.sourceType));
-    const droppedRootEvidence=(proposed.evidence||[]).filter(item=>!rootOwnedSourceTypes.has(item?.sourceType));
-    proposed.evidence=mergeUniqueById(selectedAvailableEvidence(proposed,availableEvidence),rootEvidence);
+    const rootEvidence=list(proposed.evidence).filter(item=>rootOwnedSourceTypes.has(item?.sourceType));
+    const unownedRootEvidence=list(proposed.evidence).filter(item=>!rootOwnedSourceTypes.has(item?.sourceType));
+    const wanted=new Set([
+      ...list(proposed.claims).flatMap(item=>uniqueStrings(item?.evidenceIds)),
+      ...list(proposed.gaps).flatMap(item=>uniqueStrings(item?.evidenceIds)),
+      ...list(proposed.recommendations).flatMap(item=>uniqueStrings(item?.evidenceIds)),
+      ...normalizeGapResolutions(proposed.gapResolutions).flatMap(item=>uniqueStrings(item?.evidenceIds)),
+      ...list(proposed.claims).flatMap(item=>list(item?.hops).flatMap(hop=>uniqueStrings(hop?.evidenceIds))),
+    ]);
+    const selectedWorkEvidence=list(availableEvidence).filter(item=>wanted.has(text(item?.id)));
+    proposed.evidence=mergeUniqueById(selectedWorkEvidence,rootEvidence);
 
     const traced=this.sourceTraceVerifier.enforce({task,evidence:proposed.evidence,humanGatewayHistory});
     proposed.evidence=traced.evidence;
-    const preActions=[...droppedRootEvidence.map(item=>({action:'DROP_UNOWNED_ROOT_EVIDENCE',target:text(item?.id),reason:`Root does not own ${text(item?.sourceType)||'unknown'} evidence collection.`})),...traced.actions];
-    const support=stateSupportForCandidate(currentState);
-    const validationInput={...proposed,evidence:mergeUniqueById(proposed.evidence,support.evidence),claims:mergeUniqueById(proposed.claims,support.claims),gaps:mergeUniqueById(proposed.gaps,support.gaps),kind:proposed.kind==='complete'&&candidateIsEmpty(proposed)&&hasCertifiedKnowledge(currentState)?'delegate':proposed.kind};
-    const checkedRaw=this.analysisValidator.validateAndRepair(validationInput,policyContext);
-    const checked={...checkedRaw,decision:extractCandidateAfterValidation({...checkedRaw.decision,kind:proposed.kind},proposed,support)};
-    if(checked.valid){const progress=this.deriveNewRootProgress(checked.decision,seenKnowledgeKeys);return{outcome:'pass',decision:checked.decision,feedback:[],actions:[...preActions,...checked.actions],sourceVerifications:traced.verifications,...progress};}
+    const evidenceById=byId(mergeUniqueById(current.evidence,proposed.evidence));
+    const violations=[];
 
-    // Same evidence never earns another model turn. Narrow deterministically.
-    const feedback=checked.violations.map(compactViolation),safe=this.makeSafeRootResult(checked.decision,feedback),safeSupport=stateSupportForCandidate(currentState);
-    const recheckedRaw=this.analysisValidator.validateAndRepair({...safe,evidence:mergeUniqueById(safe.evidence,safeSupport.evidence),claims:mergeUniqueById(safe.claims,safeSupport.claims),gaps:mergeUniqueById(safe.gaps,safeSupport.gaps),kind:safe.kind==='complete'&&candidateIsEmpty(safe)&&hasCertifiedKnowledge(currentState)?'delegate':safe.kind},policyContext);
-    const rechecked={...recheckedRaw,decision:extractCandidateAfterValidation({...recheckedRaw.decision,kind:safe.kind},safe,safeSupport)};
-    if(!rechecked.valid){
-      const controlOnly=rechecked.violations.length>0&&rechecked.violations.every(v=>v?.target==='blocking-gap');
-      if(controlOnly){const progress=this.deriveNewRootProgress(rechecked.decision,seenKnowledgeKeys);return{outcome:'pass',decision:rechecked.decision,feedback:[...feedback,...rechecked.violations.map(compactViolation)],actions:[...preActions,...checked.actions,...rechecked.actions,{action:'HANDOFF_ROOT_CONTROL_DECISION',target:'blocking-gap'}],sourceVerifications:traced.verifications,requiresRootDecision:true,...progress};}
-      return{outcome:'reject',decision:rechecked.decision,feedback:rechecked.violations.map(compactViolation),actions:[...preActions,...checked.actions,...rechecked.actions],commits:[],observedKnowledgeKeys:[],sourceVerifications:traced.verifications};
-    }
-    const progress=this.deriveNewRootProgress(rechecked.decision,seenKnowledgeKeys);
-    return{outcome:'pass',decision:rechecked.decision,feedback,actions:[...preActions,...checked.actions,...rechecked.actions,{action:'NARROW_UNSUPPORTED_ROOT_CANDIDATE',target:'root'}],sourceVerifications:traced.verifications,...progress};
-  }
+    for(const item of unownedRootEvidence)violations.push(feedback(`evidence:${text(item?.id)||'unknown'}`,`Root 不能自行制造 ${text(item?.sourceType)||'unknown'} Evidence；该来源必须来自执行结果或系统持有的真实来源。`,'REJECT_UNOWNED_ROOT_EVIDENCE'));
+    for(const action of list(traced.actions))if(action?.action==='REJECT_UNTRACEABLE_SOURCE')violations.push(feedback(`evidence:${text(action?.target)||'unknown'}`,text(action?.reason)||'Evidence 来源无法追溯。','REJECT_UNTRACEABLE_SOURCE'));
+    violations.push(...ledgerViolations(proposed,evidenceById,currentState));
 
-  makeSafeRootResult(decision,feedback=[]){
-    const d=copyAnalysis(decision),gapId='VALIDATOR-ROOT-GAP';
-    if(!d.gaps.some(g=>text(g?.id)===gapId)){
-      const claimsById=new Map((d.claims||[]).map(claim=>[text(claim?.id),claim]).filter(([id])=>id));
-      const unresolvedStatements=uniqueStrings((feedback||[]).map(item=>text(claimsById.get(text(item?.target).replace(/^claim:/,''))?.statement)));
-      d.gaps.push({id:gapId,question:unresolvedStatements.length?`待确认：${unresolvedStatements.join('；')}`:'待确认：当前仍有结论缺少足够可追溯证据。',reason:`Validator 的来源/结构核对未能支持该部分作为已确认事实。${feedback.length?` 主要缺口：${feedback.slice(0,4).map(v=>v.reason).join('；')}`:''}`,kind:GapKind.MISSING_FACT,blocking:false,evidenceIds:[]});
-    }
-    d.stageResult=null;d.finalResult=null;return d;
-  }
-
-  deriveNewRootProgress(decision,seenKnowledgeKeys=new Set()){
-    const d=copyAnalysis(decision),unseenClaims=[],unseenGaps=[],resolutions=normalizeGapResolutions(d.gapResolutions);
-    for(const claim of d.claims){if(claim?.level!==ClaimLevel.CONFIRMED||!text(claim?.id)||!text(claim?.statement))continue;const key=itemKey('claim',claim.id,claim.statement);if(!seenKnowledgeKeys.has(key))unseenClaims.push({item:claim,key});}
-    for(const gap of d.gaps){if(!text(gap?.id)||!text(gap?.question))continue;const key=itemKey('gap',gap.id,`${gap.question}|${gap.reason||''}`);if(!seenKnowledgeKeys.has(key))unseenGaps.push({item:gap,key});}
-    if(!unseenClaims.length&&!unseenGaps.length&&!resolutions.length){if(decision&&typeof decision==='object')delete decision.__historyCommit;return{commits:[],observedKnowledgeKeys:[]};}
-    const claimTexts=unseenClaims.map(({item})=>text(item.statement)).filter(Boolean),gapTexts=unseenGaps.map(({item})=>text(item.question).replace(/^待确认[：:]\s*/,'')).filter(Boolean),resolvedTexts=resolutions.map(item=>text(item.reason)).filter(Boolean),detailParts=[];
-    if(claimTexts.length)detailParts.push(claimTexts.join('；'));if(gapTexts.length)detailParts.push(`待确认：${gapTexts.join('；')}`);if(resolvedTexts.length)detailParts.push(`已闭合：${resolvedTexts.join('；')}`);
-    const title=claimTexts.length&&gapTexts.length?'阶段结论已收敛':claimTexts.length?'阶段事实已确认':resolvedTexts.length&&!gapTexts.length?'待确认边界已闭合':'待确认边界已收敛';
-    const sourceIds=[...unseenClaims.map(({item})=>text(item.id)),...unseenGaps.map(({item})=>text(item.id)),...resolutions.map(item=>text(item.gapId))].filter(Boolean),observedKnowledgeKeys=[...unseenClaims.map(({key})=>key),...unseenGaps.map(({key})=>key)];
-    const commit={title,detail:detailParts.join('；'),sourceIds};if(decision&&typeof decision==='object')decision.__historyCommit={...commit,sourceIds:[...sourceIds]};return{commits:[commit],observedKnowledgeKeys};
+    if(violations.length)return{outcome:'reject',decision:proposed,feedback:violations,actions:[...list(traced.actions)],commits:[],observedKnowledgeKeys:[],sourceVerifications:traced.verifications};
+    return{outcome:'pass',decision:proposed,feedback:[],actions:[...list(traced.actions)],commits:[],observedKnowledgeKeys:[],sourceVerifications:traced.verifications,requiresRootDecision:false};
   }
 }
