@@ -2,6 +2,9 @@ import { RootRuntime } from './root-runtime.js';
 import { recordTaskDiagnostic } from './runtime-diagnostic.js';
 import { taskInputCatalog } from './task-input-scope.js';
 
+const instrumentedExecutors=new WeakSet();
+const instrumentedEvaluators=new WeakSet();
+
 function debugEnabled(){
   return String(process.env.TASKBOARD_LOG_LEVEL||'info').trim().toLowerCase()==='debug';
 }
@@ -138,35 +141,38 @@ function validatorPromptComponents(request,prompt){
 }
 
 export function instrumentExecutorTelemetry(executor){
-  if(!executor||executor.__taskboardRuntimeTelemetry===true)return executor;
-  const rootContexts=new Map();
-  Object.defineProperty(executor,'__taskboardRuntimeTelemetry',{value:true,configurable:true});
-  executor.setRootTelemetryContext=(taskId,context)=>{
-    const id=text(taskId);if(id)rootContexts.set(id,context||null);
-  };
-
-  if(typeof executor.rootPrompt==='function'){
-    const original=executor.rootPrompt;
-    executor.rootPrompt=function(request={}){
-      const prompt=original.call(this,request);
-      try{
-        const taskId=text(request?.task?.id)||null;
-        const context=taskId?rootContexts.get(taskId)||null:null;
-        emitDebug('root-prompt-components',{taskId,...(context||{}),...rootPromptComponents(request,prompt)});
-        if(taskId)rootContexts.delete(taskId);
-      }catch{/* telemetry must never affect prompt production */}
-      return prompt;
+  if(!executor||(typeof executor!=='object'&&typeof executor!=='function')||instrumentedExecutors.has(executor))return executor;
+  try{
+    if(!Object.isExtensible(executor))return executor;
+    const rootContexts=new Map();
+    executor.setRootTelemetryContext=(taskId,context)=>{
+      const id=text(taskId);if(id)rootContexts.set(id,context||null);
     };
-  }
 
-  if(typeof executor.validatorPrompt==='function'){
-    const original=executor.validatorPrompt;
-    executor.validatorPrompt=function(request={}){
-      const prompt=original.call(this,request);
-      try{emitDebug('validator-prompt-components',{taskId:text(request?.task?.id)||null,...validatorPromptComponents(request,prompt)});}catch{/* diagnostics only */}
-      return prompt;
-    };
-  }
+    if(typeof executor.rootPrompt==='function'){
+      const original=executor.rootPrompt;
+      executor.rootPrompt=function(request={}){
+        const prompt=original.call(this,request);
+        try{
+          const taskId=text(request?.task?.id)||null;
+          const context=taskId?rootContexts.get(taskId)||null:null;
+          emitDebug('root-prompt-components',{taskId,...(context||{}),...rootPromptComponents(request,prompt)});
+          if(taskId)rootContexts.delete(taskId);
+        }catch{/* telemetry must never affect prompt production */}
+        return prompt;
+      };
+    }
+
+    if(typeof executor.validatorPrompt==='function'){
+      const original=executor.validatorPrompt;
+      executor.validatorPrompt=function(request={}){
+        const prompt=original.call(this,request);
+        try{emitDebug('validator-prompt-components',{taskId:text(request?.task?.id)||null,...validatorPromptComponents(request,prompt)});}catch{/* diagnostics only */}
+        return prompt;
+      };
+    }
+    instrumentedExecutors.add(executor);
+  }catch{/* an immutable/custom Executor remains valid; telemetry is optional */}
   return executor;
 }
 
@@ -182,25 +188,27 @@ export class InstrumentedRootRuntime extends RootRuntime{
 
   installCompletionTelemetry(){
     const evaluator=this.completionEvaluator;
-    if(!evaluator||typeof evaluator.evaluate!=='function'||evaluator.__taskboardRuntimeTelemetry===true)return;
-    const original=evaluator.evaluate.bind(evaluator);
-    const runtime=this;
-    evaluator.evaluate=function(args={}){
-      const result=original(args);
-      try{
-        const pending=runtime.pendingCompletionByContract.get(args?.taskContract);
-        if(pending){
-          runtime.pendingCompletionByContract.delete(args.taskContract);
-          const unsatisfied=list(result?.unsatisfiedObligationIds);
-          const nextTurnReason=result?.goalState==='satisfied'
-            ? 'goal_satisfied'
-            : pending.session?.completionRepairCount>=1?'completion_non_convergence':'completion_repair';
-          runtime.emitRootOutcome(pending.task,pending.session,pending.reviewed,pending.meta,{nextTurnReason,completionGoalState:result?.goalState||null,unsatisfiedObligationIds:unsatisfied});
-        }
-      }catch{/* telemetry only */}
-      return result;
-    };
-    Object.defineProperty(evaluator,'__taskboardRuntimeTelemetry',{value:true,configurable:true});
+    if(!evaluator||typeof evaluator.evaluate!=='function'||instrumentedEvaluators.has(evaluator))return;
+    try{
+      const original=evaluator.evaluate.bind(evaluator);
+      const runtime=this;
+      evaluator.evaluate=function(args={}){
+        const result=original(args);
+        try{
+          const pending=runtime.pendingCompletionByContract.get(args?.taskContract);
+          if(pending){
+            runtime.pendingCompletionByContract.delete(args.taskContract);
+            const unsatisfied=list(result?.unsatisfiedObligationIds);
+            const nextTurnReason=result?.goalState==='satisfied'
+              ? 'goal_satisfied'
+              : pending.session?.completionRepairCount>=1?'completion_non_convergence':'completion_repair';
+            runtime.emitRootOutcome(pending.task,pending.session,pending.reviewed,pending.meta,{nextTurnReason,completionGoalState:result?.goalState||null,unsatisfiedObligationIds:unsatisfied});
+          }
+        }catch{/* telemetry only */}
+        return result;
+      };
+      instrumentedEvaluators.add(evaluator);
+    }catch{/* telemetry must never make CompletionEvaluator unavailable */}
   }
 
   telemetryMap(taskId){
@@ -208,6 +216,16 @@ export class InstrumentedRootRuntime extends RootRuntime{
   }
   loggedSet(taskId){
     const id=text(taskId);let set=this.loggedRootOutcomesByTask.get(id);if(!set){set=new Set();this.loggedRootOutcomesByTask.set(id,set);}return set;
+  }
+
+  discardSession(taskId){
+    const result=super.discardSession(taskId);
+    const id=text(taskId);
+    this.rootTelemetryByTask.delete(id);
+    this.loggedRootOutcomesByTask.delete(id);
+    this.reviewTriggerRefsByTask.delete(id);
+    for(const [contract,pending] of this.pendingCompletionByContract.entries())if(text(pending?.task?.id)===id)this.pendingCompletionByContract.delete(contract);
+    return result;
   }
 
   async runRootTurn(task,session,callbacks,options={}){
