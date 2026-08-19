@@ -17,6 +17,13 @@ const runtimeDir = resolve(rootDir, 'data/runtime');
 mkdirSync(runtimeDir, { recursive: true });
 const logFile = resolve(runtimeDir, 'taskboard.log');
 
+function normalizeLogLevel(value) {
+  const level=String(value||'info').trim().toLowerCase();
+  return ['error','warn','info','debug','trace'].includes(level)?level:'info';
+}
+const desiredLogLevel=normalizeLogLevel(process.env.TASKBOARD_LOG_LEVEL);
+process.env.TASKBOARD_LOG_LEVEL=desiredLogLevel;
+
 function appendLog(message) {
   const fd = openSync(logFile, 'a');
   try { writeSync(fd, `${message}\n`); } finally { closeSync(fd); }
@@ -113,19 +120,20 @@ async function stopLegacyOrStaleTaskBoard() {
   return false;
 }
 
-// Reuse only the exact same build from the exact same installation root.
-// When the user upgrades by unpacking a new version into a new directory, an
-// older TaskBoard may still own 4317; in that case replace it automatically.
+// Reuse only the exact same build/root/logging mode. Debug and normal launchers
+// must not silently reuse a process running at a different diagnostic level.
 const current = await currentTaskBoardInfo();
 if (current) {
   const normalizeRoot = value => String(value || '').replace(/[\\/]+$/, '').toLowerCase();
   const sameVersion = current.version === APP_VERSION;
   const sameRoot = normalizeRoot(current.rootDir) === normalizeRoot(rootDir);
-  if (sameVersion && sameRoot) {
-    appendLog(`[launcher] ${new Date().toISOString()} TaskBoard ${current.version} already running from this installation at ${url}`);
+  const currentLogLevel=normalizeLogLevel(current.logLevel);
+  const sameLogLevel=currentLogLevel===desiredLogLevel;
+  if (sameVersion && sameRoot && sameLogLevel) {
+    appendLog(`[launcher] ${new Date().toISOString()} TaskBoard ${current.version} already running from this installation at ${url}; logLevel=${currentLogLevel}`);
     process.exit(0);
   }
-  appendLog(`[launcher] ${new Date().toISOString()} replacing running TaskBoard version=${current.version || '?'} root=${current.rootDir || '?'} with ${APP_VERSION} root=${rootDir}`);
+  appendLog(`[launcher] ${new Date().toISOString()} replacing running TaskBoard version=${current.version || '?'} root=${current.rootDir || '?'} logLevel=${currentLogLevel} with ${APP_VERSION} root=${rootDir} logLevel=${desiredLogLevel}`);
   if (!(await stopLegacyOrStaleTaskBoard())) {
     appendLog(`[launcher] ${new Date().toISOString()} failed to replace running TaskBoard on ${host}:${port}`);
     process.exit(4);
@@ -157,7 +165,7 @@ if (await tcpPortOpen()) {
   }
 }
 
-appendLog(`\n[launcher] ${new Date().toISOString()} starting TaskBoard ${APP_VERSION}; node=${process.version}`);
+appendLog(`\n[launcher] ${new Date().toISOString()} starting TaskBoard ${APP_VERSION}; node=${process.version}; logLevel=${desiredLogLevel}`);
 const logFd = openSync(logFile, 'a');
 try {
   const child = spawn(process.execPath, ['src/server/index.js'], {
@@ -190,5 +198,5 @@ if (!ready) {
   process.exit(1);
 }
 
-appendLog(`[launcher] ${new Date().toISOString()} TaskBoard ${ready.version || APP_VERSION} ready at ${url}`);
+appendLog(`[launcher] ${new Date().toISOString()} TaskBoard ${ready.version || APP_VERSION} ready at ${url}; logLevel=${ready.logLevel || desiredLogLevel}`);
 process.exit(0);
