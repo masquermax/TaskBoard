@@ -6,7 +6,7 @@ import { bootstrap } from './bootstrap.js';
 import { createApp } from './app.js';
 import { createExtensionConnectionHandler } from './extension-connection-api.js';
 import { createExtensionManagementHandler } from './extension-management-api.js';
-import { createBuiltinExtensionRegistry } from '../extensions/builtins/index.js';
+import { ExtensionRegistry } from '../extensions/runtime/extension-registry.js';
 import { ImportedExtensionStore } from '../extensions/runtime/imported-extension-store.js';
 import { loadRegisteredExtensions } from '../extensions/runtime/external-extension-loader.js';
 import { APP_ID, APP_VERSION } from '../version.js';
@@ -23,15 +23,17 @@ const importedExtensionStore = new ImportedExtensionStore({
   file: resolve(rootDir, 'data/extension-registry.json'),
   rootDir,
 });
-const extensionRegistry = createBuiltinExtensionRegistry();
+// Product Runtime starts from an empty generic registry. Every concrete Extension,
+// including Executors, enters only through the user's explicit imported registry.
+const extensionRegistry = new ExtensionRegistry();
 const extensionLoadState = loadRegisteredExtensions(extensionRegistry, {
   rootDir,
   entries: importedExtensionStore.entries(),
 });
-const requestedExecutor = process.env.TASKBOARD_EXECUTOR || importedExtensionStore.activeExecutorId() || 'codex';
-const executorName = extensionRegistry.has(requestedExecutor) ? requestedExecutor : 'codex';
-if (requestedExecutor !== executorName) {
-  console.warn(`[extensions] requested Executor ${requestedExecutor} is unavailable; using ${executorName}`);
+const requestedExecutor = importedExtensionStore.activeExecutorId();
+const executorName = requestedExecutor && extensionRegistry.has(requestedExecutor) ? requestedExecutor : null;
+if (requestedExecutor && !executorName) {
+  console.warn(`[extensions] active Executor ${requestedExecutor} did not load; TaskBoard is starting in management mode`);
 }
 
 const runtime = bootstrap({
@@ -40,6 +42,7 @@ const runtime = bootstrap({
   executorName,
   extensionRegistry,
   externalExtensions: [],
+  allowMissingExecutor: true,
   startScheduler: process.env.TASKBOARD_SCHEDULER !== 'off',
 });
 let server = null;
@@ -121,7 +124,7 @@ server.listen(port, '127.0.0.1', () => {
   }, null, 2));
   console.log(`TaskBoard running at http://127.0.0.1:${port}`);
   console.log(`Version: ${APP_VERSION}`);
-  console.log(`Executor: ${runtime.extension?.displayName||runtime.extension?.id||executorName}`);
+  console.log(`Executor: ${runtime.extension?.displayName||runtime.extension?.id||'未配置'}`);
   console.log(`Storage: ${runtime.storage} (${runtime.storageFile})`);
   if(extensionLoadState.loadedIds.length) console.log(`[extensions] loaded: ${extensionLoadState.loadedIds.join(', ')}`);
   for (const [id, error] of Object.entries(extensionLoadState.loadErrors)) console.warn(`[extensions] ${id}: ${error}`);
