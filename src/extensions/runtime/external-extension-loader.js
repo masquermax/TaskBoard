@@ -27,8 +27,10 @@ export function configuredExternalExtensionSpecs(value = process.env.TASKBOARD_E
 }
 
 export function registerExternalExtensions(registry, { rootDir = process.cwd(), specs = configuredExternalExtensionSpecs() } = {}) {
+  const normalized = normalizeSpecs(specs);
+  if (!normalized.length) return registry;
   if (!registry?.register) throw new Error('EXTENSION_REGISTRY_REQUIRED');
-  for (const spec of normalizeSpecs(specs)) {
+  for (const spec of normalized) {
     const target = moduleTarget(spec, rootDir);
     let loaded;
     try {
