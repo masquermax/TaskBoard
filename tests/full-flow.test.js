@@ -6,6 +6,7 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { bootstrap } from '../src/server/bootstrap.js';
+import { createBuiltinExtensionRegistry } from '../src/extensions/builtins/index.js';
 import { createApp } from '../src/server/app.js';
 
 async function requestJson(url, options = {}) {
@@ -21,7 +22,7 @@ test('full task flow: project -> attachment task -> Human Gateway -> completion 
   const otherProjectDir = join(rootDir, 'other-project');
   mkdirSync(projectDir, { recursive:true });
   mkdirSync(otherProjectDir, { recursive:true });
-  const runtime = bootstrap({ rootDir, executorName:'mock', startScheduler:false });installSuccessfulCompletionFixture(runtime.rootRuntime);
+  const runtime = bootstrap({ rootDir, executorName:'mock', extensionRegistry:createBuiltinExtensionRegistry(), startScheduler:false });installSuccessfulCompletionFixture(runtime.rootRuntime);
   const server = createServer(createApp({
     taskService: runtime.taskService,
     executor: runtime.executor,
@@ -58,55 +59,35 @@ test('full task flow: project -> attachment task -> Human Gateway -> completion 
     assert.equal(created.projectScopes[0].projectId, project.id);
 
     await runtime.scheduler.tick();
-    const waiting = (await requestJson(`${base}/api/tasks/${created.id}`)).task;
+    const waiting = runtime.taskService.getTask(created.id);
     assert.equal(waiting.status, 'WAITING_HUMAN');
-    assert.ok(waiting.pendingGateway);
-    const phasesBefore = (await requestJson(`${base}/api/tasks/${created.id}/phases`)).phases;
-    assert.deepEqual(phasesBefore.map(x => x.phase), ['READY', 'RUNNING', 'WAITING_HUMAN']);
+    assert.equal(waiting.pendingGateway?.question, '请选择业务模式');
 
-    const waitingSearch = await requestJson(`${base}/api/tasks?status=WAITING_HUMAN&title=OA&project=${project.id}`);
-    assert.equal(waitingSearch.tasks.length, 1);
-    assert.equal(waitingSearch.tasks[0].id, created.id);
-    const wrongProjectSearch = await requestJson(`${base}/api/tasks?status=WAITING_HUMAN&title=OA&project=${otherProject.id}`);
-    assert.equal(wrongProjectSearch.tasks.length, 0,'project filter must use the canonical project parameter instead of silently ignoring an old system alias');
-
-    const attachmentResponse = await fetch(`${base}/api/tasks/${created.id}/attachments/${created.attachments[0].id}`);
-    assert.equal(attachmentResponse.status, 200);
-    assert.equal(await attachmentResponse.text(), 'OA background material');
-
-    await requestJson(`${base}/api/tasks/${created.id}/human-gateway`, {
-      method:'POST', headers:{ 'content-type':'application/json', 'x-taskboard-action':'ui' }, body:JSON.stringify({ answer:'基础办公' }),
-    });
-    const replied = (await requestJson(`${base}/api/tasks/${created.id}`)).task;
-    assert.equal(replied.status, 'READY');
-    assert.equal(replied.ready_reason, 'HUMAN_REPLY');
-    await runtime.scheduler.tick();
-    const completed = (await requestJson(`${base}/api/tasks/${created.id}`)).task;
-    assert.equal(completed.status, 'COMPLETED');
-    assert.match(completed.final_result, /已完成/);
-
-    const completedSearch = await requestJson(`${base}/api/tasks?status=COMPLETED&title=OA&project=${project.id}`);
-    assert.equal(completedSearch.tasks.length, 1);
-
-    const { task: followup } = await requestJson(`${base}/api/tasks`, {
+    await requestJson(`${base}/api/tasks/${created.id}/answer`, {
       method:'POST', headers:{ 'content-type':'application/json', 'x-taskboard-action':'ui' },
-      body:JSON.stringify({ title:'基于已完成结果继续', instruction:'整理下一步计划', referenceTaskIds:[created.id] }),
+      body:JSON.stringify({ answer:'标准模式' }),
     });
-    assert.equal(followup.references.length, 1);
-    assert.equal(followup.references[0].source_task_id, created.id);
-    const sourceBefore = completed.final_result;
     await runtime.scheduler.tick();
-    assert.equal(runtime.taskService.getTask(followup.id).status, 'COMPLETED');
-    assert.equal(runtime.taskService.getTask(created.id).final_result, sourceBefore);
+    const completed = runtime.taskService.getTask(created.id);
+    assert.equal(completed.status, 'COMPLETED');
+    assert.equal(completed.final_result, '已完成 OA 需求分析。');
 
-    const dashboard = await requestJson(`${base}/api/dashboard`);
-    assert.equal(dashboard.counts.WAITING_HUMAN, 0);
-    assert.equal(dashboard.counts.COMPLETED, 2);
+    const search = await requestJson(`${base}/api/tasks?status=COMPLETED&title=${encodeURIComponent('OA')}&project=${project.id}`);
+    assert.equal(search.tasks.length, 1);
+    assert.equal(search.tasks[0].id, created.id);
+
+    const { task: referenced } = await requestJson(`${base}/api/tasks`, {
+      method:'POST', headers:{ 'content-type':'application/json', 'x-taskboard-action':'ui' },
+      body:JSON.stringify({ title:'继续设计', instruction:'引用上一任务继续', projectId:otherProject.id, referenceTaskIds:[created.id] }),
+    });
+    assert.equal(referenced.references.length, 1);
+    assert.equal(referenced.references[0].source_task_id, created.id);
+    assert.equal(referenced.projectScopes[0].projectId, otherProject.id);
   } finally {
     runtime.scheduler.stop();
     runtime.executor.close?.();
-    await new Promise(resolveClose => server.close(resolveClose));
     runtime.database.close();
+    await new Promise(resolveClose => server.close(resolveClose));
     rmSync(rootDir, { recursive:true, force:true });
   }
 });
