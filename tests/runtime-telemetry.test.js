@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { instrumentExecutorTelemetry, rootPromptComponents, validatorPromptComponents } from '../src/core/runtime-telemetry.js';
+import { RootRuntime } from '../src/core/root-runtime.js';
+import { InstrumentedRootRuntime, instrumentExecutorTelemetry, rootPromptComponents, validatorPromptComponents } from '../src/core/runtime-telemetry.js';
 
 function task(){
   return{
@@ -84,5 +85,44 @@ test('executor prompt wrappers emit detailed telemetry only in debug mode and ne
   }finally{
     console.log=originalLog;
     if(previous==null)delete process.env.TASKBOARD_LOG_LEVEL;else process.env.TASKBOARD_LOG_LEVEL=previous;
+  }
+});
+
+test('instrumented Root emits context and certified delta outcome without changing Root control result',async()=>{
+  const previousLevel=process.env.TASKBOARD_LOG_LEVEL;
+  const originalLog=console.log;
+  const originalRun=RootRuntime.prototype.runRootTurn;
+  const originalReview=RootRuntime.prototype.reviewRootDecision;
+  const lines=[];
+  console.log=line=>lines.push(String(line));
+  process.env.TASKBOARD_LOG_LEVEL='debug';
+  RootRuntime.prototype.runRootTurn=async function(_task,session){session.rootTurnCount+=1;return{kind:'delegate',delegations:[{id:'WU-NEXT'}]};};
+  RootRuntime.prototype.reviewRootDecision=async function(){return{decision:{kind:'delegate',delegations:[{id:'WU-NEXT'}]},turnNode:{delta:{evidence:[{id:'E-2'}],claims:[{id:'C-2'}],gaps:[],gapResolutions:[]}},requiresRootDecision:false};};
+  try{
+    const runtime=new InstrumentedRootRuntime({executor:{setRootTelemetryContext(){}},modelRouter:null,subagentRuntime:null,completionEvaluator:null});
+    const session={
+      rootTurnCount:0,
+      certifiedContext:{evidence:[{id:'E-1'}],claims:[{id:'C-1'}],gaps:[{id:'G-1'}]},
+      analysisState:{version:12,current:{evidence:[{id:'E-1'}],claims:[{id:'C-1'}],gaps:[{id:'G-1'}]}},
+      completionTriggerRefs:[],planningTriggerRefs:[],
+    };
+    const rootResult=await runtime.runRootTurn(task(),session,{}, {activityKind:'synthesis',rootInputs:[{delegationId:'WU-1'}]});
+    const reviewed=await runtime.reviewRootDecision(task(),session,rootResult,{}, {rootInputs:[{delegationId:'WU-1'}],triggerRefs:['work:WU-1']});
+    assert.equal(reviewed.decision.kind,'delegate');
+    const contextLine=lines.find(line=>line.includes('"event":"root-turn-context"'));
+    const outcomeLine=lines.find(line=>line.includes('"event":"root-turn-outcome"'));
+    assert.ok(contextLine);
+    assert.ok(outcomeLine);
+    assert.match(contextLine,/"rootTurn":1/);
+    assert.match(contextLine,/"triggerType":"work_results"/);
+    assert.match(contextLine,/"certifiedStateVersion":12/);
+    assert.match(outcomeLine,/"newCertifiedEvidence":1/);
+    assert.match(outcomeLine,/"newCertifiedClaims":1/);
+    assert.match(outcomeLine,/"nextTurnReason":"delegation_validation"/);
+  }finally{
+    RootRuntime.prototype.runRootTurn=originalRun;
+    RootRuntime.prototype.reviewRootDecision=originalReview;
+    console.log=originalLog;
+    if(previousLevel==null)delete process.env.TASKBOARD_LOG_LEVEL;else process.env.TASKBOARD_LOG_LEVEL=previousLevel;
   }
 });
