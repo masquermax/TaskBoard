@@ -34,7 +34,7 @@ function mergeUniqueById(primary = [], supporting = []) {
 function candidateIsEmpty(decision) {
   return !hasGovernedCandidateDelta(decision);
 }
-function stateSupportForCandidate(currentState, candidate) {
+function stateSupportForCandidate(currentState) {
   const current=normalizeCertifiedState(currentState).current;
   return {
     evidence:current.evidence||[],
@@ -73,21 +73,17 @@ function extractCandidateAfterValidation(validated, originalCandidate, support) 
 }
 
 /**
- * Validator is a system authority, not a single resident model Agent.
- * These methods are intentionally stateless and synchronous so independent
- * Tasks/Subagents can be certified concurrently without a central queue.
+ * Validator is an accountant boundary, not a second reasoning Agent.
+ * It checks ownership, source provenance and deterministic candidate rules.
+ * It never investigates the Task and never calls a model to reinterpret evidence.
  */
 export class ValidatorRuntime {
-  constructor({ analysisValidator = null, sourceTraceVerifier = new SourceTraceVerifier(), semanticVerifier = null } = {}) {
+  constructor({ analysisValidator = null, sourceTraceVerifier = new SourceTraceVerifier(), semanticVerifier: _semanticVerifier = null } = {}) {
     this.analysisValidator = analysisValidator;
     this.sourceTraceVerifier = sourceTraceVerifier;
-    this.semanticVerifier = semanticVerifier;
   }
 
-  reviewRoot({ decision, policyContext = null, attempt = 1, seenKnowledgeKeys = new Set(), task = null, humanGatewayHistory = [], currentState = null, availableEvidence = [] } = {}) {
-    // Certification ownership is selected by the Candidate content boundary, not
-    // taskMode/resultMode. Pure control/presentation decisions carry no Certified
-    // State delta, but any governed Candidate Delta requires the structural owner.
+  reviewRoot({ decision, policyContext = null, seenKnowledgeKeys = new Set(), task = null, humanGatewayHistory = [], currentState = null, availableEvidence = [] } = {}) {
     if (!this.analysisValidator) {
       if (!hasGovernedCandidateDelta(decision)) {
         return { outcome:'pass', decision, feedback:[], actions:[], commits:[], observedKnowledgeKeys:[] };
@@ -95,129 +91,78 @@ export class ValidatorRuntime {
       const feedback=[{ruleId:'C-003',target:'validator',reason:'Governed Candidate Delta requires Validator structural certification.',action:'REQUIRE_VALIDATOR'}];
       return { outcome:'reject', decision, feedback, actions:[], commits:[], observedKnowledgeKeys:[] };
     }
+
     const proposed=copyAnalysis(decision);
     proposed.gapResolutions=normalizeGapResolutions(decision?.gapResolutions);
-    // Evidence ownership is enforced independently of the model schema. Root may
-    // create Human/Reference evidence from its Task context, but Project/Attachment
-    // evidence must arrive through a completed Subagent result. A custom Executor
-    // cannot widen Root authority by returning a different sourceType.
+
+    // Root may originate only Human/Reference Evidence from its own Task context.
+    // Project/Attachment evidence must come from the Work Unit that actually read it.
     const rootOwnedSourceTypes=new Set([EvidenceSourceType.HUMAN,EvidenceSourceType.REFERENCE]);
     const rootEvidence=(Array.isArray(proposed.evidence)?proposed.evidence:[]).filter(item=>rootOwnedSourceTypes.has(item?.sourceType));
     const droppedRootEvidence=(Array.isArray(proposed.evidence)?proposed.evidence:[]).filter(item=>!rootOwnedSourceTypes.has(item?.sourceType));
     proposed.evidence=mergeUniqueById(selectedAvailableEvidence(proposed,availableEvidence),rootEvidence);
+
+    // SourceTraceVerifier behaves like checking the invoice against the original:
+    // real + exact DIRECT source stays DIRECT; real but unverifiable source is
+    // downgraded; missing/fabricated/mismatched source is removed.
     const traced=this.sourceTraceVerifier.enforce({task,evidence:proposed.evidence,humanGatewayHistory});
     proposed.evidence=traced.evidence;
     const preActions=[
       ...droppedRootEvidence.map(item=>({action:'DROP_UNOWNED_ROOT_EVIDENCE',target:text(item?.id),reason:`Root does not own ${text(item?.sourceType)||'unknown'} evidence collection.`})),
       ...traced.actions,
     ];
-    const support=stateSupportForCandidate(currentState,proposed);
+
+    const support=stateSupportForCandidate(currentState);
     const validationInput={
       ...proposed,
       evidence:mergeUniqueById(proposed.evidence,support.evidence),
       claims:mergeUniqueById(proposed.claims,support.claims),
       gaps:mergeUniqueById(proposed.gaps,support.gaps),
-      // An empty completion delta is valid when the Task already has committed
-      // knowledge. Completion is checked against the merged state by RootRuntime.
+      // Empty completion delta may rely on already certified knowledge. Completion
+      // is still decided later by the dedicated deterministic completion path.
       kind:proposed.kind==='complete' && candidateIsEmpty(proposed) && hasCertifiedKnowledge(currentState) ? 'delegate' : proposed.kind,
     };
-    const checkedRaw = this.analysisValidator.validateAndRepair(validationInput, policyContext);
-    const checked = { ...checkedRaw, decision:extractCandidateAfterValidation({...checkedRaw.decision,kind:proposed.kind},proposed,support) };
-    if (!checked.valid) {
-      const feedback = checked.violations.map(compactViolation);
-      if (attempt < 2) return { outcome:'rework', decision:checked.decision, feedback, actions:[...preActions,...checked.actions], commits:[], observedKnowledgeKeys:[], sourceVerifications:traced.verifications };
-      const safe = this.makeSafeRootResult(checked.decision, feedback);
-      const safeSupport=stateSupportForCandidate(currentState,safe);
-      const recheckedRaw=this.analysisValidator.validateAndRepair({...safe,evidence:mergeUniqueById(safe.evidence,safeSupport.evidence),claims:mergeUniqueById(safe.claims,safeSupport.claims),gaps:mergeUniqueById(safe.gaps,safeSupport.gaps),kind:safe.kind==='complete'&&candidateIsEmpty(safe)&&hasCertifiedKnowledge(currentState)?'delegate':safe.kind},policyContext);
-      const rechecked={...recheckedRaw,decision:extractCandidateAfterValidation({...recheckedRaw.decision,kind:safe.kind},safe,safeSupport)};
-      if (!rechecked.valid) {
-        // Validator may certify/narrow content, but it does not own Root's control
-        // decision. If the remaining violation is only that Root attempted to
-        // complete while a certified blocking Gap exists, hand the certified
-        // content back to Root to choose the next action.
-        const controlOnly = rechecked.violations.length > 0 && rechecked.violations.every(v=>v?.target==='blocking-gap');
-        if (controlOnly) {
-          const progress = this.deriveNewRootProgress(rechecked.decision, seenKnowledgeKeys);
-          return { outcome:'pass', decision:rechecked.decision, feedback:[...feedback,...rechecked.violations.map(compactViolation)], actions:[...preActions,...checked.actions,...rechecked.actions,{action:'HANDOFF_ROOT_CONTROL_DECISION',target:'blocking-gap'}], sourceVerifications:traced.verifications, requiresRootDecision:true, ...progress };
-        }
-        return { outcome:'reject', decision:rechecked.decision, feedback:rechecked.violations.map(compactViolation), actions:[...preActions,...checked.actions,...rechecked.actions], commits:[], observedKnowledgeKeys:[], sourceVerifications:traced.verifications };
-      }
-      const progress = this.deriveNewRootProgress(rechecked.decision, seenKnowledgeKeys);
-      return { outcome:'pass', decision:rechecked.decision, feedback, actions:[...preActions,...checked.actions,{action:'CONVERT_ROOT_FAILURE_TO_GAP',target:'validator-root-gap'}], sourceVerifications:traced.verifications, ...progress };
+
+    const checkedRaw=this.analysisValidator.validateAndRepair(validationInput,policyContext);
+    const checked={...checkedRaw,decision:extractCandidateAfterValidation({...checkedRaw.decision,kind:proposed.kind},proposed,support)};
+    if(checked.valid){
+      const progress=this.deriveNewRootProgress(checked.decision,seenKnowledgeKeys);
+      return{outcome:'pass',decision:checked.decision,feedback:[],actions:[...preActions,...checked.actions],sourceVerifications:traced.verifications,...progress};
     }
-    const progress = this.deriveNewRootProgress(checked.decision, seenKnowledgeKeys);
-    return { outcome:'pass', decision:checked.decision, feedback:[], actions:[...preActions,...checked.actions], sourceVerifications:traced.verifications, ...progress };
-  }
 
-  semanticFeedback(reviews = []) {
-    return (Array.isArray(reviews) ? reviews : [])
-      .filter(item => item?.verdict !== 'supported')
-      .map(item => {
-        const type=item?.candidateType==='gap_resolution'?'gap_resolution':'claim';
-        const targetId=text(item?.targetId)||text(item?.id).replace(/^gap_resolution:/,'');
-        return {
-          principleId:'C-003', principleIds:['C-003'], ruleId:'C-003',
-          target:type==='gap_resolution'?`gap:${targetId}`:`claim:${targetId}`,
-          reason:type==='gap_resolution'
-            ? `Human Gateway 回答不足以证明该 Gap 已被解决：${text(item?.reason) || '回答没有明确给出该问题所需的决定或事实。'}`
-            : `可追溯原始证据不足以认证该语义结论：${text(item?.reason) || '存在未经证明的语义跳跃。'}`,
-          action:'SEMANTIC_DOWNGRADE', repairable:false,
-        };
-      });
-  }
+    // Deterministic validation failure does not justify another model Turn. Narrow
+    // the candidate to what the ledger can support and expose the missing part as
+    // a Gap. Root is woken again only if the narrowed state changes the legal
+    // control action, not to rewrite the same prose.
+    const feedback=checked.violations.map(compactViolation);
+    const safe=this.makeSafeRootResult(checked.decision,feedback);
+    const safeSupport=stateSupportForCandidate(currentState);
+    const recheckedRaw=this.analysisValidator.validateAndRepair({
+      ...safe,
+      evidence:mergeUniqueById(safe.evidence,safeSupport.evidence),
+      claims:mergeUniqueById(safe.claims,safeSupport.claims),
+      gaps:mergeUniqueById(safe.gaps,safeSupport.gaps),
+      kind:safe.kind==='complete'&&candidateIsEmpty(safe)&&hasCertifiedKnowledge(currentState)?'delegate':safe.kind,
+    },policyContext);
+    const rechecked={...recheckedRaw,decision:extractCandidateAfterValidation({...recheckedRaw.decision,kind:safe.kind},safe,safeSupport)};
 
-  applySemanticFailures(decision, reviews = []) {
-    const failedReviews=(Array.isArray(reviews)?reviews:[]).filter(item=>item?.verdict!=='supported');
-    if(!failedReviews.length)return copyAnalysis(decision);
-    const failedClaims=new Map(failedReviews.filter(item=>item?.candidateType!=='gap_resolution').map(item=>[text(item?.targetId)||text(item?.id),item]));
-    const failedGapResolutions=new Set(failedReviews.filter(item=>item?.candidateType==='gap_resolution').map(item=>text(item?.targetId)||text(item?.id).replace(/^gap_resolution:/,'')).filter(Boolean));
-    const d=copyAnalysis(decision);const existing=new Set(d.gaps.map(g=>text(g?.id)));
-    d.gapResolutions=normalizeGapResolutions(decision?.gapResolutions).filter(item=>!failedGapResolutions.has(text(item?.gapId)));
-    for(const claim of d.claims){
-      const review=failedClaims.get(text(claim?.id));
-      if(!review||claim?.level!==ClaimLevel.CONFIRMED)continue;
-      claim.level=ClaimLevel.SUPPORTED;
-      let base=`VALIDATOR-SEM-GAP-${text(claim.id)||'claim'}`.replace(/[^A-Za-z0-9_-]/g,'-');let id=base,n=2;
-      while(existing.has(id)){id=`${base}-${n++}`;}existing.add(id);
-      d.gaps.push({
-        id,
-        question:`待确认：${text(claim.statement)}`,
-        reason:`可追溯原始证据不足以证明该完整结论。${text(review?.reason)?` ${text(review.reason)}`:''}`,
-        kind:GapKind.MISSING_FACT,
-        blocking:false,
-        evidenceIds:uniqueStrings(claim.evidenceIds),
-      });
-    }
-    return d;
-  }
-
-  async semanticReviewRoot({ reviewed, policyContext = null, attempt = 1, seenKnowledgeKeys = new Set(), task = null, humanGatewayHistory = [], currentState = null, onProgress = null, onExecutionStarted = null, signal = null } = {}) {
-    if(!this.semanticVerifier||reviewed?.outcome!=='pass')return reviewed;
-    // SemanticProofVerifier owns candidate selection. Mode labels never decide
-    // whether a structurally certified Candidate is eligible for semantic proof.
-    const semantic=await this.semanticVerifier.review({task,decision:reviewed.decision,policyContext,sourceVerifications:reviewed.sourceVerifications,humanGatewayHistory,currentState,onProgress,onExecutionStarted,signal});
-    const feedback=this.semanticFeedback(semantic.reviews);
-    if(!feedback.length)return{...reviewed,actions:[...(reviewed.actions||[]),...(semantic.actions||[])]};
-
-    // Validator certifies the evidence boundary; it does not send Root back to
-    // rethink the same Task merely because a claimed fact exceeds that boundary.
-    // Narrow the claim immediately (CONFIRMED -> SUPPORTED + explicit Gap), keep
-    // failed Gap resolutions open, then let Root continue only if the resulting
-    // certified state genuinely requires a different control action.
-    const safe=this.applySemanticFailures(reviewed.decision,semantic.reviews);
-    const support=stateSupportForCandidate(currentState,safe);
-    const checkedRaw=this.analysisValidator.validateAndRepair({...safe,evidence:mergeUniqueById(safe.evidence,support.evidence),claims:mergeUniqueById(safe.claims,support.claims),gaps:mergeUniqueById(safe.gaps,support.gaps),kind:safe.kind==='complete'&&candidateIsEmpty(safe)&&hasCertifiedKnowledge(currentState)?'delegate':safe.kind},policyContext);
-    const checked={...checkedRaw,decision:extractCandidateAfterValidation({...checkedRaw.decision,kind:safe.kind},safe,support)};
-    if(!checked.valid){
-      const controlOnly=checked.violations.length>0&&checked.violations.every(v=>v?.target==='blocking-gap');
+    if(!rechecked.valid){
+      const controlOnly=rechecked.violations.length>0&&rechecked.violations.every(v=>v?.target==='blocking-gap');
       if(controlOnly){
-        const progress=this.deriveNewRootProgress(checked.decision,seenKnowledgeKeys);
-        return{outcome:'pass',decision:checked.decision,feedback:[...feedback,...checked.violations.map(compactViolation)],actions:[...(reviewed.actions||[]),...(semantic.actions||[]),...checked.actions,{action:'HANDOFF_ROOT_CONTROL_DECISION',target:'blocking-gap'}],requiresRootDecision:true,...progress};
+        const progress=this.deriveNewRootProgress(rechecked.decision,seenKnowledgeKeys);
+        return{outcome:'pass',decision:rechecked.decision,feedback:[...feedback,...rechecked.violations.map(compactViolation)],actions:[...preActions,...checked.actions,...rechecked.actions,{action:'HANDOFF_ROOT_CONTROL_DECISION',target:'blocking-gap'}],sourceVerifications:traced.verifications,requiresRootDecision:true,...progress};
       }
-      return{outcome:'reject',decision:checked.decision,feedback:[...feedback,...checked.violations.map(compactViolation)],actions:[...(reviewed.actions||[]),...(semantic.actions||[]),...checked.actions],commits:[],observedKnowledgeKeys:[]};
+      return{outcome:'reject',decision:rechecked.decision,feedback:rechecked.violations.map(compactViolation),actions:[...preActions,...checked.actions,...rechecked.actions],commits:[],observedKnowledgeKeys:[],sourceVerifications:traced.verifications};
     }
-    const progress=this.deriveNewRootProgress(checked.decision,seenKnowledgeKeys);
-    return{outcome:'pass',decision:checked.decision,feedback,actions:[...(reviewed.actions||[]),...(semantic.actions||[]),...checked.actions,{action:'CONVERT_SEMANTIC_FAILURE_TO_GAP',target:'root'}],...progress};
+
+    const progress=this.deriveNewRootProgress(rechecked.decision,seenKnowledgeKeys);
+    return{outcome:'pass',decision:rechecked.decision,feedback,actions:[...preActions,...checked.actions,...rechecked.actions,{action:'NARROW_UNSUPPORTED_ROOT_CANDIDATE',target:'root'}],sourceVerifications:traced.verifications,...progress};
+  }
+
+  // Kept as a compatibility surface while RootRuntime is slimmed. It is
+  // deliberately a no-op: Validator has no semantic model Turn anymore.
+  async semanticReviewRoot({ reviewed } = {}) {
+    return reviewed;
   }
 
   makeSafeRootResult(decision, feedback = []) {
@@ -232,7 +177,7 @@ export class ValidatorRuntime {
       d.gaps.push({
         id:gapId,
         question:unresolvedStatements.length ? `待确认：${unresolvedStatements.join('；')}` : '待确认：当前仍有结论缺少足够可追溯证据。',
-        reason:`经过一次针对性修正后，现有证据仍不足以把该部分作为已确认事实发布。${feedback.length ? ` 主要缺口：${feedback.slice(0,4).map(v=>v.reason).join('；')}` : ''}`,
+        reason:`Validator 的来源/结构核对未能支持该部分作为已确认事实。${feedback.length ? ` 主要缺口：${feedback.slice(0,4).map(v=>v.reason).join('；')}` : ''}`,
         kind:GapKind.MISSING_FACT,
         blocking:false,
         evidenceIds:[],
@@ -240,9 +185,6 @@ export class ValidatorRuntime {
     }
     d.stageResult=null;
     d.finalResult=null;
-    // Keep Root's control decision untouched. Validator certifies content; if the
-    // control decision conflicts with the narrowed content, reviewRoot returns an
-    // explicit Handoff so Root can decide the next action.
     return d;
   }
 
@@ -263,9 +205,6 @@ export class ValidatorRuntime {
       if (!seenKnowledgeKeys.has(key)) unseenGaps.push({ item:gap, key });
     }
 
-    // Validator owns the semantic-value decision for History. Task Core may later
-    // reject an invalid state transition, but no downstream component may derive a
-    // different History sentence from the same Candidate/Turn.
     if (!unseenClaims.length && !unseenGaps.length && !resolutions.length) {
       if (decision && typeof decision==='object') delete decision.__historyCommit;
       return { commits:[], observedKnowledgeKeys:[] };
