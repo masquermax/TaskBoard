@@ -11,7 +11,6 @@ import { DailyCleanupController } from '../core/cleanup-controller.js';
 import { ExtensionRegistry, OrchestrationMode } from '../extensions/runtime/extension-registry.js';
 import { SurfaceManager } from '../extensions/runtime/surface-manager.js';
 import { GovernanceCompiler } from '../governance/governance-compiler.js';
-import { AnalysisResultValidator } from '../governance/analysis-validator.js';
 import { ValidatorRuntime } from '../governance/validator-runtime.js';
 import { TaskContractFidelityVerifier } from '../governance/task-contract-fidelity.js';
 import { CompletionAssessmentVerifier } from '../governance/completion-assessment-verifier.js';
@@ -84,13 +83,11 @@ export function bootstrap({
   const settingsStore=new RuntimeSettingsStore({file:resolve(rootDir,'data/settings.json')});
   const runtimeSettings=settingsStore.get();
   const governanceCompiler=new GovernanceCompiler({rootDir:packageRoot});
-  const analysisValidator=new AnalysisResultValidator();
   const modelRouter=new ModelRouter({capabilityProvider});
 
-  // Runtime skeleton: Root judges, Subagent executes, Validator checks sources.
-  // Capability authority is a deterministic projection of the human Requirement;
-  // no Validator/model turn is allowed to grant project-write or network access.
-  const validatorRuntime=new ValidatorRuntime({analysisValidator});
+  // Runtime skeleton: Root judges, Subagent executes, Validator checks the source ledger.
+  // Validator has no semantic-repair owner and no model turn.
+  const validatorRuntime=new ValidatorRuntime();
   const taskContractFidelityVerifier=new TaskContractFidelityVerifier();
   const completionAssessmentVerifier=new CompletionAssessmentVerifier();
   const completionEvaluator=new CompletionEvaluator();
