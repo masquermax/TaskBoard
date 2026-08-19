@@ -8,9 +8,7 @@ import { InstrumentedRootRuntime, instrumentExecutorTelemetry } from '../core/ru
 import { SubagentRuntime } from '../core/subagent-runtime.js';
 import { Scheduler } from '../core/scheduler.js';
 import { DailyCleanupController } from '../core/cleanup-controller.js';
-import { createBuiltinExtensionRegistry } from '../extensions/builtins/index.js';
-import { OrchestrationMode } from '../extensions/runtime/extension-registry.js';
-import { registerExternalExtensions } from '../extensions/runtime/external-extension-loader.js';
+import { ExtensionRegistry, OrchestrationMode } from '../extensions/runtime/extension-registry.js';
 import { SurfaceManager } from '../extensions/runtime/surface-manager.js';
 import { GovernanceCompiler } from '../governance/governance-compiler.js';
 import { AnalysisResultValidator } from '../governance/analysis-validator.js';
@@ -45,20 +43,17 @@ function createUnavailableExecutor(){
 export function bootstrap({
   rootDir,
   dbFile=null,
-  executorName=process.env.TASKBOARD_EXECUTOR||'codex',
+  executorName=null,
   continuationName=process.env.TASKBOARD_CONTINUATION||null,
   extensionRegistry=null,
-  externalExtensions=null,
   allowMissingExecutor=false,
   startScheduler=true,
   taskboardUrl=process.env.TASKBOARD_URL||'http://127.0.0.1:4317',
 }={}){
   const persistence=createPersistence({rootDir,dbFile});const{database,repository}=persistence;
-  const registry=extensionRegistry||createBuiltinExtensionRegistry();
-  registerExternalExtensions(registry,{
-    rootDir,
-    ...(externalExtensions===null?{}:{specs:externalExtensions}),
-  });
+  // bootstrap is a host composition seam, not an Extension installation path.
+  // Concrete Extensions must already be present in the explicitly supplied registry.
+  const registry=extensionRegistry||new ExtensionRegistry();
   if(!registry?.create||!registry?.has)throw new Error('EXTENSION_REGISTRY_INVALID');
   const extensionKey=String(executorName||'').trim();
   let extension=null;
