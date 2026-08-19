@@ -161,7 +161,7 @@ export class ValidatorRuntime {
           reason:type==='gap_resolution'
             ? `Human Gateway 回答不足以证明该 Gap 已被解决：${text(item?.reason) || '回答没有明确给出该问题所需的决定或事实。'}`
             : `可追溯原始证据不足以认证该语义结论：${text(item?.reason) || '存在未经证明的语义跳跃。'}`,
-          action:'SEMANTIC_REWORK', repairable:true,
+          action:'SEMANTIC_DOWNGRADE', repairable:false,
         };
       });
   }
@@ -198,7 +198,12 @@ export class ValidatorRuntime {
     const semantic=await this.semanticVerifier.review({task,decision:reviewed.decision,policyContext,sourceVerifications:reviewed.sourceVerifications,humanGatewayHistory,currentState,onProgress,onExecutionStarted,signal});
     const feedback=this.semanticFeedback(semantic.reviews);
     if(!feedback.length)return{...reviewed,actions:[...(reviewed.actions||[]),...(semantic.actions||[])]};
-    if(attempt<2)return{outcome:'rework',decision:reviewed.decision,feedback,actions:[...(reviewed.actions||[]),...(semantic.actions||[])],commits:[],observedKnowledgeKeys:[]};
+
+    // Validator certifies the evidence boundary; it does not send Root back to
+    // rethink the same Task merely because a claimed fact exceeds that boundary.
+    // Narrow the claim immediately (CONFIRMED -> SUPPORTED + explicit Gap), keep
+    // failed Gap resolutions open, then let Root continue only if the resulting
+    // certified state genuinely requires a different control action.
     const safe=this.applySemanticFailures(reviewed.decision,semantic.reviews);
     const support=stateSupportForCandidate(currentState,safe);
     const checkedRaw=this.analysisValidator.validateAndRepair({...safe,evidence:mergeUniqueById(safe.evidence,support.evidence),claims:mergeUniqueById(safe.claims,support.claims),gaps:mergeUniqueById(safe.gaps,support.gaps),kind:safe.kind==='complete'&&candidateIsEmpty(safe)&&hasCertifiedKnowledge(currentState)?'delegate':safe.kind},policyContext);
