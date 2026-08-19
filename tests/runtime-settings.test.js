@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DEFAULT_RUNTIME_SETTINGS, RuntimeSettingsStore, executionLimitsFromCapability, migrateRuntimeSettings, normalizeRuntimeSettings, resolveEffectiveRuntimeSettings } from '../src/core/runtime-settings.js';
+import { createBuiltinExtensionRegistry } from '../src/extensions/builtins/index.js';
 
 test('simple runtime settings expose only task concurrency and per-Root maximum Subagents, persist only after user changes them',()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-settings-'));
@@ -66,7 +67,7 @@ test('applying simple settings changes live Scheduler and per-Root Subagent caps
   const { bootstrap } = await import('../src/server/bootstrap.js');
   const dir=mkdtempSync(join(tmpdir(),'taskboard-settings-live-'));
   try{
-    const runtime=bootstrap({rootDir:dir,executorName:'mock',startScheduler:false});
+    const runtime=bootstrap({rootDir:dir,executorName:'mock',extensionRegistry:createBuiltinExtensionRegistry(),startScheduler:false});
     assert.equal(runtime.scheduler.maxConcurrentTasks,2);
     assert.equal(runtime.rootRuntime.maxConcurrentSubagents,3);
     const state=runtime.applyRuntimeSettings({taskConcurrency:1,taskMaxSubagents:5});
