@@ -13,7 +13,6 @@ import { SurfaceManager } from '../extensions/runtime/surface-manager.js';
 import { GovernanceCompiler } from '../governance/governance-compiler.js';
 import { ValidatorRuntime } from '../governance/validator-runtime.js';
 import { TaskContractFidelityVerifier } from '../governance/task-contract-fidelity.js';
-import { CompletionAssessmentVerifier } from '../governance/completion-assessment-verifier.js';
 import { CompletionEvaluator } from '../governance/completion-evaluator.js';
 import { RuntimeSettingsStore, executionLimitsFromCapability, resolveEffectiveRuntimeSettings } from '../core/runtime-settings.js';
 
@@ -32,7 +31,6 @@ function createUnavailableExecutor(){
     async health(){return{executor:null,displayName:'未配置',available:false,ready:false,error:'EXECUTOR_NOT_CONFIGURED'};},
     async runRoot(){return unavailable();},
     async runSubagent(){return unavailable();},
-    async runValidator(){return unavailable();},
     cleanupTaskWorkspace(){return false;},
     close(){},
   };
@@ -54,23 +52,12 @@ export function bootstrap({
   const extensionKey=String(executorName||'').trim();
   let extension=null;
   if(extensionKey&&registry.has(extensionKey))extension=registry.create(extensionKey,{rootDir,taskboardUrl});
-  else if(extensionKey&&!allowMissingExecutor){
-    try{database.close();}catch{/* fail-closed cleanup */}
-    throw new Error(`EXTENSION_NOT_FOUND:${extensionKey}`);
-  }
-  if(extension&&extension.orchestrationMode!==OrchestrationMode.TASKBOARD){
-    try{database.close();}catch{/* fail-closed cleanup */}
-    throw new Error(`EXTENSION_ORCHESTRATION_MODE_UNSUPPORTED:${extension.orchestrationMode}`);
-  }
+  else if(extensionKey&&!allowMissingExecutor){try{database.close();}catch{/* fail-closed cleanup */}throw new Error(`EXTENSION_NOT_FOUND:${extensionKey}`);}
+  if(extension&&extension.orchestrationMode!==OrchestrationMode.TASKBOARD){try{database.close();}catch{/* fail-closed cleanup */}throw new Error(`EXTENSION_ORCHESTRATION_MODE_UNSUPPORTED:${extension.orchestrationMode}`);}
 
   const continuationKey=String(continuationName||'').trim()||null;
-  const continuationExtension=continuationKey
-    ? (continuationKey===extension?.id ? extension : registry.create(continuationKey,{rootDir,taskboardUrl}))
-    : null;
-  if(continuationExtension&&!continuationExtension.continuation){
-    try{database.close();}catch{/* fail-closed cleanup */}
-    throw new Error(`EXTENSION_HAS_NO_CONTINUATION:${continuationKey}`);
-  }
+  const continuationExtension=continuationKey?(continuationKey===extension?.id?extension:registry.create(continuationKey,{rootDir,taskboardUrl})):null;
+  if(continuationExtension&&!continuationExtension.continuation){try{database.close();}catch{/* fail-closed cleanup */}throw new Error(`EXTENSION_HAS_NO_CONTINUATION:${continuationKey}`);}
   const continuation=continuationExtension?.continuation||null;
 
   const attachmentStore=new AttachmentStore({rootDir:resolve(rootDir,'data/attachments')});
@@ -85,15 +72,14 @@ export function bootstrap({
   const governanceCompiler=new GovernanceCompiler({rootDir:packageRoot});
   const modelRouter=new ModelRouter({capabilityProvider});
 
-  // Runtime skeleton: Root judges, Subagent executes, Validator checks the source ledger.
-  // Validator has no semantic-repair owner and no model turn.
+  // Runtime skeleton: Root judges, Subagent executes, Validator checks sources;
+  // CompletionEvaluator deterministically checks Root's explicit obligation mapping.
   const validatorRuntime=new ValidatorRuntime();
   const taskContractFidelityVerifier=new TaskContractFidelityVerifier();
-  const completionAssessmentVerifier=new CompletionAssessmentVerifier();
   const completionEvaluator=new CompletionEvaluator();
   const subagentRuntime=new SubagentRuntime({executor,modelRouter});
   const currentLimits=()=>executionLimitsFromCapability(capabilityProvider?.snapshot?.()||null);
-  const rootRuntime=new InstrumentedRootRuntime({executor,modelRouter,subagentRuntime,governanceCompiler,validatorRuntime,taskContractFidelityVerifier,completionAssessmentVerifier,completionEvaluator,maxConcurrentSubagents:runtimeSettings.taskMaxSubagents,capabilityLimits:currentLimits});
+  const rootRuntime=new InstrumentedRootRuntime({executor,modelRouter,subagentRuntime,governanceCompiler,validatorRuntime,taskContractFidelityVerifier,completionEvaluator,maxConcurrentSubagents:runtimeSettings.taskMaxSubagents,capabilityLimits:currentLimits});
   const scheduler=new Scheduler({repository,taskService,rootRuntime,maxConcurrentTasks:runtimeSettings.taskConcurrency,capabilityLimits:currentLimits});
   const runtimeSettingsState=()=>resolveEffectiveRuntimeSettings(settingsStore.get(),capabilityProvider?.snapshot?.()||null);
   const applyRuntimeSettings=next=>{const value=settingsStore.update(next);rootRuntime.setConcurrency?.(value.taskMaxSubagents);scheduler.setConcurrency?.(value.taskConcurrency);return runtimeSettingsState();};
