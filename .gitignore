@@ -8,7 +8,5 @@ data/attachments/*
 data/runtime/*
 !data/runtime/.gitkeep
 data/executor-connections/
-data/extensions/*
-!data/extensions/.gitkeep
 *.log
 .DS_Store
