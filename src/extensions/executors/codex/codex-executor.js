@@ -65,11 +65,10 @@ const subagentSchema = {
     result:{type:'string'},
     evidence:{type:'array',items:evidenceSchema,maxItems:40},
     findings:{type:'array',items:subagentFindingSchema,maxItems:30},
-    discoveries:{type:'array',items:{type:'object',properties:{summary:{type:'string'},whyRelevant:{type:'string'},suggestedNextQuestion:{type:'string'}},required:['summary','whyRelevant','suggestedNextQuestion'],additionalProperties:false},maxItems:12},
     blocker:{type:['string','null']},
     uncertainty:{type:['string','null']},
   },
-  required:['delegationId','result','evidence','findings','discoveries','blocker','uncertainty'],
+  required:['delegationId','result','evidence','findings','blocker','uncertainty'],
   additionalProperties:false,
 };
 
@@ -233,6 +232,8 @@ export class CodexExecutor extends ExecutorPort {
     return `${policyPrompt(policyContext)}
 
 Turn protocol:
+- Think as deeply as needed internally, but cross the Root boundary with only the minimum sufficient decision delta. Do not restate the Task, source material, completed Work, Subagent search process, or already-certified content. Every emitted item must change the current judgment, evidence relation, blocker, or next action.
+- Root advances the Task in two ways only: (1) split the current goal into the smallest sufficient bounded Work Units that can run independently/in parallel where possible; (2) when results return, map concise Task-level conclusions to Evidence ids and choose the next action. Do not summarize Subagent prose.
 - Evidence/Claims/Gaps are THIS TURN'S knowledge delta. Committed knowledge is carried forward by TaskBoard.
 - When a Work Unit already supplies an Evidence id, cite that id from Claims/Gaps instead of rewriting it. Root evidence[] is only for Human/Reference material already present in Root context; project/attachment/search/runtime Evidence belongs to bounded Subagent work.
 - Recommendations/Steps are current presentation over certified knowledge, not durable memory. On kind=complete return only the concise recommendations/steps that should be shown now.
@@ -288,12 +289,13 @@ Return only the validator schema.`;
     return `${policyPrompt(policyContext)}
 
 Work Unit protocol:
-- Execute only delegation.goal and delegation.expectedOutput; delegation.stopCondition is the execution boundary.
+- Execute only delegation.goal and delegation.expectedOutput; delegation.stopCondition is the execution boundary. Do not investigate, plan, or suggest work outside this Work Unit.
+- Stop as soon as expectedOutput is established by sufficient traceable evidence. Remaining time/tool budget is not a reason to continue searching.
 - delegation.projectAccess and delegation.networkAccess are the complete Runtime-granted Project/network capabilities for this Work Unit.
-- evidence[] contains traceable source-near material found while executing this Work Unit.
+- evidence[] contains only traceable source-near material necessary for the current Work Unit result.
 - Search output is only a locator. When search finds a source-code fact, read the actual file and emit PROJECT_FILE Evidence with the concrete file locator + observation.
-- findings[] contains only local findings from that evidence. Do not classify Task-level truth, gaps, recommendations, completion, or next work; Root owns those judgments.
-- discoveries[] carries relevant observations outside the current Work Unit for Root planning.
+- findings[] contains only local findings from that evidence. Do not classify Task-level truth, gaps, recommendations, completion, next work, or out-of-scope discoveries; Root owns those judgments.
+- Keep result compact: state the Work Unit result, not the search process or material already represented by Evidence/findings.
 - Executor Environment Snapshot below is a runtime fact. Do not re-probe capabilities already marked unavailable; choose an available path instead.
 ${validationFeedback?.length?`VALIDATION FEEDBACK — correct only these source-trace issues inside the same Work Unit. ${JSON.stringify(validationFeedback)}`:''}
 
