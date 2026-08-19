@@ -1,4 +1,4 @@
-import { ClaimLevel, EvidenceKind } from './analysis-contract.js';
+import { ClaimLevel } from './analysis-contract.js';
 import { resolveRequirementRefs } from './task-contract-fidelity.js';
 
 function text(value){return String(value==null?'':value).trim();}
@@ -7,15 +7,23 @@ function obligations(task){return (Array.isArray(task?.taskContract?.obligations
 function resultText(proposal={}){return text(proposal?.finalResult)||text(proposal?.summary)||text(proposal?.stageResult);}
 function proposalClaim(proposal={}){return{finalResult:text(proposal?.finalResult)||null,summary:text(proposal?.summary)||null,stageResult:text(proposal?.stageResult)||null};}
 function requirementContext(excerpts=[]){return excerpts.map(excerpt=>({sourceId:text(excerpt?.sourceId),start:Number(excerpt?.start),end:Number(excerpt?.end),text:text(excerpt?.text)}));}
+
+// Completion proves a governed obligation from already-certified Task facts.
+// Claim -> Evidence was certified earlier by Validator; do not resend the raw
+// Evidence ledger to another model turn. Only CONFIRMED Task-level Claims can
+// prove completion. SUPPORTED/inferred material remains useful context for Root,
+// but is not completion proof.
 function certifiedProofMaterial(certifiedContext={}){
-  const evidence=(Array.isArray(certifiedContext?.evidence)?certifiedContext.evidence:[]).filter(item=>text(item?.id)&&item?.kind!==EvidenceKind.REQUIREMENT);
-  const evidenceIds=new Set(evidence.map(item=>text(item.id)));
-  const claims=(Array.isArray(certifiedContext?.claims)?certifiedContext.claims:[]).filter(item=>{
-    const level=text(item?.level);
-    const refs=Array.isArray(item?.evidenceIds)?item.evidenceIds.map(text).filter(Boolean):[];
-    return text(item?.id)&&(level===ClaimLevel.CONFIRMED||level===ClaimLevel.SUPPORTED)&&refs.some(id=>evidenceIds.has(id));
-  });
-  return[...evidence,...claims].map(item=>JSON.parse(JSON.stringify(item)));
+  return (Array.isArray(certifiedContext?.claims)?certifiedContext.claims:[])
+    .filter(item=>text(item?.id)&&text(item?.statement)&&item?.level===ClaimLevel.CONFIRMED)
+    .map(item=>({
+      id:text(item.id),
+      statement:text(item.statement),
+      level:ClaimLevel.CONFIRMED,
+      coverage:item?.coverage??null,
+      scope:item?.scope??null,
+      evidenceIds:(Array.isArray(item?.evidenceIds)?item.evidenceIds:[]).map(text).filter(Boolean),
+    }));
 }
 function proofRelation(obligation,proofMaterial){
   return{
@@ -23,11 +31,11 @@ function proofRelation(obligation,proofMaterial){
     subject:{obligationId:text(obligation.id)},
     criterion:obligation?.criterion||{},
     certifiedFactRefs:proofMaterial.map(item=>text(item?.id)).filter(Boolean),
-    claim:'Certified Facts in proofMaterial are sufficient to satisfy this governed Criterion.',
+    claim:'Certified Task Claims in proofMaterial are sufficient to satisfy this governed Criterion.',
     requirementContextRole:'Requirement provenance defines what is required and the governed Criterion; it is not completion evidence.',
     proposalRole:'Completion proposal is the candidate claim under review; it is not proof.',
-    supportRule:'Return supported only when proofMaterial Certified Facts alone satisfy the entire Criterion; partial proof is overreach.',
-    forbiddenProofSources:['completion proposal','Requirement wording alone','bare WorkReceipt','WorkUnit obligationRefs','taskMode','TaskStatus','completionReason','Scheduler lifecycle','UI Completed'],
+    supportRule:'Return supported only when the supplied CONFIRMED Task Claims alone satisfy the entire Criterion; partial proof is overreach.',
+    forbiddenProofSources:['raw Evidence ledger','SUPPORTED/inferred Claim','completion proposal','Requirement wording alone','bare WorkReceipt','WorkUnit obligationRefs','taskMode','TaskStatus','completionReason','Scheduler lifecycle','UI Completed'],
   };
 }
 function proofCandidate(task,obligation,proposal,excerpts,proofMaterial){
@@ -61,13 +69,13 @@ export class CompletionAssessmentVerifier{
       const refs=obligation?.requirementRefs??obligation?.requirement_refs??[];
       const resolved=resolveRequirementRefs(task?.requirementSources??task?.requirement_sources??[],refs);
       if(!resolved.valid||!resultText(proposal)){assessments.push(unresolved(obligation,!resolved.valid?'Obligation Requirement provenance is invalid.':'Completion proposal has no result to certify.'));continue;}
-      if(!proofMaterial.length){assessments.push(unresolved(obligation,'No Certified Facts are available to prove the completion criterion.'));continue;}
+      if(!proofMaterial.length){assessments.push(unresolved(obligation,'No CONFIRMED Task Claims are available to prove the completion criterion.'));continue;}
       candidates.push({obligation,candidate:proofCandidate(task,obligation,proposal,resolved.excerpts,proofMaterial)});
     }
     if(!candidates.length)return{checked:assessments.length>0,assessments};
     if(!this.available()){for(const {obligation} of candidates)assessments.push(unresolved(obligation,'Validator semantic certification is unavailable.'));return{checked:true,assessments};}
     await this.modelRouter?.prepare?.({role:'validator',task});
-    onProgress?.({summary:'Validator 正在核对完成条件',detail:`正在逐项核对 ${candidates.length} 个 governed obligation；不会重新调查 Task。`});
+    onProgress?.({summary:'Validator 正在核对完成条件',detail:`正在逐项核对 ${candidates.length} 个 governed obligation；只使用已认证 Task Claims，不重新提交原始 Evidence 或调查 Task。`});
     const response=await this.executor.runValidator({task,candidates:candidates.map(item=>item.candidate),policyContext,modelPolicy:this.modelRouter?.route?.({role:'validator',task})||null,onProgress,onExecutionStarted,signal});
     const reviews=new Map((Array.isArray(response?.reviews)?response.reviews:[]).map(item=>[text(item?.id),item]).filter(([id])=>id));
     for(const {obligation,candidate} of candidates){
