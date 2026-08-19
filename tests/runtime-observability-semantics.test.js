@@ -14,8 +14,8 @@ function delegation(id='audit') {
     id,
     title:'审计工作',
     goal:'取得可验证证据',
-    expectedOutput:'返回证据结论',
-    stopCondition:'证据足够后停止',
+    expectedOutput:'返回执行结果和来源',
+    stopCondition:'Root 指定的结果已经返回',
     projectAccess:'none',
     networkAccess:false,
     skillId:null,
@@ -33,9 +33,9 @@ test('Work Unit keeps issued/start/completion timestamps separate from last acti
     async runRoot(){ throw new Error('unused'); },
     async runSubagent({delegation:onWork,onExecutionStarted,onProgress}){
       onExecutionStarted?.();
-      onProgress?.({summary:'正在核对证据',detail:'已经取得一条证据，继续判断。'});
+      onProgress?.({summary:'正在执行',detail:'正在完成 Root 指定的 Work Unit。'});
       await new Promise(resolve=>setTimeout(resolve,5));
-      return {delegationId:onWork.id,result:'审计完成。',evidence:[],findings:[],discoveries:[],blocker:null,uncertainty:null};
+      return {delegationId:onWork.id,result:'审计完成。',evidence:[],blocker:null};
     },
   };
   const router=new ModelRouter();
@@ -51,8 +51,9 @@ test('Work Unit keeps issued/start/completion timestamps separate from last acti
 
   const issuedAt=unit.issuedAt;
   const outcome=await root.runStage(currentTask,session,{});
-  assert.equal(outcome.kind,'work_results_ready','a completed Subagent result must return to Root before the stage is cleared');
-  const completed=root.makeSnapshot(session).stage.workUnits[0];
+  assert.equal(outcome.kind,'stage_complete','a stage closes only after its Work Units finish');
+  assert.equal(session.currentStage,null,'closed stage is not kept as active work');
+  const completed=session.completedWorkUnits.find(item=>item.id==='audit');
   assert.equal(completed.status,'COMPLETED');
   assert.equal(completed.issuedAt,issuedAt,'progress updates must never rewrite issuance time');
   assert.ok(completed.startedAt,'first real Subagent admission must be recorded');
