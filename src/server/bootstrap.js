@@ -13,7 +13,6 @@ import { SurfaceManager } from '../extensions/runtime/surface-manager.js';
 import { GovernanceCompiler } from '../governance/governance-compiler.js';
 import { AnalysisResultValidator } from '../governance/analysis-validator.js';
 import { ValidatorRuntime } from '../governance/validator-runtime.js';
-import { SemanticProofVerifier } from '../governance/semantic-proof-verifier.js';
 import { TaskContractFidelityVerifier } from '../governance/task-contract-fidelity.js';
 import { CompletionAssessmentVerifier } from '../governance/completion-assessment-verifier.js';
 import { CompletionEvaluator } from '../governance/completion-evaluator.js';
@@ -51,8 +50,6 @@ export function bootstrap({
   taskboardUrl=process.env.TASKBOARD_URL||'http://127.0.0.1:4317',
 }={}){
   const persistence=createPersistence({rootDir,dbFile});const{database,repository}=persistence;
-  // bootstrap is a host composition seam, not an Extension installation path.
-  // Concrete Extensions must already be present in the explicitly supplied registry.
   const registry=extensionRegistry||new ExtensionRegistry();
   if(!registry?.create||!registry?.has)throw new Error('EXTENSION_REGISTRY_INVALID');
   const extensionKey=String(executorName||'').trim();
@@ -62,17 +59,11 @@ export function bootstrap({
     try{database.close();}catch{/* fail-closed cleanup */}
     throw new Error(`EXTENSION_NOT_FOUND:${extensionKey}`);
   }
-  // The current TaskBoard Root/Subagent/Validator execution graph owns Work
-  // orchestration. A future runtime-native agent tree is a distinct execution
-  // contract and must never be admitted through the existing runSubagent path.
   if(extension&&extension.orchestrationMode!==OrchestrationMode.TASKBOARD){
     try{database.close();}catch{/* fail-closed cleanup */}
     throw new Error(`EXTENSION_ORCHESTRATION_MODE_UNSUPPORTED:${extension.orchestrationMode}`);
   }
 
-  // Continuation is an optional, independently bound Extension Point. It carries
-  // disposable cross-session cognition only; Executor/Core semantics do not
-  // depend on its presence. One process binds at most one active continuation.
   const continuationKey=String(continuationName||'').trim()||null;
   const continuationExtension=continuationKey
     ? (continuationKey===extension?.id ? extension : registry.create(continuationKey,{rootDir,taskboardUrl}))
@@ -85,7 +76,6 @@ export function bootstrap({
 
   const attachmentStore=new AttachmentStore({rootDir:resolve(rootDir,'data/attachments')});
   const taskService=new TaskService(repository,{attachmentStore,defaultExecutorKey:extension?.id||'unconfigured'});
-
   if(extension&&!extension.executor)throw new Error(`EXTENSION_HAS_NO_EXECUTOR:${extensionKey}`);
   const executor=instrumentExecutorTelemetry(extension?.executor||createUnavailableExecutor());
   const capabilityProvider=extension?.capabilityProvider||null;
@@ -96,14 +86,14 @@ export function bootstrap({
   const governanceCompiler=new GovernanceCompiler({rootDir:packageRoot});
   const analysisValidator=new AnalysisResultValidator();
   const modelRouter=new ModelRouter({capabilityProvider});
-  // Validator authority must not disappear just because an Executor lacks a
-  // semantic-review turn. SemanticProofVerifier fails only source material that
-  // the deterministic verifier explicitly marks as requiring semantic
-  // interpretation (for example pixels); ordinary text/code stays model-free.
-  const semanticVerifier=new SemanticProofVerifier({executor,modelRouter});
-  const validatorRuntime=new ValidatorRuntime({analysisValidator,semanticVerifier});
+
+  // Runtime skeleton: Root judges, Subagent executes, Validator checks the ledger.
+  // Validator therefore needs deterministic analysis/source checks only; there is
+  // no resident semantic proof model and completion no longer starts another model
+  // turn. Requirement-authority fidelity remains separate pending its own audit.
+  const validatorRuntime=new ValidatorRuntime({analysisValidator});
   const taskContractFidelityVerifier=new TaskContractFidelityVerifier({executor,modelRouter});
-  const completionAssessmentVerifier=new CompletionAssessmentVerifier({executor,modelRouter});
+  const completionAssessmentVerifier=new CompletionAssessmentVerifier();
   const completionEvaluator=new CompletionEvaluator();
   const subagentRuntime=new SubagentRuntime({executor,modelRouter});
   const currentLimits=()=>executionLimitsFromCapability(capabilityProvider?.snapshot?.()||null);
