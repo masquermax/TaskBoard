@@ -1,5 +1,4 @@
 import { createRequire } from 'node:module';
-import { existsSync, readdirSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 
 const require = createRequire(import.meta.url);
@@ -27,26 +26,7 @@ export function configuredExternalExtensionSpecs(value = process.env.TASKBOARD_E
   return normalizeSpecs(value);
 }
 
-export function discoveredExternalExtensionSpecs({ rootDir = process.cwd(), extensionsDir = resolve(rootDir, 'data/extensions') } = {}) {
-  if (!existsSync(extensionsDir)) return [];
-  return readdirSync(extensionsDir, { withFileTypes: true })
-    .filter(entry => entry.isDirectory())
-    .map(entry => resolve(extensionsDir, entry.name, 'index.cjs'))
-    .filter(file => existsSync(file));
-}
-
-export function defaultExternalExtensionSpecs({ rootDir = process.cwd() } = {}) {
-  return [...new Set([
-    ...discoveredExternalExtensionSpecs({ rootDir }),
-    ...configuredExternalExtensionSpecs(),
-  ])];
-}
-
-export function registerExternalExtensions(registry, {
-  rootDir = process.cwd(),
-  specs = defaultExternalExtensionSpecs({ rootDir }),
-  defaultExecutorIds = null,
-} = {}) {
+export function registerExternalExtensions(registry, { rootDir = process.cwd(), specs = configuredExternalExtensionSpecs() } = {}) {
   const normalized = normalizeSpecs(specs);
   if (!normalized.length) return registry;
   if (!registry?.register) throw new Error('EXTENSION_REGISTRY_REQUIRED');
@@ -70,7 +50,6 @@ export function registerExternalExtensions(registry, {
     if (!id) throw new Error(`EXTERNAL_EXTENSION_ID_REQUIRED:${spec}`);
     if (typeof factory !== 'function') throw new Error(`EXTERNAL_EXTENSION_FACTORY_REQUIRED:${id}`);
     registry.register(id, factory);
-    if (descriptor?.defaultExecutor === true && Array.isArray(defaultExecutorIds)) defaultExecutorIds.push(id);
   }
   return registry;
 }
