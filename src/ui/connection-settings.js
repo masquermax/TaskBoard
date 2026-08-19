@@ -1,3 +1,5 @@
+import './extension-management.js';
+
 const $=id=>document.getElementById(id);
 const embedConfig=globalThis.__TASKBOARD_EMBED_CONFIG__||null;
 const NEW_PROFILE_ID='__new__';
@@ -11,6 +13,7 @@ const errorCopy={
   EXECUTOR_CONNECTION_BASE_URL_INVALID:'API 地址必须是有效的 http/https 地址，且不能包含账号、密码、查询参数或 # 片段',
   EXECUTOR_CONNECTION_BASE_URL_REQUIRED:'请填写 API 地址',
   EXECUTOR_CONNECTION_API_KEY_REQUIRED:'第一次保存这个连接时必须填写 API Key',
+  EXECUTOR_CONNECTION_DEFAULT_MODEL_REQUIRED:'请填写默认模型',
   EXECUTOR_CONNECTION_PROFILE_ID_INVALID:'连接标识无效，请重新新建',
   EXECUTOR_CONNECTION_PROFILE_NOT_FOUND:'这个 AI 连接已经不存在，请刷新后重试',
   EXECUTOR_CONNECTION_ACTIVE_PROFILE_DELETE:'正在使用的 AI 连接不能直接删除，请先切换到其他连接',
