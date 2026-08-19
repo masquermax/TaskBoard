@@ -1,5 +1,6 @@
 import { SourceTraceVerifier } from '../governance/source-trace-verifier.js';
 import { competingEffectAttempts } from './effect-recovery.js';
+import { finalizeWorkUnitObservability } from './work-unit-observability.js';
 import { scopeTaskInputs } from './task-input-scope.js';
 import { workMayMutate } from './work-capability.js';
 
@@ -47,7 +48,7 @@ function blockedDependency(delegation){
 
 function unmetDependencyResult(delegation,dependency){
   const dependencyId=text(dependency?.id)||'unknown';
-  const reason=text(dependency?.result?.blocker)||'前置 Work Unit 未满足其工作契约。';
+  const reason=text(dependency?.result?.blocker)||'前置 Work Unit 未满足工作契约。';
   return {
     delegationId:text(delegation?.id),
     result:`前置 Work Unit ${dependencyId} 未满足工作契约；当前依赖 Work Unit 未执行，控制权交回 Root 重新规划。`,
@@ -110,13 +111,14 @@ export class SubagentRuntime {
     const blocker=text(raw?.blocker)||null;
     const uncertainty=text(raw?.uncertainty)||null;
 
-    // Tool/source telemetry is finalized only after SourceTraceVerifier has
-    // established the Evidence set. Diagnostics can observe verified Evidence;
-    // they cannot create, promote or alter it.
+    // The collector is transport/runtime telemetry only. Finalize it from the
+    // SourceTraceVerifier-owned Evidence set so logging cannot invent Evidence.
     try {
-      this.executor.finalizeWorkUnitDiagnostics?.({
-        diagnostics:raw?.__taskboardWorkUnitDiagnostics||null,
+      finalizeWorkUnitObservability({
+        taskId:scopedTask?.id||task?.id||null,
+        workUnitId:delegation?.id||null,
         evidence,
+        status:'completed',
         blocker,
         uncertainty,
       });
