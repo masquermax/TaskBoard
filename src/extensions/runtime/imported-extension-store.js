@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { EXTENSION_API_VERSION } from './extension-registry.js';
 
@@ -12,25 +12,27 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function normalizedDirectory(value, rootDir) {
-  const raw = text(value);
-  if (!raw) throw new Error('EXTENSION_IMPORT_DIRECTORY_REQUIRED');
-  const directory = isAbsolute(raw) || /^[A-Za-z]:[\\/]/.test(raw) ? resolve(raw) : resolve(rootDir || process.cwd(), raw);
-  if (!existsSync(directory)) throw new Error('EXTENSION_IMPORT_DIRECTORY_NOT_FOUND');
-  if (!statSync(directory).isDirectory()) throw new Error('EXTENSION_IMPORT_DIRECTORY_NOT_DIRECTORY');
-  return directory;
-}
-
 function inside(directory, target) {
   const rel = relative(directory, target);
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
+function normalizedDirectory(value, rootDir) {
+  const raw = text(value);
+  if (!raw) throw new Error('EXTENSION_IMPORT_DIRECTORY_REQUIRED');
+  const candidate = isAbsolute(raw) || /^[A-Za-z]:[\\/]/.test(raw) ? resolve(raw) : resolve(rootDir || process.cwd(), raw);
+  if (!existsSync(candidate)) throw new Error('EXTENSION_IMPORT_DIRECTORY_NOT_FOUND');
+  if (!statSync(candidate).isDirectory()) throw new Error('EXTENSION_IMPORT_DIRECTORY_NOT_DIRECTORY');
+  return realpathSync(candidate);
+}
+
 function readManifest(directory) {
   const packageFile = resolve(directory, 'package.json');
   if (!existsSync(packageFile) || !statSync(packageFile).isFile()) throw new Error('EXTENSION_IMPORT_MANIFEST_REQUIRED');
+  const realPackageFile=realpathSync(packageFile);
+  if (!inside(directory, realPackageFile)) throw new Error('EXTENSION_IMPORT_MANIFEST_OUTSIDE_DIRECTORY');
   let pkg;
-  try { pkg = JSON.parse(readFileSync(packageFile, 'utf8')); }
+  try { pkg = JSON.parse(readFileSync(realPackageFile, 'utf8')); }
   catch { throw new Error('EXTENSION_IMPORT_MANIFEST_INVALID'); }
   const manifest = pkg?.taskboard;
   if (!manifest || typeof manifest !== 'object') throw new Error('EXTENSION_IMPORT_MANIFEST_REQUIRED');
@@ -42,9 +44,11 @@ function readManifest(directory) {
   const displayName = text(manifest.displayName || pkg.name || id, 160) || id;
   const entryName = text(manifest.entry || pkg.main || 'index.cjs', 1024);
   if (!entryName) throw new Error('EXTENSION_IMPORT_ENTRY_REQUIRED');
-  const entryPath = resolve(directory, entryName);
+  const candidateEntryPath = resolve(directory, entryName);
+  if (!inside(directory, candidateEntryPath)) throw new Error('EXTENSION_IMPORT_ENTRY_OUTSIDE_DIRECTORY');
+  if (!existsSync(candidateEntryPath) || !statSync(candidateEntryPath).isFile()) throw new Error('EXTENSION_IMPORT_ENTRY_NOT_FOUND');
+  const entryPath=realpathSync(candidateEntryPath);
   if (!inside(directory, entryPath)) throw new Error('EXTENSION_IMPORT_ENTRY_OUTSIDE_DIRECTORY');
-  if (!existsSync(entryPath) || !statSync(entryPath).isFile()) throw new Error('EXTENSION_IMPORT_ENTRY_NOT_FOUND');
   const provides = {
     executor: manifest?.provides?.executor === true,
     continuation: manifest?.provides?.continuation === true,
