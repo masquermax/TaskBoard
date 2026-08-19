@@ -1,9 +1,12 @@
 import { spawn, spawnSync } from 'node:child_process';
 import readline from 'node:readline';
 import { APP_VERSION } from '../../../version.js';
+import { WorkUnitObservability, registerWorkUnitObservability, failWorkUnitObservability } from '../../../core/work-unit-observability.js';
 import { CodexRuntimeResolver } from './codex-runtime-resolver.js';
 
 const DIAGNOSTIC_RPC_METHODS=new Set(['initialize','model/list','account/read','config/read','modelProvider/capabilities/read','thread/start','turn/start']);
+const LOG_LEVELS=Object.freeze({error:0,warn:1,info:2,debug:3,trace:4});
+function normalizeLogLevel(value){const level=String(value||'info').trim().toLowerCase();return Object.prototype.hasOwnProperty.call(LOG_LEVELS,level)?level:'info';}
 
 function childOptions(extra = {}) {
   return {
@@ -28,7 +31,7 @@ function normalizedLaunchProfile(provider) {
 }
 
 export class CodexAppServerClient {
-  constructor({ command = process.env.CODEX_COMMAND || process.env.TASKBOARD_CODEX_COMMAND || null, runtimeResolver = null, diagnosticLogger = null, turnEventTimeoutMs = 30 * 60 * 1000, subagentExecutionWindowMs = null, launchProfileProvider = null } = {}) {
+  constructor({ command = process.env.CODEX_COMMAND || process.env.TASKBOARD_CODEX_COMMAND || null, runtimeResolver = null, diagnosticLogger = null, logLevel = process.env.TASKBOARD_LOG_LEVEL || 'info', turnEventTimeoutMs = 30 * 60 * 1000, subagentExecutionWindowMs = null, launchProfileProvider = null } = {}) {
     this.runtimeResolver = runtimeResolver || new CodexRuntimeResolver({ env: process.env });
     if (command) {
       this.runtimeResolver.env = { ...this.runtimeResolver.env, CODEX_COMMAND: command };
@@ -45,15 +48,18 @@ export class CodexAppServerClient {
     this.connectionGeneration = 0;
     this.generationListeners = new Set();
     this.diagnosticLogger = diagnosticLogger || (line => console.error(line));
+    this.logLevel = normalizeLogLevel(logLevel);
     this.activeTurnCount = 0;
     this.turnEventTimeoutMs = Math.max(1_000, Number(turnEventTimeoutMs) || 30 * 60 * 1000);
     this.subagentExecutionWindowMs = Math.max(1_000, Number(subagentExecutionWindowMs) || this.turnEventTimeoutMs);
     this.launchProfileProvider = launchProfileProvider;
   }
 
-  recordDiagnostic(event, data = {}) {
+  recordDiagnostic(event, data = {}, level = 'info') {
+    const normalized=normalizeLogLevel(level);
+    if(LOG_LEVELS[normalized]>LOG_LEVELS[this.logLevel])return;
     try {
-      this.diagnosticLogger?.(`[codex-runtime] ${JSON.stringify({ ts:new Date().toISOString(), event, ...data })}`);
+      this.diagnosticLogger?.(`[codex-runtime] ${JSON.stringify({ ts:new Date().toISOString(), level:normalized, event, ...data })}`);
     } catch { /* diagnostics must never affect execution */ }
   }
 
@@ -134,12 +140,12 @@ export class CodexAppServerClient {
             generation:this.connectionGeneration,
             activeRpcMethods:this.activeRpcMethods(),
             message:text.slice(0,1000),
-          });
+          },'warn');
         }
       }
     });
     this.child.on('exit', code => {
-      this.recordDiagnostic('app-server-exit',{pid:this.child?.pid||null,generation:this.connectionGeneration,code:code??null});
+      this.recordDiagnostic('app-server-exit',{pid:this.child?.pid||null,generation:this.connectionGeneration,code:code??null},code===0?'info':'warn');
       const err = new Error(`Codex app-server exited (${code ?? 'unknown'})`);
       this.failAll(err);
       this.initialized = false;
@@ -189,7 +195,7 @@ export class CodexAppServerClient {
       clearTimeout(pending.timer);
       this.pending.delete(msg.id);
       if (DIAGNOSTIC_RPC_METHODS.has(pending.method)) {
-        this.recordDiagnostic('rpc-end',{method:pending.method,id:msg.id,generation:this.connectionGeneration,durationMs:Date.now()-pending.startedAt,ok:!msg.error});
+        this.recordDiagnostic('rpc-end',{method:pending.method,id:msg.id,generation:this.connectionGeneration,durationMs:Date.now()-pending.startedAt,ok:!msg.error},'debug');
       }
       if (msg.error) {
         const error = new Error(msg.error.message || JSON.stringify(msg.error));
@@ -268,13 +274,13 @@ export class CodexAppServerClient {
     const id = this.nextId++;
     const startedAt=Date.now();
     if (DIAGNOSTIC_RPC_METHODS.has(method)) {
-      this.recordDiagnostic('rpc-start',{method,id,generation:this.connectionGeneration,pid:this.child?.pid||null});
+      this.recordDiagnostic('rpc-start',{method,id,generation:this.connectionGeneration,pid:this.child?.pid||null},'debug');
     }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         if (DIAGNOSTIC_RPC_METHODS.has(method)) {
-          this.recordDiagnostic('rpc-timeout',{method,id,generation:this.connectionGeneration,pid:this.child?.pid||null,durationMs:Date.now()-startedAt,timeoutMs});
+          this.recordDiagnostic('rpc-timeout',{method,id,generation:this.connectionGeneration,pid:this.child?.pid||null,durationMs:Date.now()-startedAt,timeoutMs},'warn');
         }
         reject(new Error(`Timed out calling Codex ${method}`));
       }, timeoutMs);
@@ -410,7 +416,7 @@ export class CodexAppServerClient {
         cwd,
         command:this.command||null,
         version:this.version||null,
-      });
+      },'error');
       const error=new Error('CODEX_RUNTIME_ROOTS_NOT_APPLIED: app-server did not confirm the exact Runtime workspace roots.');error.nonRetryable=true;throw error;
     }
     const threadId = thread.thread.id;
@@ -438,6 +444,14 @@ export class CodexAppServerClient {
     });
     const boundedSubagent=diagnosticContext?.role==='subagent'&&String(stopCondition||'').trim();
     const turnStartedAt=Date.now();
+    const workUnitObserver=boundedSubagent?registerWorkUnitObservability(new WorkUnitObservability({
+      taskId:routeMeta.taskId,
+      workUnitId:routeMeta.workUnitId,
+      turnId,
+      startedAt:turnStartedAt,
+      stopCondition,
+      emitDiagnostic:(event,data,level)=>this.recordDiagnostic(event,data,level),
+    })):null;
     const softBoundaryAt=boundedSubagent?turnStartedAt+Math.floor(this.subagentExecutionWindowMs/3):null;
     const hardBoundaryAt=boundedSubagent?turnStartedAt+Math.floor((this.subagentExecutionWindowMs*2)/3):null;
     let convergenceSteered=false;
@@ -472,19 +486,21 @@ export class CodexAppServerClient {
             convergenceSteered=true;
             try {
               await this.request('turn/steer',{threadId,input:[{type:'text',text:steerText}],expectedTurnId:turnId},8_000);
-              this.recordDiagnostic('turn-steered',{...routeMeta,threadId,turnId,reason:'work-unit-convergence',elapsedMs:Date.now()-turnStartedAt});
+              const steerAt=Date.now();
+              workUnitObserver?.noteConvergenceSteer(steerAt);
+              this.recordDiagnostic('turn-steered',{...routeMeta,threadId,turnId,reason:'work-unit-convergence',elapsedMs:steerAt-turnStartedAt});
               onProgress?.({summary:'Work Unit 正在收敛',detail:'已达到执行租约的收敛点；正在按原停止条件用现有证据形成结果，不再扩大调查范围。'});
             } catch (error) {
               // Steering is a convergence hint, not the safety boundary itself.
               // Older/temporarily unhealthy app-server builds must not turn a
               // useful Subagent into a retry storm merely because steer failed.
-              this.recordDiagnostic('turn-steer-failed',{...routeMeta,threadId,turnId,reason:'work-unit-convergence',elapsedMs:Date.now()-turnStartedAt,error:error?.message||String(error)});
+              this.recordDiagnostic('turn-steer-failed',{...routeMeta,threadId,turnId,reason:'work-unit-convergence',elapsedMs:Date.now()-turnStartedAt,error:error?.message||String(error)},'warn');
             }
           }
           if(Date.now()>=hardBoundaryAt){
             try{await this.request('turn/interrupt',{threadId,turnId},8_000);}catch{/* boundary remains authoritative even if interrupt acknowledgement is lost */}
             interruptRequested=true;
-            this.recordDiagnostic('turn-execution-boundary',{...routeMeta,threadId,turnId,elapsedMs:Date.now()-turnStartedAt,stopConditionBytes:Buffer.byteLength(String(stopCondition||''),'utf8')});
+            this.recordDiagnostic('turn-execution-boundary',{...routeMeta,threadId,turnId,elapsedMs:Date.now()-turnStartedAt,stopConditionBytes:Buffer.byteLength(String(stopCondition||''),'utf8')},'warn');
             try{await this.waitFor(msg=>msg.method==='turn/completed'&&msg.params?.turn?.id===turnId,8_000);}catch{/* stale completion is harmless and bounded */}
             const boundaryError=new Error('WORK_UNIT_EXECUTION_BOUNDARY: Work Unit reached its technical execution lease after a convergence steer.');
             boundaryError.nonRetryable=true;
@@ -517,13 +533,17 @@ export class CodexAppServerClient {
             interrupt();
             const error=new Error(`EXECUTION_SURFACE_VIOLATION: ${type||'unknown'} exceeds the projected Runtime execution surface.`);error.nonRetryable=true;error.authorityViolation=true;throw error;
           }
-          if (type === 'commandExecution') { toolCallCount+=1; onProgress?.({ summary:'正在核对证据', detail:commandDetail }); }
+          const observed=workUnitObserver?.start(item,Date.now());
+          if(observed)toolCallCount=workUnitObserver.records.length;
+          else if(type==='commandExecution')toolCallCount+=1;
+          if (type === 'commandExecution') onProgress?.({ summary:'正在核对证据', detail:commandDetail });
           else if (type === 'fileChange') onProgress?.({ summary:'Codex 正在处理文件变更', detail:fileChangeDetail });
           continue;
         }
 
         if (event.method === 'item/completed') {
           const item = event.params?.item;
+          workUnitObserver?.complete(item,Date.now());
           if (item?.type === 'agentMessage' && typeof item.text === 'string' && item.text.trim()) {
             agentMessages.push(item.text);
             onProgress?.({ summary:'Codex 已形成阶段输出', detail:formedDetail });
@@ -558,9 +578,16 @@ export class CodexAppServerClient {
         usage:usage&&typeof usage==='object'?usage:null,
         activeTurnCount:this.activeTurnCount,
       });
+      // SubagentRuntime normally finalizes this collector immediately after
+      // SourceTraceVerifier. The timeout only prevents a stale collector if
+      // structured parsing/verification fails after this transport turn returns.
+      if(workUnitObserver){setTimeout(()=>failWorkUnitObservability({taskId:routeMeta.taskId,workUnitId:routeMeta.workUnitId,status:'diagnostic-finalization-timeout',blocker:'Structured Work Unit result was not finalized after transport completion.'}),5_000).unref?.();}
       onProgress?.({ summary:'Codex 本轮执行完成', detail:completedDetail });
       return finalText;
     } catch(error) {
+      if(workUnitObserver){
+        try{failWorkUnitObservability({taskId:routeMeta.taskId,workUnitId:routeMeta.workUnitId,status:error?.interrupted||signal?.aborted?'interrupted':'failed',blocker:error?.message||String(error)});}catch{/* diagnostics only */}
+      }
       this.recordDiagnostic('turn-failed',{
         ...routeMeta,
         threadId,
@@ -571,12 +598,12 @@ export class CodexAppServerClient {
         activeTurnCount:this.activeTurnCount,
         interrupted:Boolean(error?.interrupted||signal?.aborted),
         error:error?.message||String(error),
-      });
+      },error?.interrupted?'warn':'error');
       throw error;
     } finally {
       signal?.removeEventListener?.('abort', interrupt);
       this.activeTurnCount=Math.max(0,this.activeTurnCount-1);
-      this.recordDiagnostic('turn-released',{...routeMeta,threadId,turnId,activeTurnCount:this.activeTurnCount});
+      this.recordDiagnostic('turn-released',{...routeMeta,threadId,turnId,activeTurnCount:this.activeTurnCount},'debug');
     }
   }
 
