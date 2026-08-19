@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SourceTraceVerifier } from '../src/governance/source-trace-verifier.js';
 import { ValidatorRuntime } from '../src/governance/validator-runtime.js';
-import { AnalysisResultValidator } from '../src/governance/analysis-validator.js';
 
 function projectEvidence(id,overrides={}){return{id,strength:'direct',kind:'fact',sourceType:'project_file',coverage:'component',statement:'TARGET = true',basis:'target.js#L1',locator:'target.js#L1',observation:'TARGET = true',...overrides};}
+function claim(id,evidenceIds,level='confirmed'){return{id,statement:'目标已经确定',level,evidenceIds,scope:'single_system',coverage:'component',hops:[]};}
 function decision(overrides={}){return{kind:'complete',summary:'done',stageResult:null,finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[],...overrides};}
 
 test('Validator source ledger keeps exact project-file Evidence DIRECT when the invoice matches the source',()=>{
@@ -24,9 +24,20 @@ test('Validator rejects a fabricated or mismatched source instead of keeping it 
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
-test('A real source that is intentionally INDIRECT stays usable only as untrusted reference material',()=>{
+test('A real source that cannot be verified stays INDIRECT and Root may only keep a downgraded conclusion',()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-source-indirect-'));
-  try{writeFileSync(join(dir,'target.js'),'TARGET = true\n');const out=new SourceTraceVerifier().enforce({task:{id:'T',projectScopes:[{path:dir}],attachments:[],references:[]},evidence:[projectEvidence('E-I',{strength:'indirect',statement:'可能与目标有关',observation:'模型转述而非原文'})]});assert.equal(out.evidence[0].strength,'indirect');assert.equal(out.verifications[0].traceable,true);assert.equal(out.verifications[0].verified,false);assert.equal(out.actions[0].action,'DOWNGRADE_UNVERIFIED_SOURCE_TRACE');}finally{rmSync(dir,{recursive:true,force:true});}
+  try{
+    writeFileSync(join(dir,'target.js'),'TARGET = true\n');
+    const task={id:'T',projectScopes:[{path:dir}],attachments:[],references:[]};
+    const indirect=projectEvidence('E-I',{strength:'indirect',statement:'可能与目标有关',observation:'模型转述而非原文'});
+    const runtime=new ValidatorRuntime();
+    const accepted=runtime.reviewRoot({task,availableEvidence:[indirect],decision:decision({claims:[claim('C-I',['E-I'],'supported')]})});
+    assert.equal(accepted.outcome,'pass');
+    assert.equal(accepted.decision.evidence[0].strength,'indirect');
+    const escalated=runtime.reviewRoot({task,availableEvidence:[indirect],decision:decision({claims:[claim('C-BAD',['E-I'],'confirmed')]})});
+    assert.equal(escalated.outcome,'reject');
+    assert.ok(escalated.feedback.some(item=>item.action==='REJECT_TRUST_ESCALATION'));
+  }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
 test('Visual attachment provenance is accepted only as INDIRECT because Validator does not interpret pixels',()=>{
@@ -39,15 +50,14 @@ test('Agent-authored search/runtime prose has no invoice until TaskBoard owns a 
   for(const sourceType of ['project_search','runtime']){const out=verifier.enforce({task,evidence:[{id:`E-${sourceType}`,strength:'direct',kind:'fact',sourceType,coverage:'project',statement:'未找到实现',basis:'agent',locator:'search://query',observation:'未找到实现'}]});assert.deepEqual(out.evidence,[]);assert.ok(out.actions.some(action=>action.action==='REJECT_UNTRACEABLE_SOURCE'));}
 });
 
-test('ValidatorRuntime exposes no semantic model review surface',()=>{
-  const runtime=new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()});
+test('Validator rejects a Claim whose cited invoice is missing and never repairs or re-asks Root',()=>{
+  const runtime=new ValidatorRuntime({sourceTraceVerifier:{enforce:()=>({evidence:[],actions:[],verifications:[]})}});
+  const out=runtime.reviewRoot({decision:decision({claims:[claim('C-MISSING',['E-NOT-THERE'],'confirmed')]}),task:{id:'T'}});
+  assert.equal(out.outcome,'reject');
+  assert.ok(out.feedback.some(item=>String(item.reason).includes('E-NOT-THERE')));
+  assert.equal(typeof runtime.makeSafeRootResult,'undefined');
+  assert.equal(typeof runtime.deriveNewRootProgress,'undefined');
   assert.equal(typeof runtime.semanticReviewRoot,'undefined');
+  assert.equal('analysisValidator' in runtime,false);
   assert.equal('semanticVerifier' in runtime,false);
-});
-
-test('Deterministic Validator narrowing never requests a Root rewrite turn for the same evidence',()=>{
-  const runtime=new ValidatorRuntime({analysisValidator:new AnalysisResultValidator(),sourceTraceVerifier:{enforce:({evidence})=>({evidence,actions:[],verifications:evidence.map(item=>({id:item.id,checked:true,verified:false,traceable:true}))})}});
-  const indirect=projectEvidence('E-I',{strength:'indirect'}),proposed=decision({claims:[{id:'C-1',statement:'目标已经确定',level:'confirmed',evidenceIds:['E-I'],scope:'single_system',coverage:'component',hops:[]}]});
-  const result=runtime.reviewRoot({decision:proposed,availableEvidence:[indirect],task:{id:'T'},currentState:null,seenKnowledgeKeys:new Set()});
-  assert.notEqual(result.outcome,'rework');
 });
