@@ -53,3 +53,21 @@ export function registerExternalExtensions(registry, { rootDir = process.cwd(), 
   }
   return registry;
 }
+
+export function loadRegisteredExtensions(registry, { rootDir = process.cwd(), entries = [] } = {}) {
+  const loadedIds = [];
+  const loadErrors = {};
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const id = String(entry?.id || '').trim();
+    const spec = String(entry?.entryPath || '').trim();
+    if (!id || !spec) continue;
+    try {
+      registerExternalExtensions(registry, { rootDir, specs: [spec] });
+      if (!registry.has(id)) throw new Error(`EXTENSION_REGISTERED_ID_MISMATCH:${id}`);
+      loadedIds.push(id);
+    } catch (error) {
+      loadErrors[id] = error?.message || String(error);
+    }
+  }
+  return { loadedIds, loadErrors };
+}
