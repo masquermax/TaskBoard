@@ -41,7 +41,6 @@ const runtime = bootstrap({
   taskboardUrl,
   executorName,
   extensionRegistry,
-  externalExtensions: [],
   allowMissingExecutor: true,
   startScheduler: process.env.TASKBOARD_SCHEDULER !== 'off',
 });
