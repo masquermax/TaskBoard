@@ -18,12 +18,17 @@ function extensionIdentity(extension){
   };
 }
 
+function runtimeLogLevel(){
+  const value=String(process.env.TASKBOARD_LOG_LEVEL||'info').trim().toLowerCase();
+  return ['error','warn','info','debug','trace'].includes(value)?value:'info';
+}
+
 export function createApp({taskService,executor,scheduler=null,capabilityProvider=null,surfaceManager=null,extension=null,settingsStore=null,runtimeSettingsState=null,applyRuntimeSettings=null,uiRoot,onShutdown=null,instanceRoot=null}){
   return async function handler(req,res){
     try{
       const url=new URL(req.url,'http://localhost');const path=url.pathname;
       if(path.startsWith('/api/')&&!['GET','HEAD'].includes(req.method||'GET')){const expectedAction=path==='/api/system/shutdown'?'shutdown':'ui';if(req.headers['x-taskboard-action']!==expectedAction)return json(res,403,{error:'FORBIDDEN'});}
-      if(path==='/api/live'&&req.method==='GET')return json(res,200,{ok:true,app:APP_ID,version:APP_VERSION,pid:process.pid,rootDir:instanceRoot});
+      if(path==='/api/live'&&req.method==='GET')return json(res,200,{ok:true,app:APP_ID,version:APP_VERSION,pid:process.pid,rootDir:instanceRoot,logLevel:runtimeLogLevel()});
       if(path==='/api/health'&&req.method==='GET'){
         const health=await executor.health();
         const identity=extensionIdentity(extension);
