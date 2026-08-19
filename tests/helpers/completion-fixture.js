@@ -10,33 +10,20 @@ export function successfulCompletionDependenciesForControlFlowTest() {
       },
     },
   });
-  const completionAssessmentVerifier = {
-    available() { return true; },
-    async review() {
+  const completionEvaluator = {
+    evaluate() {
       return {
-        checked: true,
-        assessments: [{
-          id: 'TEST-COMPLETION-ASSESSMENT',
-          proofKind: 'completion_obligation_support',
-          certification: 'supported',
-          obligationRefs: ['TEST-OBLIGATION'],
-          criterionSatisfied: true,
-          proofFactRefs: ['TEST-CERTIFIED-FACT'],
-        }],
+        goalState:'satisfied',
+        satisfiedObligationIds:['TEST-OBLIGATION'],
+        unsatisfiedObligationIds:[],
+        assessments:[{id:'TEST-COMPLETION-ASSESSMENT',obligationRefs:['TEST-OBLIGATION'],criterionSatisfied:true,proofFactRefs:['TEST-CERTIFIED-FACT'],certification:'supported'}],
       };
     },
   };
-  const completionEvaluator = {
-    evaluate() {
-      return { goalState:'satisfied', satisfiedObligationIds:['TEST-OBLIGATION'], unsatisfiedObligationIds:[] };
-    },
-  };
-  return { validatorRuntime, completionAssessmentVerifier, completionEvaluator };
+  return { validatorRuntime, completionEvaluator };
 }
 
 export function installSuccessfulCompletionFixture(rootRuntime) {
-  const dependencies = successfulCompletionDependenciesForControlFlowTest();
-  rootRuntime.completionAssessmentVerifier = dependencies.completionAssessmentVerifier;
-  rootRuntime.completionEvaluator = dependencies.completionEvaluator;
+  rootRuntime.completionEvaluator = successfulCompletionDependenciesForControlFlowTest().completionEvaluator;
   return rootRuntime;
 }
