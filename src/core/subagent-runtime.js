@@ -1,6 +1,6 @@
 import { SourceTraceVerifier } from '../governance/source-trace-verifier.js';
 import { competingEffectAttempts } from './effect-recovery.js';
-import { finalizeWorkUnitObservability } from './work-unit-observability.js';
+import { failWorkUnitObservability, finalizeWorkUnitObservability } from './work-unit-observability.js';
 import { scopeTaskInputs } from './task-input-scope.js';
 import { workMayMutate } from './work-capability.js';
 
@@ -48,7 +48,7 @@ function blockedDependency(delegation){
 
 function unmetDependencyResult(delegation,dependency){
   const dependencyId=text(dependency?.id)||'unknown';
-  const reason=text(dependency?.result?.blocker)||'前置 Work Unit 未满足工作契约。';
+  const reason=text(dependency?.result?.blocker)||'前置 Work Unit 未满足其工作契约。';
   return {
     delegationId:text(delegation?.id),
     result:`前置 Work Unit ${dependencyId} 未满足工作契约；当前依赖 Work Unit 未执行，控制权交回 Root 重新规划。`,
@@ -76,6 +76,7 @@ export class SubagentRuntime {
     if(dependencyBlocker)return unmetDependencyResult(delegation,dependencyBlocker);
 
     const scopedTask = scopeTaskInputs(task, delegation?.inputRefs);
+    const diagnosticIdentity={taskId:scopedTask?.id||task?.id||null,workUnitId:delegation?.id||null};
     await this.modelRouter.prepare?.({ role:'subagent', task:scopedTask, work:delegation });
     let raw;
     try {
@@ -90,6 +91,7 @@ export class SubagentRuntime {
         signal,
       });
     } catch (error) {
+      try{failWorkUnitObservability({...diagnosticIdentity,status:error?.executionBoundary?'execution-boundary':(error?.interrupted?'interrupted':'failed'),blocker:error?.message||String(error)});}catch{/* diagnostics only */}
       // The technical lease is evidence about this execution, not a Task-level
       // reason to ask the human to replay the same read-only investigation.
       // Only side-effect-free Work can be safely converted into a local blocker;
@@ -98,9 +100,16 @@ export class SubagentRuntime {
       throw error;
     }
 
-    const rawEvidence=Array.isArray(raw?.evidence)?raw.evidence:[];
-    const traced=this.sourceTraceVerifier.enforce({task:scopedTask,evidence:rawEvidence,humanGatewayHistory:[]});
-    const evidence=Array.isArray(traced.evidence)?traced.evidence:[];
+    let evidence;
+    try{
+      const rawEvidence=Array.isArray(raw?.evidence)?raw.evidence:[];
+      const traced=this.sourceTraceVerifier.enforce({task:scopedTask,evidence:rawEvidence,humanGatewayHistory:[]});
+      evidence=Array.isArray(traced.evidence)?traced.evidence:[];
+    }catch(error){
+      try{failWorkUnitObservability({...diagnosticIdentity,status:'evidence-verification-failed',blocker:error?.message||String(error)});}catch{/* diagnostics only */}
+      throw error;
+    }
+
     const evidenceIds=new Set(evidence.map(item=>text(item?.id)).filter(Boolean));
     const findings=(Array.isArray(raw?.findings)?raw.findings:[]).map(item=>({
       id:text(item?.id),
@@ -115,8 +124,7 @@ export class SubagentRuntime {
     // SourceTraceVerifier-owned Evidence set so logging cannot invent Evidence.
     try {
       finalizeWorkUnitObservability({
-        taskId:scopedTask?.id||task?.id||null,
-        workUnitId:delegation?.id||null,
+        ...diagnosticIdentity,
         evidence,
         status:'completed',
         blocker,
