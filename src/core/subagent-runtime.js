@@ -107,6 +107,20 @@ export class SubagentRuntime {
       evidenceIds:strings(item?.evidenceIds).filter(id=>evidenceIds.has(id)),
     })).filter(item=>item.id&&item.statement);
     const effectActuationClosure=normalizeEffectActuationClosure(raw?.effectActuationClosure,task,delegation,evidence);
+    const blocker=text(raw?.blocker)||null;
+    const uncertainty=text(raw?.uncertainty)||null;
+
+    // Tool/source telemetry is finalized only after SourceTraceVerifier has
+    // established the Evidence set. Diagnostics can observe verified Evidence;
+    // they cannot create, promote or alter it.
+    try {
+      this.executor.finalizeWorkUnitDiagnostics?.({
+        diagnostics:raw?.__taskboardWorkUnitDiagnostics||null,
+        evidence,
+        blocker,
+        uncertainty,
+      });
+    } catch { /* diagnostics must never affect Work Unit semantics */ }
 
     // Runtime allow-list: a custom Executor cannot smuggle Task-level claims,
     // gaps, recommendations, Gateway controls, a different Work Unit identity,
@@ -119,8 +133,8 @@ export class SubagentRuntime {
       evidence,
       findings,
       discoveries:normalizeDiscoveries(raw?.discoveries),
-      blocker:text(raw?.blocker)||null,
-      uncertainty:text(raw?.uncertainty)||null,
+      blocker,
+      uncertainty,
       ...(effectActuationClosure?{effectActuationClosure}:{}),
     };
   }
