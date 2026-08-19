@@ -32,7 +32,7 @@ function createPersistence({rootDir,dbFile=null}){
 export function bootstrap({
   rootDir,
   dbFile=null,
-  executorName=process.env.TASKBOARD_EXECUTOR||null,
+  executorName=process.env.TASKBOARD_EXECUTOR||'codex',
   continuationName=process.env.TASKBOARD_CONTINUATION||null,
   extensionRegistry=null,
   externalExtensions=null,
@@ -41,19 +41,12 @@ export function bootstrap({
 }={}){
   const persistence=createPersistence({rootDir,dbFile});const{database,repository}=persistence;
   const registry=extensionRegistry||createBuiltinExtensionRegistry();
-  const defaultExternalExecutors=[];
   registerExternalExtensions(registry,{
     rootDir,
-    defaultExecutorIds:defaultExternalExecutors,
     ...(externalExtensions===null?{}:{specs:externalExtensions}),
   });
   if(!registry?.create||!registry?.has)throw new Error('EXTENSION_REGISTRY_INVALID');
-  if(!executorName&&defaultExternalExecutors.length>1){
-    try{database.close();}catch{/* fail-closed cleanup */}
-    throw new Error(`EXTENSION_DEFAULT_EXECUTOR_AMBIGUOUS:${defaultExternalExecutors.join(',')}`);
-  }
-  const effectiveExecutorName=executorName||defaultExternalExecutors[0]||'codex';
-  const extension=registry.create(effectiveExecutorName,{rootDir,taskboardUrl});
+  const extension=registry.create(executorName,{rootDir,taskboardUrl});
   // The current TaskBoard Root/Subagent/Validator execution graph owns Work
   // orchestration. A future runtime-native agent tree is a distinct execution
   // contract and must never be admitted through the existing runSubagent path.
@@ -78,7 +71,7 @@ export function bootstrap({
   const attachmentStore=new AttachmentStore({rootDir:resolve(rootDir,'data/attachments')});
   const taskService=new TaskService(repository,{attachmentStore,defaultExecutorKey:extension.id});
 
-  if(!extension.executor)throw new Error(`EXTENSION_HAS_NO_EXECUTOR:${effectiveExecutorName}`);
+  if(!extension.executor)throw new Error(`EXTENSION_HAS_NO_EXECUTOR:${executorName}`);
   const executor=instrumentExecutorTelemetry(extension.executor);
   const capabilityProvider=extension.capabilityProvider;
   const surfaceManager=new SurfaceManager({hosts:extension.surfaceHosts});
