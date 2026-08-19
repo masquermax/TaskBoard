@@ -8,6 +8,7 @@ import {
   configuredExternalExtensionSpecs,
   registerExternalExtensions,
 } from '../src/extensions/runtime/external-extension-loader.js';
+import { bootstrap } from '../src/server/bootstrap.js';
 
 function tempModule(source) {
   const root = mkdtempSync(resolve(tmpdir(), 'taskboard-extension-'));
@@ -43,6 +44,42 @@ test('external extension module registers through the generic registry contract'
   assert.equal(created.id, 'external-test');
   assert.equal(created.displayName, 'External Test');
   assert.equal(typeof created.executor.health, 'function');
+});
+
+test('bootstrap can select an explicit external executor without changing Core', () => {
+  const { root, file } = tempModule(`
+    module.exports = {
+      id: 'external-bootstrap',
+      createExtension() {
+        return {
+          displayName: 'External Bootstrap',
+          executor: {
+            readiness() { return { ready: true, preparing: false, reason: null, message: null }; },
+            async health() { return { executor: 'external-bootstrap', available: true, ready: true }; },
+            cleanupTaskWorkspace() { return false; },
+            close() {}
+          },
+          capabilityProvider: null,
+          surfaceHosts: []
+        };
+      }
+    };
+  `);
+  const runtime = bootstrap({
+    rootDir: root,
+    executorName: 'external-bootstrap',
+    externalExtensions: [file],
+    startScheduler: false,
+  });
+  try {
+    assert.equal(runtime.extension.id, 'external-bootstrap');
+    assert.equal(runtime.extension.displayName, 'External Bootstrap');
+    assert.equal(runtime.extensionRegistry.has('codex'), true);
+    assert.equal(runtime.extensionRegistry.has('mock'), true);
+  } finally {
+    runtime.executor.close?.();
+    runtime.database.close();
+  }
 });
 
 test('external extension can register multiple factories without TaskBoard knowing their ids', () => {
