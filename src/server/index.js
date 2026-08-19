@@ -5,18 +5,46 @@ import { fileURLToPath } from 'node:url';
 import { bootstrap } from './bootstrap.js';
 import { createApp } from './app.js';
 import { createExtensionConnectionHandler } from './extension-connection-api.js';
+import { createExtensionManagementHandler } from './extension-management-api.js';
+import { createBuiltinExtensionRegistry } from '../extensions/builtins/index.js';
+import { ImportedExtensionStore } from '../extensions/runtime/imported-extension-store.js';
+import { loadRegisteredExtensions } from '../extensions/runtime/external-extension-loader.js';
 import { APP_ID, APP_VERSION } from '../version.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(here, '../..');
 const port = Number(process.env.PORT || 4317);
+const taskboardUrl = process.env.TASKBOARD_URL || `http://127.0.0.1:${port}`;
 const runtimeDir = resolve(rootDir, 'data/runtime');
 const instanceFile = resolve(runtimeDir, 'taskboard-instance.json');
 mkdirSync(runtimeDir, { recursive: true });
 
-const runtime = bootstrap({ rootDir, startScheduler: process.env.TASKBOARD_SCHEDULER !== 'off' });
+const importedExtensionStore = new ImportedExtensionStore({
+  file: resolve(rootDir, 'data/extension-registry.json'),
+  rootDir,
+});
+const extensionRegistry = createBuiltinExtensionRegistry();
+const extensionLoadState = loadRegisteredExtensions(extensionRegistry, {
+  rootDir,
+  entries: importedExtensionStore.entries(),
+});
+const requestedExecutor = process.env.TASKBOARD_EXECUTOR || importedExtensionStore.activeExecutorId() || 'codex';
+const executorName = extensionRegistry.has(requestedExecutor) ? requestedExecutor : 'codex';
+if (requestedExecutor !== executorName) {
+  console.warn(`[extensions] requested Executor ${requestedExecutor} is unavailable; using ${executorName}`);
+}
+
+const runtime = bootstrap({
+  rootDir,
+  taskboardUrl,
+  executorName,
+  extensionRegistry,
+  externalExtensions: [],
+  startScheduler: process.env.TASKBOARD_SCHEDULER !== 'off',
+});
 let server = null;
 let shuttingDown = false;
+let extensionManagementHandler = null;
 
 function removeInstanceFile() {
   try { rmSync(instanceFile, { force: true }); } catch { /* ignore */ }
@@ -28,6 +56,7 @@ async function shutdown() {
   runtime.scheduler.beginShutdown?.();
   runtime.cleanup?.stop?.();
   runtime.surfaceManager?.stop?.();
+  extensionManagementHandler?.close?.();
   runtime.executor?.close?.();
   // Let active Scheduler runs observe the executor interruption and leave their
   // Tasks RUNNING for normal startup recovery. Never close persistence while an
@@ -58,7 +87,16 @@ const connectionHandler=createExtensionConnectionHandler({
   connectionSettings:runtime.extension?.connectionSettings||null,
   extension:runtime.extension||null,
 });
+extensionManagementHandler=createExtensionManagementHandler({
+  store: importedExtensionStore,
+  registry: runtime.extensionRegistry,
+  loadState: extensionLoadState,
+  activeExtension: runtime.extension,
+  rootDir,
+  taskboardUrl,
+});
 const handler=async(req,res)=>{
+  if(await extensionManagementHandler(req,res))return;
   if(await connectionHandler(req,res))return;
   return appHandler(req,res);
 };
@@ -83,8 +121,10 @@ server.listen(port, '127.0.0.1', () => {
   }, null, 2));
   console.log(`TaskBoard running at http://127.0.0.1:${port}`);
   console.log(`Version: ${APP_VERSION}`);
-  console.log(`Executor: ${runtime.extension?.displayName||runtime.extension?.id||process.env.TASKBOARD_EXECUTOR||'codex'}`);
+  console.log(`Executor: ${runtime.extension?.displayName||runtime.extension?.id||executorName}`);
   console.log(`Storage: ${runtime.storage} (${runtime.storageFile})`);
+  if(extensionLoadState.loadedIds.length) console.log(`[extensions] loaded: ${extensionLoadState.loadedIds.join(', ')}`);
+  for (const [id, error] of Object.entries(extensionLoadState.loadErrors)) console.warn(`[extensions] ${id}: ${error}`);
   if(process.env.TASKBOARD_SURFACES==='on') runtime.surfaceManager?.start?.();
   runtime.cleanup?.startDailySchedule?.();
   // Startup cleanup waits until the executor startup/health attempt has settled.
