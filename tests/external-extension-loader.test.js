@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { ExtensionRegistry, EXTENSION_API_VERSION } from '../src/extensions/runtime/extension-registry.js';
 import {
   configuredExternalExtensionSpecs,
+  discoveredExternalExtensionSpecs,
   registerExternalExtensions,
 } from '../src/extensions/runtime/external-extension-loader.js';
 import { bootstrap } from '../src/server/bootstrap.js';
@@ -35,6 +36,16 @@ function taskboardExtensionBody(displayName, executorName) {
 test('external extension specs are explicit and semicolon-delimited', () => {
   assert.deepEqual(configuredExternalExtensionSpecs(' one ; ; two '), ['one', 'two']);
   assert.deepEqual(configuredExternalExtensionSpecs(''), []);
+});
+
+test('installed extensions are discovered only from data/extensions child entrypoints', () => {
+  const root = mkdtempSync(resolve(tmpdir(), 'taskboard-installed-extension-'));
+  const installed = resolve(root, 'data/extensions/company-api');
+  const ignored = resolve(root, 'data/extensions/not-an-extension');
+  mkdirSync(installed, { recursive: true });
+  mkdirSync(ignored, { recursive: true });
+  writeFileSync(resolve(installed, 'index.cjs'), 'module.exports={};', 'utf8');
+  assert.deepEqual(discoveredExternalExtensionSpecs({ rootDir: root }), [resolve(installed, 'index.cjs')]);
 });
 
 test('no external specs preserve an injected registry without requiring a registration surface', () => {
@@ -86,6 +97,37 @@ test('bootstrap can select an explicit external Executor without changing Task C
     runtime.executor.close?.();
     runtime.database.close();
   }
+});
+
+test('an installed external extension may explicitly become the default Executor without environment variables', () => {
+  const root = mkdtempSync(resolve(tmpdir(), 'taskboard-default-extension-'));
+  const folder = resolve(root, 'data/extensions/company-api');
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(resolve(folder, 'index.cjs'), `
+    module.exports = {
+      id: 'company-api',
+      defaultExecutor: true,
+      createExtension() { return ${taskboardExtensionBody('Company API', 'company-api')}; }
+    };
+  `, 'utf8');
+  const runtime = bootstrap({ rootDir: root, startScheduler: false });
+  try {
+    assert.equal(runtime.extension.id, 'company-api');
+    assert.equal(runtime.extension.displayName, 'Company API');
+  } finally {
+    runtime.executor.close?.();
+    runtime.database.close();
+  }
+});
+
+test('multiple installed default Executors fail closed instead of choosing by filesystem order', () => {
+  const root = mkdtempSync(resolve(tmpdir(), 'taskboard-ambiguous-extension-'));
+  for (const id of ['alpha', 'beta']) {
+    const folder = resolve(root, `data/extensions/${id}`);
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(resolve(folder, 'index.cjs'), `module.exports={id:'${id}',defaultExecutor:true,createExtension(){return ${taskboardExtensionBody(id, id)};}};`, 'utf8');
+  }
+  assert.throws(() => bootstrap({ rootDir: root, startScheduler: false }), /EXTENSION_DEFAULT_EXECUTOR_AMBIGUOUS/);
 });
 
 test('external extension can register multiple factories without TaskBoard knowing their ids', () => {
