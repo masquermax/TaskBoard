@@ -10,6 +10,7 @@ import { Scheduler } from '../core/scheduler.js';
 import { DailyCleanupController } from '../core/cleanup-controller.js';
 import { createBuiltinExtensionRegistry } from '../extensions/builtins/index.js';
 import { OrchestrationMode } from '../extensions/runtime/extension-registry.js';
+import { registerExternalExtensions } from '../extensions/runtime/external-extension-loader.js';
 import { SurfaceManager } from '../extensions/runtime/surface-manager.js';
 import { GovernanceCompiler } from '../governance/governance-compiler.js';
 import { AnalysisResultValidator } from '../governance/analysis-validator.js';
@@ -34,11 +35,16 @@ export function bootstrap({
   executorName=process.env.TASKBOARD_EXECUTOR||'codex',
   continuationName=process.env.TASKBOARD_CONTINUATION||null,
   extensionRegistry=null,
+  externalExtensions=null,
   startScheduler=true,
   taskboardUrl=process.env.TASKBOARD_URL||'http://127.0.0.1:4317',
 }={}){
   const persistence=createPersistence({rootDir,dbFile});const{database,repository}=persistence;
   const registry=extensionRegistry||createBuiltinExtensionRegistry();
+  registerExternalExtensions(registry,{
+    rootDir,
+    ...(externalExtensions===null?{}:{specs:externalExtensions}),
+  });
   if(!registry?.create||!registry?.has)throw new Error('EXTENSION_REGISTRY_INVALID');
   const extension=registry.create(executorName,{rootDir,taskboardUrl});
   // The current TaskBoard Root/Subagent/Validator execution graph owns Work
