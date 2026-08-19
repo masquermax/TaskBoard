@@ -78,7 +78,7 @@ test('semantic model review is selected only when deterministic source tracing e
   assert.equal(selected[0].evidence[0].basis,undefined);
 });
 
-test('visual semantic overreach gets one targeted rework, then narrows to supported + explicit Gap instead of disappearing',async()=>{
+test('visual semantic overreach is narrowed in Validator without another Root model turn',async()=>{
   const semanticVerifier={async review(){return{checked:true,reviews:[{id:'C-1',verdict:'overreach',reason:'视觉证据没有证明完整业务关系。'}],actions:[]};}};
   const runtime=new ValidatorRuntime({analysisValidator:new AnalysisResultValidator(),sourceTraceVerifier:{enforce:({evidence})=>({evidence,actions:[],verifications:[{id:'E-1',needsSemantic:true,verified:true,path:'/task/prototype.png'}]})},semanticVerifier});
   const visualEvidence=directEvidence('E-1','attachment_visual',{locator:'prototype.png#page=1',observation:'视觉区域'});
@@ -88,16 +88,14 @@ test('visual semantic overreach gets one targeted rework, then narrows to suppor
     steps:[{order:1,text:'完整业务关系',kind:'confirmed',sourceIds:['C-1']}],
   });
   const structural=runtime.reviewRoot({decision:proposed,availableEvidence:[visualEvidence],policyContext:policy,attempt:1,seenKnowledgeKeys:new Set(),task:{id:'T'}});
-  const first=await runtime.semanticReviewRoot({reviewed:structural,policyContext:policy,attempt:1,seenKnowledgeKeys:new Set(),task:{id:'T'}});
-  assert.equal(first.outcome,'rework');
-
-  const structural2=runtime.reviewRoot({decision:proposed,availableEvidence:[visualEvidence],policyContext:policy,attempt:2,seenKnowledgeKeys:new Set(),task:{id:'T'}});
-  const second=await runtime.semanticReviewRoot({reviewed:structural2,policyContext:policy,attempt:2,seenKnowledgeKeys:new Set(),task:{id:'T'}});
-  assert.equal(second.outcome,'pass');
-  assert.equal(second.decision.claims[0].level,'supported');
-  assert.equal(second.decision.steps.length,0);
-  assert.ok(second.decision.gaps.some(g=>/完整业务关系/.test(g.question)));
-  assert.ok(second.commits.some(c=>c.title==='待确认边界已收敛'&&/完整业务关系/.test(c.detail)));
+  const reviewed=await runtime.semanticReviewRoot({reviewed:structural,policyContext:policy,attempt:1,seenKnowledgeKeys:new Set(),task:{id:'T'}});
+  assert.equal(reviewed.outcome,'pass');
+  assert.equal(reviewed.decision.claims[0].level,'supported');
+  assert.equal(reviewed.decision.steps.length,0);
+  assert.ok(reviewed.decision.gaps.some(g=>/完整业务关系/.test(g.question)));
+  assert.ok(reviewed.commits.some(c=>c.title==='待确认边界已收敛'&&/完整业务关系/.test(c.detail)));
+  assert.ok(reviewed.actions.some(a=>a.action==='CONVERT_SEMANTIC_FAILURE_TO_GAP'));
+  assert.equal(reviewed.feedback[0].action,'SEMANTIC_DOWNGRADE');
 });
 
 test('system-owned source tracing downgrades Agent-authored project-search/runtime prose when no replayable record exists',()=>{
