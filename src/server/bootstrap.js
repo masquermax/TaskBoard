@@ -29,6 +29,19 @@ function createPersistence({rootDir,dbFile=null}){
   return{database,repository:new JsonTaskRepository(database),storage:'json',filename};
 }
 
+function createUnavailableExecutor(){
+  const unavailable=()=>{const error=new Error('EXECUTOR_NOT_CONFIGURED');error.nonRetryable=true;throw error;};
+  return {
+    readiness(){return{ready:false,preparing:false,reason:'executor-not-configured',message:'尚未加载 Executor 扩展。请先在管理 → 导入扩展中登记扩展并重启 TaskBoard。'};},
+    async health(){return{executor:null,displayName:'未配置',available:false,ready:false,error:'EXECUTOR_NOT_CONFIGURED'};},
+    async runRoot(){return unavailable();},
+    async runSubagent(){return unavailable();},
+    async runValidator(){return unavailable();},
+    cleanupTaskWorkspace(){return false;},
+    close(){},
+  };
+}
+
 export function bootstrap({
   rootDir,
   dbFile=null,
@@ -36,6 +49,7 @@ export function bootstrap({
   continuationName=process.env.TASKBOARD_CONTINUATION||null,
   extensionRegistry=null,
   externalExtensions=null,
+  allowMissingExecutor=false,
   startScheduler=true,
   taskboardUrl=process.env.TASKBOARD_URL||'http://127.0.0.1:4317',
 }={}){
@@ -46,11 +60,17 @@ export function bootstrap({
     ...(externalExtensions===null?{}:{specs:externalExtensions}),
   });
   if(!registry?.create||!registry?.has)throw new Error('EXTENSION_REGISTRY_INVALID');
-  const extension=registry.create(executorName,{rootDir,taskboardUrl});
+  const extensionKey=String(executorName||'').trim();
+  let extension=null;
+  if(extensionKey&&registry.has(extensionKey))extension=registry.create(extensionKey,{rootDir,taskboardUrl});
+  else if(extensionKey&&!allowMissingExecutor){
+    try{database.close();}catch{/* fail-closed cleanup */}
+    throw new Error(`EXTENSION_NOT_FOUND:${extensionKey}`);
+  }
   // The current TaskBoard Root/Subagent/Validator execution graph owns Work
   // orchestration. A future runtime-native agent tree is a distinct execution
   // contract and must never be admitted through the existing runSubagent path.
-  if(extension.orchestrationMode!==OrchestrationMode.TASKBOARD){
+  if(extension&&extension.orchestrationMode!==OrchestrationMode.TASKBOARD){
     try{database.close();}catch{/* fail-closed cleanup */}
     throw new Error(`EXTENSION_ORCHESTRATION_MODE_UNSUPPORTED:${extension.orchestrationMode}`);
   }
@@ -60,7 +80,7 @@ export function bootstrap({
   // depend on its presence. One process binds at most one active continuation.
   const continuationKey=String(continuationName||'').trim()||null;
   const continuationExtension=continuationKey
-    ? (continuationKey===extension.id ? extension : registry.create(continuationKey,{rootDir,taskboardUrl}))
+    ? (continuationKey===extension?.id ? extension : registry.create(continuationKey,{rootDir,taskboardUrl}))
     : null;
   if(continuationExtension&&!continuationExtension.continuation){
     try{database.close();}catch{/* fail-closed cleanup */}
@@ -69,12 +89,12 @@ export function bootstrap({
   const continuation=continuationExtension?.continuation||null;
 
   const attachmentStore=new AttachmentStore({rootDir:resolve(rootDir,'data/attachments')});
-  const taskService=new TaskService(repository,{attachmentStore,defaultExecutorKey:extension.id});
+  const taskService=new TaskService(repository,{attachmentStore,defaultExecutorKey:extension?.id||'unconfigured'});
 
-  if(!extension.executor)throw new Error(`EXTENSION_HAS_NO_EXECUTOR:${executorName}`);
-  const executor=instrumentExecutorTelemetry(extension.executor);
-  const capabilityProvider=extension.capabilityProvider;
-  const surfaceManager=new SurfaceManager({hosts:extension.surfaceHosts});
+  if(extension&&!extension.executor)throw new Error(`EXTENSION_HAS_NO_EXECUTOR:${extensionKey}`);
+  const executor=instrumentExecutorTelemetry(extension?.executor||createUnavailableExecutor());
+  const capabilityProvider=extension?.capabilityProvider||null;
+  const surfaceManager=new SurfaceManager({hosts:extension?.surfaceHosts||[]});
 
   const settingsStore=new RuntimeSettingsStore({file:resolve(rootDir,'data/settings.json')});
   const runtimeSettings=settingsStore.get();
