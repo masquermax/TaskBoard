@@ -7,14 +7,6 @@ import { workMayMutate } from './work-capability.js';
 function text(value){return String(value==null?'':value).trim();}
 function strings(values){return [...new Set((Array.isArray(values)?values:[]).map(text).filter(Boolean))];}
 
-function normalizeDiscoveries(values=[]){
-  return (Array.isArray(values)?values:[]).map(item=>({
-    summary:text(item?.summary),
-    whyRelevant:text(item?.whyRelevant),
-    suggestedNextQuestion:text(item?.suggestedNextQuestion),
-  })).filter(item=>item.summary&&item.whyRelevant&&item.suggestedNextQuestion);
-}
-
 function normalizeEffectActuationClosure(value,task,delegation,evidence=[]){
   const attempts=competingEffectAttempts(task?.executionState);
   if(task?.executionState?.retry?.scope!=='effect-recovery-observe'||attempts.length!==1||workMayMutate(delegation)||!value||typeof value!=='object')return null;
@@ -132,17 +124,17 @@ export class SubagentRuntime {
       });
     } catch { /* diagnostics must never affect Work Unit semantics */ }
 
-    // Runtime allow-list: a custom Executor cannot smuggle Task-level claims,
-    // gaps, recommendations, Gateway controls, a different Work Unit identity,
-    // or an unbound/indirect recovery-closure assertion through the Subagent result surface.
-    // The exact old effectAttemptId is injected from TaskBoard's durable recovery state,
-    // never trusted from Root/Executor prose or a free-form result field.
+    // Runtime allow-list: Subagent owns only the current Work Unit execution.
+    // Executor-provided next-work suggestions / out-of-scope discoveries are
+    // intentionally discarded: Task-level planning and the decision to create
+    // more Work belong only to Root. `discoveries: []` is retained temporarily
+    // as a compatibility shape while executors stop producing that obsolete field.
     return {
       delegationId:text(delegation?.id),
       result:text(raw?.result),
       evidence,
       findings,
-      discoveries:normalizeDiscoveries(raw?.discoveries),
+      discoveries:[],
       blocker,
       uncertainty,
       ...(effectActuationClosure?{effectActuationClosure}:{}),
