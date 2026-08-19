@@ -25,12 +25,9 @@ function normalizeEffectActuationClosure(value,task,delegation,evidence=[]){
 function boundedNonConvergence(delegation){
   return {
     delegationId:text(delegation?.id),
-    result:'当前 Work Unit 在技术执行边界内未能收敛成结构化结果；该执行边界已作为局部 Runtime 事实交回 Root。',
+    result:'当前 Work Unit 在技术执行边界内未形成要求的执行输出。',
     evidence:[],
-    findings:[],
-    discoveries:[],
-    blocker:'WORK_UNIT_NON_CONVERGENT: 当前 Work Unit 在技术执行边界内未满足停止条件；Root 应缩小或拆分工作边界，而不是原样重放。',
-    uncertainty:'当前 expectedOutput 尚未在受限执行窗口内建立；没有新的 Task 级结论被认证。',
+    blocker:'WORK_UNIT_NON_CONVERGENT: 当前 Work Unit 在技术执行边界内未满足停止条件；控制权交回 Root。',
   };
 }
 
@@ -40,15 +37,11 @@ function blockedDependency(delegation){
 
 function unmetDependencyResult(delegation,dependency){
   const dependencyId=text(dependency?.id)||'unknown';
-  const reason=text(dependency?.result?.blocker)||'前置 Work Unit 未满足其工作契约。';
   return {
     delegationId:text(delegation?.id),
-    result:`前置 Work Unit ${dependencyId} 未满足工作契约；当前依赖 Work Unit 未执行，控制权交回 Root 重新规划。`,
+    result:`前置 Work Unit ${dependencyId} 未满足工作契约；当前依赖 Work Unit 未执行。`,
     evidence:[],
-    findings:[],
-    discoveries:[],
-    blocker:`WORK_UNIT_DEPENDENCY_UNSATISFIED: 前置 Work Unit ${dependencyId} 未满足工作契约；不得在缺少其 expectedOutput 的情况下执行当前依赖 Work。`,
-    uncertainty:`依赖 ${dependencyId} 的结果不可作为当前 Work Unit 的有效输入。原因：${reason}`,
+    blocker:`WORK_UNIT_DEPENDENCY_UNSATISFIED: 前置 Work Unit ${dependencyId} 未满足工作契约。`,
   };
 }
 
@@ -60,10 +53,9 @@ export class SubagentRuntime {
   }
 
   async run(task, delegation, { onProgress = null, onExecutionStarted = null, signal = null, policyContext = null } = {}) {
-    // A declared dependency is part of this Work Unit's execution precondition.
-    // If a prerequisite returned a blocker, do not spend another model/tool turn
-    // pretending the expected dependency output exists. Return the local missing
-    // dependency fact to Root; only Root may re-plan the affected dependency radius.
+    // Subagent executes one Root-issued Work Unit. Dependency interpretation and
+    // any next Task decision belong to Root, so a blocked prerequisite ends this
+    // Work Unit without another model/tool turn.
     const dependencyBlocker=blockedDependency(delegation);
     if(dependencyBlocker)return unmetDependencyResult(delegation,dependencyBlocker);
 
@@ -84,10 +76,9 @@ export class SubagentRuntime {
       });
     } catch (error) {
       try{failWorkUnitObservability({...diagnosticIdentity,status:error?.executionBoundary?'execution-boundary':(error?.interrupted?'interrupted':'failed'),blocker:error?.message||String(error)});}catch{/* diagnostics only */}
-      // The technical lease is evidence about this execution, not a Task-level
-      // reason to ask the human to replay the same read-only investigation.
-      // Only side-effect-free Work can be safely converted into a local blocker;
-      // effect-capable Work must retain the existing recovery/suspension path.
+      // The technical lease is only an execution fact. A read-only Work Unit that
+      // reaches it returns that fact to Root; effect-capable Work keeps the stricter
+      // recovery/suspension path because Reality may already have changed.
       if(error?.executionBoundary===true && !workMayMutate(delegation)) return boundedNonConvergence(delegation);
       throw error;
     }
@@ -102,41 +93,28 @@ export class SubagentRuntime {
       throw error;
     }
 
-    const evidenceIds=new Set(evidence.map(item=>text(item?.id)).filter(Boolean));
-    const findings=(Array.isArray(raw?.findings)?raw.findings:[]).map(item=>({
-      id:text(item?.id),
-      statement:text(item?.statement),
-      evidenceIds:strings(item?.evidenceIds).filter(id=>evidenceIds.has(id)),
-    })).filter(item=>item.id&&item.statement);
     const effectActuationClosure=normalizeEffectActuationClosure(raw?.effectActuationClosure,task,delegation,evidence);
     const blocker=text(raw?.blocker)||null;
-    const uncertainty=text(raw?.uncertainty)||null;
 
-    // The collector is transport/runtime telemetry only. Finalize it from the
-    // SourceTraceVerifier-owned Evidence set so logging cannot invent Evidence.
+    // Observability records execution facts only. It cannot create a Finding,
+    // Task Claim, Gap, recommendation or next action.
     try {
       finalizeWorkUnitObservability({
         ...diagnosticIdentity,
         evidence,
         status:'completed',
         blocker,
-        uncertainty,
       });
     } catch { /* diagnostics must never affect Work Unit semantics */ }
 
-    // Runtime allow-list: Subagent owns only the current Work Unit execution.
-    // Executor-provided next-work suggestions / out-of-scope discoveries are
-    // intentionally discarded: Task-level planning and the decision to create
-    // more Work belong only to Root. `discoveries: []` is retained temporarily
-    // as a compatibility shape while executors stop producing that obsolete field.
+    // Runtime allow-list: Subagent is hands, not the Task brain. Return only the
+    // requested execution output, traceable source material and an execution
+    // blocker when the Work Unit could not be completed. Root owns all judgment.
     return {
       delegationId:text(delegation?.id),
       result:text(raw?.result),
       evidence,
-      findings,
-      discoveries:[],
       blocker,
-      uncertainty,
       ...(effectActuationClosure?{effectActuationClosure}:{}),
     };
   }
