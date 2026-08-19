@@ -68,14 +68,17 @@ test('runtime-native orchestration is a distinct declared mode rather than an im
   assert.throws(()=>registry.create('bad'),/EXTENSION_ORCHESTRATION_MODE_INVALID:hybrid/);
 });
 
-test('TaskBoard exposes separate author and host composition entry points for an external extension repository',()=>{
+test('TaskBoard exposes generic author and host composition entry points without concrete builtin extensions',()=>{
   const pkg=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8'));
   assert.equal(pkg.exports['./extension-api'],'./src/extensions/public-api.js');
   assert.equal(pkg.exports['./extensions'],'./src/extensions/index.js');
   assert.equal(pkg.exports['./bootstrap'],'./src/server/bootstrap.js');
   const authorApi=readFileSync(new URL('../src/extensions/public-api.js',import.meta.url),'utf8');
+  const hostApi=readFileSync(new URL('../src/extensions/index.js',import.meta.url),'utf8');
   assert.match(authorApi,/EXTENSION_API_VERSION/);
   assert.doesNotMatch(authorApi,/createBuiltinExtensionRegistry|ExtensionRegistry/);
+  assert.match(hostApi,/ExtensionRegistry/);
+  assert.doesNotMatch(hostApi,/createBuiltinExtensionRegistry|codex|mock/i);
 });
 
 test('surface manager is generic and lifecycle-isolates optional hosts', async () => {
