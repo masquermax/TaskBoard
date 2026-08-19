@@ -1,11 +1,38 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TaskContractFidelityVerifier, createAuthoritySemanticCandidate } from '../src/governance/task-contract-fidelity.js';
-const task=(text,instruction='MUTABLE CURRENT TEXT')=>({id:'T',title:'T',instruction,requirementSources:[{id:'REQ',text}]});
-const ref=(text,fragment)=>{const start=text.indexOf(fragment);return{sourceId:'REQ',start,end:start+fragment.length};};
 
-test('contradicted candidate is unsupported while unmentioned candidate is unresolved',async()=>{const text='不要修改数据库';const candidates=[createAuthoritySemanticCandidate({id:'db',key:'dbMutation',value:'allowed',requirementRefs:[ref(text,text)]}),createAuthoritySemanticCandidate({id:'project',key:'projectMutation',value:'allowed',requirementRefs:[ref(text,text)]})];const executor={async runValidator({candidates:proofs}){return{reviews:proofs.map(p=>({id:p.id,verdict:p.targetId==='db'&&p.proofKind.endsWith('contradiction')?'supported':'overreach',reason:'checked'}))};}};const out=await new TaskContractFidelityVerifier({executor}).review({task:task(text),candidates});const byId=new Map(out.reviews.map(x=>[x.id,x.certification]));assert.equal(byId.get('db'),'unsupported');assert.equal(byId.get('project'),'unresolved');});
+const task=text=>({id:'T',title:'T',instruction:text,requirementSources:[{id:'REQ',text}]});
+const ref=text=>({sourceId:'REQ',start:0,end:text.length});
+const candidate=(id,key,text)=>createAuthoritySemanticCandidate({id,key,value:true,requirementRefs:[ref(text)]});
 
-test('Validator receives only cited immutable source span',async()=>{const text='前缀 允许读取项目 后缀',calls=[];const candidate=createAuthoritySemanticCandidate({id:'read',key:'projectRead',value:'allowed',requirementRefs:[ref(text,'允许读取项目')]});const executor={async runValidator(request){calls.push(request);return{reviews:request.candidates.map(p=>({id:p.id,verdict:p.proofKind.endsWith('support')?'supported':'overreach',reason:'checked'}))};}};await new TaskContractFidelityVerifier({executor}).review({task:task(text),candidates:[candidate]});const payload=JSON.stringify(calls[0].candidates);assert.match(payload,/允许读取项目/);assert.doesNotMatch(payload,/前缀|后缀|MUTABLE CURRENT TEXT/);assert.ok(calls[0].candidates.every(p=>p.candidateType==='claim'));});
+test('explicit human project mutation deterministically supports projectWrite',async()=>{
+  const text='请修改项目中的目标文件，但不得联网。';
+  const out=await new TaskContractFidelityVerifier({executor:{async runValidator(){throw new Error('MODEL_MUST_NOT_RUN');}}}).review({task:task(text),candidates:[candidate('write','projectWrite',text)]});
+  assert.equal(out.reviews[0].certification,'supported');
+});
 
-test('invalid provenance and unavailable Validator fail closed to unresolved',async()=>{let calls=0;const bad=createAuthoritySemanticCandidate({id:'bad',key:'projectRead',value:'allowed',requirementRefs:[{sourceId:'missing',start:0,end:1}]});const first=await new TaskContractFidelityVerifier({executor:{async runValidator(){calls++;return{reviews:[]};}}}).review({task:task('read'),candidates:[bad]});assert.equal(calls,0);assert.equal(first.reviews[0].certification,'unresolved');const text='允许读取项目',good=createAuthoritySemanticCandidate({id:'good',key:'projectRead',value:'allowed',requirementRefs:[ref(text,text)]});const second=await new TaskContractFidelityVerifier({executor:{}}).review({task:task(text),candidates:[good]});assert.equal(second.reviews[0].certification,'unresolved');});
+test('read-only or negated mutation never expands projectWrite authority',async()=>{
+  for(const text of ['只读检查项目，不得修改文件。','分析当前实现，不要修改代码。']){
+    const out=await new TaskContractFidelityVerifier().review({task:task(text),candidates:[candidate('write','projectWrite',text)]});
+    assert.equal(out.reviews[0].certification,'unresolved');
+  }
+});
+
+test('network authority requires an explicit human network request',async()=>{
+  const allowed='请联网搜索官方资料。';
+  const denied='检查本地项目，不得联网。';
+  const verifier=new TaskContractFidelityVerifier();
+  assert.equal((await verifier.review({task:task(allowed),candidates:[candidate('net','networkAccess',allowed)]})).reviews[0].certification,'supported');
+  assert.equal((await verifier.review({task:task(denied),candidates:[candidate('net','networkAccess',denied)]})).reviews[0].certification,'unresolved');
+});
+
+test('invalid provenance and unknown authority key fail closed without a model',async()=>{
+  let modelCalls=0;
+  const verifier=new TaskContractFidelityVerifier({executor:{async runValidator(){modelCalls+=1;return{reviews:[]};}}});
+  const bad=createAuthoritySemanticCandidate({id:'bad',key:'projectWrite',value:true,requirementRefs:[{sourceId:'missing',start:0,end:1}]});
+  const unknown=createAuthoritySemanticCandidate({id:'unknown',key:'dbMutation',value:true,requirementRefs:[ref('修改数据库')]});
+  assert.equal((await verifier.review({task:task('修改数据库'),candidates:[bad]})).reviews[0].certification,'unresolved');
+  assert.equal((await verifier.review({task:task('修改数据库'),candidates:[unknown]})).reviews[0].certification,'unresolved');
+  assert.equal(modelCalls,0);
+});
