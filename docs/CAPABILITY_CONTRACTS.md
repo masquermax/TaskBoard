@@ -35,7 +35,7 @@ Handoff:
 
 Identity: Task-level reasoning and organization authority.
 
-Purpose: 持续掌握一个 Task，决定下一步需要什么工作，并把经过认证的局部结果综合成 Task 级结果。
+Purpose: 持续掌握一个 Task，把当前目标拆成最小充分、可停止并尽可能并行的 Work Unit；结果返回后只把 Task 级结论与证据关系收敛成下一步，不复述问题、资料或 Subagent 调查过程。
 
 Owns:
 - Task 目标理解与执行规划。
@@ -47,6 +47,7 @@ Owns:
 Capabilities:
 - 读取 Task Baseline、Task Input Catalog 的逻辑引用、Current Certified State、新 Subagent Result 与触发当前 Turn 的 Human answer；不取得 Project Scope 文件系统路径、附件本地路径或网络能力。
 - 创建有限 Work Unit 并显式声明 `inputRefs`、`projectAccess=none|read|write` 与 `networkAccess`；Root 自己的控制/综合 Turn 不继承这些执行能力。
+- 每个 Root Turn 只跨边界输出当前推进所需的最小充分 Decision Delta：目标拆分时只给出实际 Work Unit；结果回来时只形成必要的结论、Evidence 引用、Gap 与下一动作，不重新总结 Subagent 已表达的调查过程。
 - 根据新发现调整计划；普通 Root Turn 必须由 Task 启动、新 Work Unit Result、已解决 Human Gateway 或技术恢复触发，Current Certified State 本身不产生新的 Root Turn。
 - 当 Current Certified State 存在标记为 `blocking` 的 Gap 时，Root 必须把不安全的完成/收敛视为阻塞；若仍需系统可获得的证据，可以创建独立满足 Work Unit Contract 与 `AuthorizedGrant` 的有限 evidence-acquisition Work Unit。该 Work Unit 只能返回证据/局部发现，不能自行关闭 Gap；若剩余信息或决定确属用户拥有或系统不可获得，Root 再为该 Gap 提交 Human Gateway intent。
 - 每次 Root 决策都把本轮形成/更新的 Task 级 Claims/Gaps 作为 Root Result candidate 提交 Validator；History 是否形成不由 Root 决定。
@@ -81,14 +82,14 @@ Produces:
 - 一个 delegated execution 的工作边界；当前 first-class executor 为 Subagent。
 
 Handoff:
-- 新发现但超出当前 Work Unit 的问题 → Root。
-- 当前问题无法在现有证据/能力下闭合 → Result 中返回 Blocker / Discovery 给 Root，由 Root 判断是否形成 Task Gap 或新 Work Unit。
+- 当前 Work Unit 已完成 → 以 Evidence / local Finding 交回 Root。
+- 当前问题无法在现有证据/能力下闭合 → 只返回当前 Work Unit 的 Blocker / uncertainty 给 Root；是否形成 Task Gap、扩大 Scope 或创建新 Work Unit 仍由 Root 决定。
 
 ## SUBAGENT
 
 Identity: Short-lived executor of one delegated Work Unit.
 
-Purpose: 在给定 Work Unit 边界内使用指定 Skill/Tool 完成具体工作，并尽快把结果交回。
+Purpose: 在给定 Work Unit 边界内使用指定 Skill/Tool 完成具体工作，达到 expectedOutput 后立即把最小充分结果交回。
 
 Owns:
 - 当前 Work Unit 的具体执行过程。
@@ -98,24 +99,23 @@ Capabilities:
 - `projectAccess` 是 Work Unit request，不是授权事实；最终 Project 能力只取 `AuthorizedGrant`。所选 Project 可被收窄到 `none` / `read` / `write`，其中 `write` 必须同时满足 machine Role capability、governed TaskContract authority、Work Unit request 与 selected Project scope。
 - `networkAccess=true` 只表示 Work Unit 请求网络；Executor 仍可基于实际环境继续削减，未声明时网络关闭。
 - 临时产物只写 TaskBoard-managed scratch；能力未声明时 Runtime fail-closed，不从 Task 或 Executor 默认值补权。
-- 返回 source-near Evidence、局部 Finding、blocker 与超范围 Discovery；Finding 只表达当前 Work Unit 内由证据支持的局部发现，不定义 Task 级 Claim / Gap / Recommendation。
-- 达到 stopCondition 后结束本次执行；Codex Executor 还以软收敛 steer + 最终 interrupt 的技术租约落实有限执行，租约只负责停止边界，不替代业务完成判断。
+- 返回当前 Work Unit 必要的 source-near Evidence、局部 Finding、blocker / uncertainty；Finding 只表达当前 Work Unit 内由证据支持的局部发现，不定义 Task 级 Claim / Gap / Recommendation，也不建议新的 Task 工作。
+- 一旦 expectedOutput 已由充分、可追溯的证据建立就结束；剩余时间、Tool budget 或可继续搜索本身都不是继续执行的理由。`stopCondition` 是工作边界，Codex Executor 的 steer / interrupt 只是最终技术停止保护，不替代这个业务停止判断。
 - 当 Root 已形成经过认证的 Task 收敛决定时，可响应 Runtime 的停止请求结束仍在进行且无副作用的只读调查；写入型 Work Unit 不因这种收敛被强行中断。
 
 Produces:
-- Work Unit Result（Evidence + local Findings）。
-- Discovery / Blocker。
+- Work Unit Result（必要 Evidence + local Findings + optional Blocker / uncertainty）。
 
 Handoff:
 - Task 级事实判断、Gap、Recommendation、下一步与完成判断 → Root。
-- 新工作、扩大 Scope、下一阶段或更多 Agent → Root。
+- 新工作、扩大 Scope、下一阶段或更多 Agent → Root；Subagent 不生成这些 Task 级决定。
 - 用户信息 → Root；Subagent 不直接进入 Human Gateway。
 
 ## VALIDATOR
 
 Identity: Peer certification authority for Task-level candidate knowledge.
 
-Purpose: 判断 Root Candidate Delta 是否可被当前证据与 Contract 正式支持，并把越界部分收敛到证据真正支持的范围或明确 Gap。
+Purpose: 只判断 Root Candidate 中声明的关系是否被其引用证据与 Contract 支持；不替 Root 思考、不重新调查 Task。
 
 Owns:
 - Root Result / Candidate Delta 是否可成为正式 Task 结论。
@@ -125,7 +125,7 @@ Capabilities:
 - 核对 Root Candidate Delta 使用的可追溯原始证据地址与结构关系。
 - 对可确定问题执行确定性认证。
 - 在确实无法机械认证且存在可直接提供的精确原始语义输入时，仅检查当前具体 proof obligation；不得重新规划、浏览 Project Scope 或重新调查 Task。
-- 首次不通过时把局部认证反馈交回 Root；仍无法成立时保留可认证内容并形成明确 Gap。
+- 语义证据不足时直接把 `CONFIRMED` 收窄为 `SUPPORTED` 并保留明确 Gap，或保持未被证明的 Gap resolution 为未闭合；不为同一证据边界额外要求一次 Root 模型重写。只有收窄后的认证状态确实改变合法控制动作时，才把控制权交回 Root。
 
 Produces:
 - Certified Result / Narrowed Result / Gap。
