@@ -1,4 +1,5 @@
 const TOOL_TYPES=new Set(['commandExecution','fileChange','webSearch']);
+const ACTIVE_WORK_UNITS=new Map();
 
 function text(value){return String(value==null?'':value).trim();}
 function iso(ms){return Number.isFinite(ms)?new Date(ms).toISOString():null;}
@@ -7,6 +8,7 @@ function normalizeSpace(value){return text(value).replace(/\s+/g,' ');}
 function normalizePath(value){return text(value).replace(/\\/g,'/').replace(/^['"]|['"]$/g,'').replace(/[),;:]+$/g,'');}
 function pathLike(value){const item=normalizePath(value);if(!item||item.length>500)return null;if(/^https?:\/\//i.test(item))return item;if(/^[A-Za-z]:\//.test(item))return item;if(/^(?:\.\.?\/)?(?:[\w.@+-]+\/)+[\w.@+()\[\]-]+(?:\.[A-Za-z0-9_-]+)?(?::\d+)?$/.test(item))return item.replace(/:\d+$/,'');if(/^[\w.@+()\[\]-]+\.[A-Za-z0-9_-]{1,12}(?::\d+)?$/.test(item))return item.replace(/:\d+$/,'');return null;}
 function unique(values){return [...new Set(values.filter(Boolean))];}
+function registryKey(taskId,workUnitId){return`${text(taskId)}\u0000${text(workUnitId)}`;}
 
 function commandName(command){
   const raw=text(command);if(!raw)return'commandExecution';
@@ -95,9 +97,15 @@ function sourceMatchesLocator(source,locator){
   return left===right||left.includes(right)||right.includes(left)||left.split('/').pop()===right.split('/').pop();
 }
 
+function publish(observer,finalized){
+  if(!observer?.emitDiagnostic||!finalized)return;
+  for(const item of finalized.toolEvents||[]){const{event,...data}=item;observer.emitDiagnostic(event,data,'debug');}
+  if(finalized.summary){const{event,...data}=finalized.summary;observer.emitDiagnostic(event,data,'info');}
+}
+
 export class WorkUnitObservability {
-  constructor({taskId=null,workUnitId=null,turnId=null,startedAt=Date.now(),stopCondition='',now=()=>Date.now()}={}){
-    this.taskId=taskId||null;this.workUnitId=workUnitId||null;this.turnId=turnId||null;this.startedAt=startedAt;this.stopCondition=text(stopCondition);this.now=now;
+  constructor({taskId=null,workUnitId=null,turnId=null,startedAt=Date.now(),stopCondition='',now=()=>Date.now(),emitDiagnostic=null}={}){
+    this.taskId=taskId||null;this.workUnitId=workUnitId||null;this.turnId=turnId||null;this.startedAt=startedAt;this.stopCondition=text(stopCondition);this.now=now;this.emitDiagnostic=typeof emitDiagnostic==='function'?emitDiagnostic:null;
     this.records=[];this.active=new Map();this.operationFingerprints=new Set();this.sources=new Set();this.convergenceSteerAt=null;this.finalized=false;
   }
 
@@ -146,4 +154,18 @@ export class WorkUnitObservability {
   }
 }
 
-export const WorkUnitObservabilityInternals={operationClass,commandName,itemSources,stopCriteria};
+export function registerWorkUnitObservability(observer){
+  if(!(observer instanceof WorkUnitObservability)||!text(observer.taskId)||!text(observer.workUnitId))return observer;
+  ACTIVE_WORK_UNITS.set(registryKey(observer.taskId,observer.workUnitId),observer);return observer;
+}
+
+export function finalizeWorkUnitObservability({taskId,workUnitId,evidence=[],completedAt=Date.now(),status='completed',blocker=null,uncertainty=null}={}){
+  const key=registryKey(taskId,workUnitId);const observer=ACTIVE_WORK_UNITS.get(key);if(!observer)return null;
+  ACTIVE_WORK_UNITS.delete(key);const finalized=observer.finalize({evidence,completedAt,status,blocker,uncertainty});publish(observer,finalized);return finalized;
+}
+
+export function failWorkUnitObservability({taskId,workUnitId,completedAt=Date.now(),status='failed',blocker=null,uncertainty=null}={}){
+  return finalizeWorkUnitObservability({taskId,workUnitId,evidence:[],completedAt,status,blocker,uncertainty});
+}
+
+export const WorkUnitObservabilityInternals={operationClass,commandName,itemSources,stopCriteria,registryKey};
