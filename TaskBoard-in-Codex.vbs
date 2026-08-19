@@ -7,6 +7,7 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 base = fso.GetParentFolderName(WScript.ScriptFullName)
 shell.CurrentDirectory = base
 shell.Environment("PROCESS")("TASKBOARD_SURFACES") = "on"
+shell.Environment("PROCESS")("TASKBOARD_LOG_LEVEL") = "info"
 errFile = fso.BuildPath(base, "data\runtime\codex-surface-error.txt")
 
 rc = shell.Run("node scripts\windows-launcher.mjs", 0, True)
