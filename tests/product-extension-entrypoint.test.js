@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const productIndex=readFileSync(resolve(process.cwd(),'src/server/index.js'),'utf8');
+const bootstrapSource=readFileSync(resolve(process.cwd(),'src/server/bootstrap.js'),'utf8');
 
 test('product Runtime starts from a generic registry and never wires concrete builtin extensions', () => {
   assert.match(productIndex,/new ExtensionRegistry\(\)/);
@@ -17,4 +18,13 @@ test('product Runtime does not use environment variables as a second extension i
   assert.doesNotMatch(productIndex,/TASKBOARD_EXECUTOR/);
   assert.match(productIndex,/ImportedExtensionStore/);
   assert.match(productIndex,/loadRegisteredExtensions/);
+});
+
+test('bootstrap is a generic host seam, not a hidden extension installation path', () => {
+  assert.match(bootstrapSource,/new ExtensionRegistry\(\)/);
+  assert.doesNotMatch(bootstrapSource,/createBuiltinExtensionRegistry/);
+  assert.doesNotMatch(bootstrapSource,/registerExternalExtensions/);
+  assert.doesNotMatch(bootstrapSource,/TASKBOARD_EXTERNAL_EXTENSIONS/);
+  assert.doesNotMatch(bootstrapSource,/TASKBOARD_EXECUTOR/);
+  assert.doesNotMatch(bootstrapSource,/executorName\s*=\s*['"]codex['"]/);
 });
