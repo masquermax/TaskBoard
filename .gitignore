@@ -8,5 +8,6 @@ data/attachments/*
 data/runtime/*
 !data/runtime/.gitkeep
 data/executor-connections/
+data/extension-registry.json
 *.log
 .DS_Store
