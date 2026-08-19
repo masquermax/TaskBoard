@@ -87,12 +87,11 @@ export function bootstrap({
   const analysisValidator=new AnalysisResultValidator();
   const modelRouter=new ModelRouter({capabilityProvider});
 
-  // Runtime skeleton: Root judges, Subagent executes, Validator checks the ledger.
-  // Validator therefore needs deterministic analysis/source checks only; there is
-  // no resident semantic proof model and completion no longer starts another model
-  // turn. Requirement-authority fidelity remains separate pending its own audit.
+  // Runtime skeleton: Root judges, Subagent executes, Validator checks sources.
+  // Capability authority is a deterministic projection of the human Requirement;
+  // no Validator/model turn is allowed to grant project-write or network access.
   const validatorRuntime=new ValidatorRuntime({analysisValidator});
-  const taskContractFidelityVerifier=new TaskContractFidelityVerifier({executor,modelRouter});
+  const taskContractFidelityVerifier=new TaskContractFidelityVerifier();
   const completionAssessmentVerifier=new CompletionAssessmentVerifier();
   const completionEvaluator=new CompletionEvaluator();
   const subagentRuntime=new SubagentRuntime({executor,modelRouter});
