@@ -1,5 +1,6 @@
 const $=id=>document.getElementById(id);
 const embedConfig=globalThis.__TASKBOARD_EMBED_CONFIG__||null;
+const NEW_PROFILE_ID='__new__';
 let extensionState={extensions:[],activeExecutorId:null};
 let activeConfigId=null;
 let presentationState=null;
@@ -38,7 +39,7 @@ function ensureManagementUi(){
   const extensionPanel=document.createElement('div');extensionPanel.id='management-extension-panel';extensionPanel.className='hidden';extensionPanel.setAttribute('role','tabpanel');extensionPanel.innerHTML='<label><span>导入地址</span><input id="extension-import-directory" placeholder="D:\\TaskBoard-Extensions\\company-api"></label><button type="button" class="primary-button full" id="extension-import-add">新增</button><div class="divider"></div><label><span>已导入</span><select id="extension-imported-select"><option value="">暂无已导入扩展</option></select></label><div id="extension-import-status" class="hint">只访问你明确填写的扩展目录，不扫描其他位置。</div><button type="button" class="secondary-button full" id="extension-open" disabled>打开</button>';
   head.insertAdjacentElement('afterend',tabs);tabs.insertAdjacentElement('afterend',projectPanel);projectPanel.insertAdjacentElement('afterend',extensionPanel);
 
-  const configDialog=document.createElement('dialog');configDialog.id='extension-config-dialog';configDialog.className='dialog';configDialog.innerHTML='<div class="dialog-card narrow"><div class="dialog-head"><div><span class="eyebrow">扩展</span><h2 id="extension-config-title">扩展配置</h2></div><button id="extension-config-close" type="button" class="icon-button" aria-label="关闭">×</button></div><div id="extension-config-fields"></div><div id="extension-config-help" class="hint"></div><div class="dialog-actions"><button type="button" id="extension-config-cancel" class="secondary-button">关闭</button><button type="button" id="extension-config-save" class="primary-button">保存</button></div></div>';
+  const configDialog=document.createElement('dialog');configDialog.id='extension-config-dialog';configDialog.className='dialog';configDialog.innerHTML='<div class="dialog-card narrow"><div class="dialog-head"><div><span class="eyebrow">扩展</span><h2 id="extension-config-title">扩展配置</h2></div><button id="extension-config-close" type="button" class="icon-button" aria-label="关闭">×</button></div><div id="extension-config-profile"></div><div id="extension-config-fields"></div><div id="extension-config-help" class="hint"></div><div class="dialog-actions"><button type="button" id="extension-config-delete" class="danger-button hidden">删除</button><button type="button" id="extension-config-cancel" class="secondary-button">关闭</button><button type="button" id="extension-config-save" class="primary-button">保存</button></div></div>';
   document.body.appendChild(configDialog);
 
   $('management-tab-project').addEventListener('click',()=>showTab('project'));
@@ -50,6 +51,7 @@ function ensureManagementUi(){
   $('extension-config-close').addEventListener('click',()=>configDialog.close());
   $('extension-config-cancel').addEventListener('click',()=>configDialog.close());
   $('extension-config-save').addEventListener('click',saveExtensionConfig);
+  $('extension-config-delete').addEventListener('click',deleteExtensionProfile);
   void loadExtensions();
 }
 
@@ -87,18 +89,60 @@ async function importExtension(){
 
 function supportedField(field){return ['text','url','secret','model','select'].includes(String(field?.type||'text'));}
 function fields(){return (Array.isArray(presentationState?.fields)?presentationState.fields:[]).filter(field=>field?.key&&supportedField(field));}
+function profiles(){return Array.isArray(connectionState?.profiles)?connectionState.profiles:[];}
+function profileById(id){return profiles().find(profile=>String(profile?.id)===String(id))||null;}
+function selectedProfileId(){return $('extension-config-profile-select')?.value||connectionState?.activeProfileId||'';}
+function selectedProfile(){const id=selectedProfileId();return id===NEW_PROFILE_ID?null:profileById(id);}
 function optionHtml(option){const value=typeof option==='object'?option.value:option;const label=typeof option==='object'?(option.label??option.value):option;return`<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;}
 function fieldHtml(field){const id=fieldId(field),label=escapeHtml(field.label||field.key),placeholder=escapeHtml(field.placeholder||'');if(field.type==='select')return`<label><span>${label}</span><select id="${id}">${(field.options||[]).map(optionHtml).join('')}</select></label>`;const type=field.type==='secret'?'password':field.type==='url'?'url':'text';const note=field.type==='secret'?`<div id="${fieldNoteId(field)}" class="hint"></div>`:'';return`<label><span>${label}</span><input id="${id}" type="${type}" placeholder="${placeholder}" autocomplete="off"></label>${note}`;}
 
+function renderFieldValues(source={}){for(const field of fields()){const input=$(fieldId(field));if(!input)continue;if(field.type==='secret'){input.value='';const note=$(fieldNoteId(field));if(note)note.textContent=field.configuredKey&&source?.[field.configuredKey]?'已保存 Secret；留空不会覆盖。':'尚未保存 Secret。';}else input.value=source?.[field.key]??field.defaultValue??'';}}
+
+function renderProfileSelection(){
+  const host=$('extension-config-profile');const kind=String(presentationState?.kind||'form');if(!host)return;
+  if(kind!=='profiles'){host.innerHTML='';return;}
+  host.innerHTML=`<label><span>${escapeHtml(presentationState?.selectorLabel||'连接')}</span><select id="extension-config-profile-select"></select></label>`;
+  const select=$('extension-config-profile-select');for(const profile of profiles()){const option=document.createElement('option');option.value=profile.id;option.textContent=profile.name||profile.id;select.appendChild(option);}
+  if(presentationState?.allowCreate!==false){const add=document.createElement('option');add.value=NEW_PROFILE_ID;add.textContent=presentationState?.createLabel||'＋ 新增';select.appendChild(add);}
+  const preferred=connectionState?.activeProfileId;select.value=profileById(preferred)?preferred:(profiles()[0]?.id||NEW_PROFILE_ID);select.addEventListener('change',renderSelectedProfile);
+}
+
+function renderSelectedProfile(){
+  const kind=String(presentationState?.kind||'form');if(kind!=='profiles'){renderFieldValues(connectionState||{});$('extension-config-delete')?.classList.add('hidden');return;}
+  const profile=selectedProfile(),isNew=selectedProfileId()===NEW_PROFILE_ID,editable=isNew||profile?.editable===true;
+  $('extension-config-fields')?.classList.toggle('hidden',!editable);renderFieldValues(profile||{});
+  const del=$('extension-config-delete');if(del){del.textContent=presentationState?.deleteLabel||'删除';del.classList.toggle('hidden',!profile?.deletable);}
+}
+
 function renderConfig(){
-  $('extension-config-title').textContent=presentationState?.title||extensionState.extensions.find(x=>x.id===activeConfigId)?.displayName||'扩展配置';$('extension-config-fields').innerHTML=fields().map(fieldHtml).join('');$('extension-config-help').textContent=presentationState?.help||'';$('extension-config-save').textContent=presentationState?.saveLabel||'保存';
-  for(const field of fields()){const input=$(fieldId(field));if(!input)continue;if(field.type==='secret'){input.value='';const note=$(fieldNoteId(field));if(note)note.textContent=field.configuredKey&&connectionState?.[field.configuredKey]?'已保存 Secret；留空不会覆盖。':'尚未保存 Secret。';}else input.value=connectionState?.[field.key]??field.defaultValue??'';}
+  $('extension-config-title').textContent=presentationState?.title||extensionState.extensions.find(x=>x.id===activeConfigId)?.displayName||'扩展配置';$('extension-config-fields').classList.remove('hidden');$('extension-config-fields').innerHTML=fields().map(fieldHtml).join('');$('extension-config-help').textContent=presentationState?.help||'';$('extension-config-save').textContent=presentationState?.saveLabel||'保存';
+  renderProfileSelection();renderSelectedProfile();
 }
 
 async function openSelectedExtension(){const id=$('extension-imported-select')?.value||'';if(!id)return;try{const body=await api(`/api/extensions/${encodeURIComponent(id)}/connection`);activeConfigId=id;presentationState=body.presentation||null;connectionState=body.connection||{};renderConfig();$('extension-config-dialog').showModal();}catch(error){console.error(error);toast(error?.message||'无法打开扩展配置');}}
 
 function fieldValues(){const values={};for(const field of fields()){const input=$(fieldId(field));if(!input)continue;const value=String(input.value??'').trim();if(value||field.type!=='secret')values[field.key]=value;}return values;}
 
-async function saveExtensionConfig(){if(!activeConfigId)return;const button=$('extension-config-save');if(button)button.disabled=true;try{const action=presentationState?.actions?.save||'save';const body=await api(`/api/extensions/${encodeURIComponent(activeConfigId)}/connection`,{method:'PUT',body:JSON.stringify({action,values:fieldValues()})});presentationState=body.presentation||presentationState;connectionState=body.connection||{};renderConfig();toast('扩展配置已保存并立即生效');}catch(error){console.error(error);toast(presentationState?.errors?.[error?.message]||error?.message||'扩展配置保存失败');}finally{if(button)button.disabled=false;}}
+async function saveExtensionConfig(){
+  if(!activeConfigId)return;const button=$('extension-config-save');if(button)button.disabled=true;
+  try{
+    const actions=presentationState?.actions||{},kind=String(presentationState?.kind||'form');let payload;
+    if(kind==='profiles'){
+      const selected=selectedProfileId(),profile=selectedProfile();
+      if(selected!==NEW_PROFILE_ID&&profile?.editable!==true)payload={action:actions.select||'selectProfile',profileId:selected};
+      else{const next=fieldValues();if(selected!==NEW_PROFILE_ID)next.id=selected;payload={action:actions.save||'saveProfile',profile:next,select:true};}
+    }else payload={action:actions.save||'save',values:fieldValues()};
+    const body=await api(`/api/extensions/${encodeURIComponent(activeConfigId)}/connection`,{method:'PUT',body:JSON.stringify(payload)});presentationState=body.presentation||presentationState;connectionState=body.connection||{};renderConfig();toast('扩展配置已保存并立即生效');
+  }catch(error){console.error(error);toast(presentationState?.errors?.[error?.message]||error?.message||'扩展配置保存失败');}
+  finally{if(button)button.disabled=false;}
+}
+
+async function deleteExtensionProfile(){
+  if(!activeConfigId)return;const profile=selectedProfile();if(!profile?.deletable)return;if(typeof globalThis.confirm==='function'&&!globalThis.confirm(`删除“${profile.name||profile.id}”？`))return;
+  const button=$('extension-config-delete');if(button)button.disabled=true;
+  try{const action=presentationState?.actions?.delete||'deleteProfile';const body=await api(`/api/extensions/${encodeURIComponent(activeConfigId)}/connection`,{method:'PUT',body:JSON.stringify({action,profileId:profile.id})});presentationState=body.presentation||presentationState;connectionState=body.connection||{};renderConfig();toast('扩展配置已更新并立即生效');}
+  catch(error){console.error(error);toast(presentationState?.errors?.[error?.message]||error?.message||'扩展配置更新失败');}
+  finally{if(button)button.disabled=false;}
+}
 
 ensureManagementUi();
