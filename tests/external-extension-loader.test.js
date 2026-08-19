@@ -61,7 +61,7 @@ test('external extension module registers through the v0.9.2 generic registry co
   assert.equal(created.orchestrationMode, 'taskboard');
 });
 
-test('bootstrap can select an explicit external Executor without changing Task Core', () => {
+test('bootstrap accepts only an explicitly composed registry rather than loading extension specs itself', () => {
   const { root, file } = tempModule(`
     module.exports = {
       id: 'external-bootstrap',
@@ -70,18 +70,19 @@ test('bootstrap can select an explicit external Executor without changing Task C
       }
     };
   `);
+  const registry = new ExtensionRegistry();
+  registerExternalExtensions(registry, { rootDir: root, specs: [file] });
   const runtime = bootstrap({
     rootDir: root,
     executorName: 'external-bootstrap',
-    externalExtensions: [file],
+    extensionRegistry: registry,
     startScheduler: false,
   });
   try {
     assert.equal(runtime.extension.id, 'external-bootstrap');
     assert.equal(runtime.extension.apiVersion, EXTENSION_API_VERSION);
     assert.equal(runtime.extension.displayName, 'External Bootstrap');
-    assert.equal(runtime.extensionRegistry.has('codex'), true);
-    assert.equal(runtime.extensionRegistry.has('mock'), true);
+    assert.deepEqual(runtime.extensionRegistry.ids(), ['external-bootstrap']);
   } finally {
     runtime.executor.close?.();
     runtime.database.close();
