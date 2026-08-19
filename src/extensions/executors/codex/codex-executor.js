@@ -47,28 +47,15 @@ const validatorSchema = {
   additionalProperties:false,
 };
 
-const subagentFindingSchema = {
-  type:'object',
-  properties:{
-    id:{type:'string'},
-    statement:{type:'string'},
-    evidenceIds:{type:'array',items:{type:'string'},maxItems:20},
-  },
-  required:['id','statement','evidenceIds'],
-  additionalProperties:false,
-};
-
 const subagentSchema = {
   type:'object',
   properties:{
     delegationId:{type:'string'},
     result:{type:'string'},
     evidence:{type:'array',items:evidenceSchema,maxItems:40},
-    findings:{type:'array',items:subagentFindingSchema,maxItems:30},
     blocker:{type:['string','null']},
-    uncertainty:{type:['string','null']},
   },
-  required:['delegationId','result','evidence','findings','blocker','uncertainty'],
+  required:['delegationId','result','evidence','blocker'],
   additionalProperties:false,
 };
 
@@ -240,7 +227,7 @@ Turn protocol:
 - gapResolutions[] closes an existing Gap by id with reason + evidenceIds; omitted committed items remain unchanged. Resolved Human Gateway answers listed below already have system-owned DIRECT evidenceId values: cite those ids from Claims/Gap resolutions and do not copy the Human answer into evidence[]. Runtime will independently submit the bound Gateway Gap for proof even if Root omits that resolution.
 - kind=delegate emits NEW bounded Work Units in delegations[] with goal, expectedOutput, stopCondition, projectAccess, networkAccess, dependsOn, inputRefs and optional skillId. projectAccess/networkAccess must be the minimum capabilities actually required by that Work Unit; Runtime may deny an unrealizable plan but must not silently weaken these semantics. inputRefs selects only the Task inputs needed by that Work Unit from the catalog below; use [] when no Task source is needed.
 - kind=human_gateway is only for one unresolved blocking Gap that truly requires human information/choice. Set gateway.gapId to that exact Gap id and gateway.question to that Gap's exact certified question; context/options may explain choices but may not replace the question with a broader/narrower one. Non-blocking unknowns remain Gaps. kind=complete emits a completion candidate.
-- Work Unit findings are local execution output, not Task truth. Root decides which supported findings become this Turn's Claims/Gaps/Recommendations; any Task-knowledge change must appear in this Turn's candidate delta even when the next control action is delegate.
+- Work Unit results are execution output plus source-traced Evidence, not Task truth. Root alone decides what those results mean, whether another Work Unit is needed, and which Task-level Claims/Gaps/Recommendations follow.
 
 Structured analysis serialization when resultMode=analysis:
 - Evidence is source-near material with locator + observation. DIRECT statement equals observation.
@@ -292,10 +279,10 @@ Work Unit protocol:
 - Execute only delegation.goal and delegation.expectedOutput; delegation.stopCondition is the execution boundary. Do not investigate, plan, or suggest work outside this Work Unit.
 - Stop as soon as expectedOutput is established by sufficient traceable evidence. Remaining time/tool budget is not a reason to continue searching.
 - delegation.projectAccess and delegation.networkAccess are the complete Runtime-granted Project/network capabilities for this Work Unit.
-- evidence[] contains only traceable source-near material necessary for the current Work Unit result.
+- Return only the requested execution output plus traceable source-near evidence necessary for Root to judge it. Do not classify correctness, confidence, Task truth, Gap, recommendation, completion, next work, or what the result means.
 - Search output is only a locator. When search finds a source-code fact, read the actual file and emit PROJECT_FILE Evidence with the concrete file locator + observation.
-- findings[] contains only local findings from that evidence. Do not classify Task-level truth, gaps, recommendations, completion, next work, or out-of-scope discoveries; Root owns those judgments.
-- Keep result compact: state the Work Unit result, not the search process or material already represented by Evidence/findings.
+- If the Work Unit cannot execute or cannot reach expectedOutput inside its boundary, set blocker and stop. Do not reinterpret or expand the Task.
+- Keep result compact: state what was executed/found, not the search process or material already represented by Evidence.
 - Executor Environment Snapshot below is a runtime fact. Do not re-probe capabilities already marked unavailable; choose an available path instead.
 ${validationFeedback?.length?`VALIDATION FEEDBACK — correct only these source-trace issues inside the same Work Unit. ${JSON.stringify(validationFeedback)}`:''}
 
