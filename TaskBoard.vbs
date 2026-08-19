@@ -14,6 +14,7 @@ If Not fso.FileExists(launcher) Then
 End If
 
 shell.CurrentDirectory = base
+shell.Environment("PROCESS")("TASKBOARD_LOG_LEVEL") = "info"
 rc = shell.Run("cmd.exe /d /c node --version >nul 2>&1", 0, True)
 If rc <> 0 Then
   MsgBox "Node.js was not found in PATH. Please install Node.js or add node.exe to PATH.", 16, "TaskBoard"
