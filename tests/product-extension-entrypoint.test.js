@@ -13,9 +13,10 @@ test('product Runtime starts from a generic registry and never wires concrete bu
   assert.doesNotMatch(productIndex,/register\(['"]mock['"]/);
 });
 
-test('product Runtime does not use environment variables as a second extension import path', () => {
+test('product Runtime does not use environment variables or direct specs as a second extension import path', () => {
   assert.doesNotMatch(productIndex,/TASKBOARD_EXTERNAL_EXTENSIONS/);
   assert.doesNotMatch(productIndex,/TASKBOARD_EXECUTOR/);
+  assert.doesNotMatch(productIndex,/externalExtensions/);
   assert.match(productIndex,/ImportedExtensionStore/);
   assert.match(productIndex,/loadRegisteredExtensions/);
 });
@@ -26,5 +27,6 @@ test('bootstrap is a generic host seam, not a hidden extension installation path
   assert.doesNotMatch(bootstrapSource,/registerExternalExtensions/);
   assert.doesNotMatch(bootstrapSource,/TASKBOARD_EXTERNAL_EXTENSIONS/);
   assert.doesNotMatch(bootstrapSource,/TASKBOARD_EXECUTOR/);
+  assert.doesNotMatch(bootstrapSource,/externalExtensions/);
   assert.doesNotMatch(bootstrapSource,/executorName\s*=\s*['"]codex['"]/);
 });
