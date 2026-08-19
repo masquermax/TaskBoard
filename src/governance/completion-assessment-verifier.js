@@ -34,11 +34,11 @@ function accepted(obligation,claims,reason){
 }
 
 /**
- * CompletionAssessmentVerifier is deterministic glue, not another reasoning role.
- * Root owns the judgment that a confirmed Claim satisfies a governed obligation;
- * Validator has already checked that Claim's source ledger. This component only
- * verifies the explicit mapping and hands it to CompletionEvaluator, which remains
- * the sole Goal Satisfaction aggregator.
+ * Deterministic completion ledger.
+ * Root owns the judgment that a CONFIRMED Claim satisfies an obligation and must
+ * state that relation explicitly through claim.obligationRefs. Validator has
+ * already checked the Claim's source ledger; this component only checks the
+ * declared ids/provenance and CompletionEvaluator aggregates the result.
  */
 export class CompletionAssessmentVerifier{
   constructor(_options={}){}
@@ -46,11 +46,9 @@ export class CompletionAssessmentVerifier{
 
   async review({task,proposal,certifiedContext=null}={}){
     const assessments=[];
-    const taskObligations=obligations(task);
-    const supportedObligations=taskObligations.filter(supported);
     const claims=confirmedClaims(certifiedContext||{});
 
-    for(const obligation of taskObligations){
+    for(const obligation of obligations(task)){
       if(!supported(obligation)){
         assessments.push(unresolved(obligation,'Obligation is not Requirement-certified.'));
         continue;
@@ -66,15 +64,9 @@ export class CompletionAssessmentVerifier{
         continue;
       }
 
-      let mapped=claims.filter(claim=>strings(claim?.obligationRefs).includes(text(obligation.id)));
-      // Compatibility for the current canonical TaskContract, which contains one
-      // goal obligation. Until every Root output emits obligationRefs, a single
-      // governed obligation may consume all CONFIRMED Task Claims. Multi-obligation
-      // Tasks stay fail-closed without explicit Root mapping.
-      if(!mapped.length&&supportedObligations.length===1)mapped=claims;
-
+      const mapped=claims.filter(claim=>strings(claim?.obligationRefs).includes(text(obligation.id)));
       if(!mapped.length){
-        assessments.push(unresolved(obligation,'Root supplied no CONFIRMED Claim mapped to this obligation.'));
+        assessments.push(unresolved(obligation,'Root supplied no CONFIRMED Claim explicitly mapped to this obligation.'));
         continue;
       }
 
