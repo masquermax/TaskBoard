@@ -1,5 +1,6 @@
 const TOOL_TYPES=new Set(['commandExecution','fileChange','webSearch']);
 const ACTIVE_WORK_UNITS=new Map();
+const MAX_MATCH_TEXT_BYTES=256*1024;
 
 function text(value){return String(value==null?'':value).trim();}
 function iso(ms){return Number.isFinite(ms)?new Date(ms).toISOString():null;}
@@ -9,6 +10,7 @@ function normalizePath(value){return text(value).replace(/\\/g,'/').replace(/^['
 function pathLike(value){const item=normalizePath(value);if(!item||item.length>500)return null;if(/^https?:\/\//i.test(item))return item;if(/^[A-Za-z]:\//.test(item))return item;if(/^(?:\.\.?\/)?(?:[\w.@+-]+\/)+[\w.@+()\[\]-]+(?:\.[A-Za-z0-9_-]+)?(?::\d+)?$/.test(item))return item.replace(/:\d+$/,'');if(/^[\w.@+()\[\]-]+\.[A-Za-z0-9_-]{1,12}(?::\d+)?$/.test(item))return item.replace(/:\d+$/,'');return null;}
 function unique(values){return [...new Set(values.filter(Boolean))];}
 function registryKey(taskId,workUnitId){return`${text(taskId)}\u0000${text(workUnitId)}`;}
+function truncate(value,max=600){const raw=text(value);return raw.length>max?`${raw.slice(0,max)}…`:raw;}
 
 function commandName(command){
   const raw=text(command);if(!raw)return'commandExecution';
@@ -61,11 +63,27 @@ function targetFor(item,sources=[]){
   return null;
 }
 
+function operationPreview(item){
+  if(item?.type==='commandExecution')return truncate(normalizeSpace(item?.command));
+  if(item?.type==='webSearch')return truncate(item?.query||item?.url);
+  if(item?.type==='fileChange')return truncate((Array.isArray(item?.changes)?item.changes:[]).map(change=>`${text(change?.kind)||'change'}:${text(change?.path)}`).join(', '));
+  return null;
+}
+
 function resultBytes(item){
   if(item?.type==='commandExecution')return bytes(item?.aggregatedOutput||'');
   if(item?.type==='fileChange')return bytes(item?.changes||[]);
   if(item?.type==='webSearch')return bytes(item?.results??item?.result??item??'');
   return bytes(item??'');
+}
+
+function matchText(item){
+  let raw='';
+  if(item?.type==='commandExecution')raw=text(item?.aggregatedOutput);
+  else if(item?.type==='webSearch')raw=text(JSON.stringify(item?.results??item?.result??''));
+  else if(item?.type==='fileChange')raw=text(JSON.stringify(item?.changes??''));
+  if(Buffer.byteLength(raw,'utf8')<=MAX_MATCH_TEXT_BYTES)return normalizeSpace(raw);
+  return normalizeSpace(Buffer.from(raw,'utf8').subarray(0,MAX_MATCH_TEXT_BYTES).toString('utf8'));
 }
 
 function succeeded(item){
@@ -97,10 +115,16 @@ function sourceMatchesLocator(source,locator){
   return left===right||left.includes(right)||right.includes(left)||left.split('/').pop()===right.split('/').pop();
 }
 
-function publish(observer,finalized){
-  if(!observer?.emitDiagnostic||!finalized)return;
-  for(const item of finalized.toolEvents||[]){const{event,...data}=item;observer.emitDiagnostic(event,data,'debug');}
-  if(finalized.summary){const{event,...data}=finalized.summary;observer.emitDiagnostic(event,data,'info');}
+function exactEvidenceMatches(record,evidenceItem){
+  const locator=text(evidenceItem?.locator);const observation=normalizeSpace(evidenceItem?.observation);
+  if(!locator||observation.length<8||!record.resultMatchText)return false;
+  const sourceMatch=record.sources.some(source=>sourceMatchesLocator(source,locator))||sourceMatchesLocator(record.target,locator);
+  return sourceMatch&&record.resultMatchText.includes(observation);
+}
+
+function publishSummary(observer,summary){
+  if(!observer?.emitDiagnostic||!summary)return;
+  const{event,...data}=summary;observer.emitDiagnostic(event,data,'info');
 }
 
 export class WorkUnitObservability {
@@ -117,40 +141,56 @@ export class WorkUnitObservability {
     const id=text(item?.id)||`tool-${this.records.length+1}`;
     if(this.active.has(id))return this.active.get(id);
     const sources=itemSources(item);const opClass=operationClass(item);const fingerprint=operationFingerprint(item,opClass,sources);
-    const record={id,seq:this.records.length+1,toolCallName:item?.type==='commandExecution'?commandName(item?.command):text(item?.type),toolType:text(item?.type),startedAt:at,completedAt:null,durationMs:null,operationClass:opClass,target:targetFor(item,sources),success:null,resultBytes:0,sources,duplicateOperation:this.operationFingerprints.has(fingerprint),fingerprint,newSourceCount:0,newEvidenceCount:0,elapsedSinceLastNewEvidenceMs:null};
+    const record={id,seq:this.records.length+1,toolCallName:item?.type==='commandExecution'?commandName(item?.command):text(item?.type),toolType:text(item?.type),operation:operationPreview(item),startedAt:at,completedAt:null,durationMs:null,operationClass:opClass,target:targetFor(item,sources),success:null,resultBytes:0,resultMatchText:'',sources,duplicateOperation:this.operationFingerprints.has(fingerprint),fingerprint,newSourceCount:0,newEvidenceCount:null,elapsedSinceLastNewEvidenceMs:null};
     this.operationFingerprints.add(fingerprint);this.records.push(record);this.active.set(id,record);return record;
   }
 
   complete(item,at=this.now()){
     if(!this.isToolItem(item))return null;
     const id=text(item?.id)||null;let record=id?this.active.get(id):null;if(!record)record=this.start(item,at);if(!record)return null;
-    const completedSources=itemSources(item);record.sources=unique([...record.sources,...completedSources]);record.target=targetFor(item,record.sources)||record.target;record.completedAt=at;record.durationMs=Number.isFinite(item?.durationMs)?Number(item.durationMs):Math.max(0,at-record.startedAt);record.success=succeeded(item);record.resultBytes=resultBytes(item);
-    let newSourceCount=0;for(const source of record.sources){const normalized=normalizePath(source).toLowerCase();if(normalized&&!this.sources.has(normalized)){this.sources.add(normalized);newSourceCount+=1;}}record.newSourceCount=newSourceCount;this.active.delete(record.id);return record;
+    const completedSources=itemSources(item);record.sources=unique([...record.sources,...completedSources]);record.target=targetFor(item,record.sources)||record.target;record.operation=record.operation||operationPreview(item);record.completedAt=at;record.durationMs=Number.isFinite(item?.durationMs)?Number(item.durationMs):Math.max(0,at-record.startedAt);record.success=succeeded(item);record.resultBytes=resultBytes(item);record.resultMatchText=matchText(item);
+    let newSourceCount=0;for(const source of record.sources){const normalized=normalizePath(source).toLowerCase();if(normalized&&!this.sources.has(normalized)){this.sources.add(normalized);newSourceCount+=1;}}record.newSourceCount=newSourceCount;this.active.delete(record.id);
+    if(this.emitDiagnostic){
+      this.emitDiagnostic('tool-completed',{
+        taskId:this.taskId,workUnitId:this.workUnitId,turnId:this.turnId,seq:record.seq,
+        toolCallName:record.toolCallName,toolType:record.toolType,operation:record.operation||null,
+        startedAt:iso(record.startedAt),durationMs:record.durationMs,operationClass:record.operationClass,target:record.target,
+        success:record.success,resultBytes:record.resultBytes,newSourceCount:record.newSourceCount,
+        newEvidenceCount:null,duplicateOperation:record.duplicateOperation,elapsedSinceLastNewEvidenceMs:null,
+        evidenceState:'pending-verification',
+      },'debug');
+    }
+    return record;
   }
 
   noteConvergenceSteer(at=this.now()){if(this.convergenceSteerAt==null)this.convergenceSteerAt=at;}
 
-  finalize({evidence=[],completedAt=this.now(),status='completed',blocker=null,uncertainty=null}={}){
+  finalize({evidence=null,completedAt=this.now(),status='completed',blocker=null,uncertainty=null}={}){
     if(this.finalized)return this.finalized;this.finalized=true;
-    const verified=Array.isArray(evidence)?evidence:[];
-    const unattributed=[];
-    for(const evidenceItem of verified){
-      const locator=text(evidenceItem?.locator);let matched=null;
-      if(locator){matched=this.records.find(record=>record.sources.some(source=>sourceMatchesLocator(source,locator))||sourceMatchesLocator(record.target,locator));}
-      if(matched)matched.newEvidenceCount+=1;else unattributed.push(evidenceItem);
+    const evidenceAvailable=Array.isArray(evidence);const verified=evidenceAvailable?evidence:[];const unattributed=[];
+    for(const record of this.records){record.newEvidenceCount=evidenceAvailable?0:null;record.elapsedSinceLastNewEvidenceMs=null;}
+    if(evidenceAvailable){
+      for(const evidenceItem of verified){
+        const matches=this.records.filter(record=>exactEvidenceMatches(record,evidenceItem));
+        if(matches.length===1)matches[0].newEvidenceCount+=1;else unattributed.push(evidenceItem);
+      }
     }
     const ordered=[...this.records].sort((a,b)=>a.seq-b.seq);let lastEvidenceAt=null;let firstEvidenceAt=null;let lastEvidenceSeq=null;
-    for(const record of ordered){
-      if(record.newEvidenceCount>0){const at=record.completedAt??record.startedAt;if(firstEvidenceAt==null)firstEvidenceAt=at;lastEvidenceAt=at;lastEvidenceSeq=record.seq;}
-      record.elapsedSinceLastNewEvidenceMs=lastEvidenceAt==null?null:Math.max(0,(record.completedAt??record.startedAt)-lastEvidenceAt);
+    if(evidenceAvailable){
+      for(const record of ordered){
+        if((record.newEvidenceCount||0)>0){const at=record.completedAt??record.startedAt;if(firstEvidenceAt==null)firstEvidenceAt=at;lastEvidenceAt=at;lastEvidenceSeq=record.seq;}
+        if(lastEvidenceAt!=null)record.elapsedSinceLastNewEvidenceMs=Math.max(0,(record.completedAt??record.startedAt)-lastEvidenceAt);
+      }
+      if(this.emitDiagnostic){
+        for(const record of ordered.filter(item=>(item.newEvidenceCount||0)>0)){
+          this.emitDiagnostic('tool-evidence-attributed',{taskId:this.taskId,workUnitId:this.workUnitId,turnId:this.turnId,seq:record.seq,newEvidenceCount:record.newEvidenceCount,elapsedSinceLastNewEvidenceMs:record.elapsedSinceLastNewEvidenceMs},'debug');
+        }
+      }
     }
-    let evidenceTimingBasis='tool-source-attribution';
-    if(verified.length&&!lastEvidenceAt){firstEvidenceAt=completedAt;lastEvidenceAt=completedAt;evidenceTimingBasis='turn-final-unattributed';}
-    const toolCallCount=ordered.length;const uniqueToolCalls=this.operationFingerprints.size;const duplicateToolCalls=Math.max(0,toolCallCount-uniqueToolCalls);const postSaturationCalls=lastEvidenceSeq==null?(verified.length?null:toolCallCount):ordered.filter(record=>record.seq>lastEvidenceSeq).length;const callsAfterSteer=this.convergenceSteerAt==null?0:ordered.filter(record=>(record.startedAt??0)>=this.convergenceSteerAt).length;
-    const criteria=stopCriteria(this.stopCondition);const cleanCompletion=status==='completed'&&!text(blocker)&&!text(uncertainty);const stopConditionProgress={satisfied:cleanCompletion?criteria.length:null,total:criteria.length,status:cleanCompletion?'reported-satisfied':'not-proven',basis:cleanCompletion?'work-unit-return-without-blocker':'runtime-observation',satisfiedAt:cleanCompletion?iso(completedAt):null};
-    const toolEvents=ordered.map(record=>({event:'tool-completed',taskId:this.taskId,workUnitId:this.workUnitId,turnId:this.turnId,seq:record.seq,toolCallName:record.toolCallName,toolType:record.toolType,startedAt:iso(record.startedAt),durationMs:record.durationMs,operationClass:record.operationClass,target:record.target,success:record.success,resultBytes:record.resultBytes,newSourceCount:record.newSourceCount,newEvidenceCount:record.newEvidenceCount,duplicateOperation:record.duplicateOperation,elapsedSinceLastNewEvidenceMs:record.elapsedSinceLastNewEvidenceMs}));
-    const summary={event:'work-unit-summary',taskId:this.taskId,workUnitId:this.workUnitId,turnId:this.turnId,status,durationMs:Math.max(0,completedAt-this.startedAt),toolCallCount,uniqueToolCalls,duplicateToolCalls,duplicateRatio:toolCallCount?Number((duplicateToolCalls/toolCallCount).toFixed(4)):0,uniqueSourcesTouched:this.sources.size,newEvidenceCount:verified.length,attributedEvidenceCount:verified.length-unattributed.length,unattributedEvidenceCount:unattributed.length,firstEvidenceAt:iso(firstEvidenceAt),lastNewEvidenceAt:iso(lastEvidenceAt),evidenceTimingBasis,postSaturationCalls,timeAfterLastNewEvidenceMs:lastEvidenceAt==null?null:Math.max(0,completedAt-lastEvidenceAt),convergenceSteerAt:iso(this.convergenceSteerAt),convergenceSteerElapsedMs:this.convergenceSteerAt==null?null:Math.max(0,this.convergenceSteerAt-this.startedAt),callsAfterConvergenceSteer:callsAfterSteer,stopConditionProgress,actualCompletionAt:iso(completedAt)};
-    return{toolEvents,summary};
+    const toolCallCount=ordered.length;const uniqueToolCalls=this.operationFingerprints.size;const duplicateToolCalls=Math.max(0,toolCallCount-uniqueToolCalls);const postSaturationCalls=lastEvidenceSeq==null?null:ordered.filter(record=>record.seq>lastEvidenceSeq).length;const callsAfterSteer=this.convergenceSteerAt==null?0:ordered.filter(record=>(record.startedAt??0)>=this.convergenceSteerAt).length;
+    const criteria=stopCriteria(this.stopCondition);const stopConditionProgress={satisfied:null,total:criteria.length||null,status:'unknown',basis:'not-instrumented',satisfiedAt:null};
+    const summary={event:'work-unit-summary',taskId:this.taskId,workUnitId:this.workUnitId,turnId:this.turnId,status,durationMs:Math.max(0,completedAt-this.startedAt),toolCallCount,uniqueToolCalls,duplicateToolCalls,duplicateRatio:toolCallCount?Number((duplicateToolCalls/toolCallCount).toFixed(4)):0,uniqueSourcesTouched:this.sources.size,newEvidenceCount:evidenceAvailable?verified.length:null,attributedEvidenceCount:evidenceAvailable?verified.length-unattributed.length:null,unattributedEvidenceCount:evidenceAvailable?unattributed.length:null,firstEvidenceAt:iso(firstEvidenceAt),lastNewEvidenceAt:iso(lastEvidenceAt),evidenceTimingBasis:evidenceAvailable?(lastEvidenceAt==null?'unavailable':'exact-observation-match'):'unavailable',postSaturationCalls,timeAfterLastNewEvidenceMs:lastEvidenceAt==null?null:Math.max(0,completedAt-lastEvidenceAt),convergenceSteerAt:iso(this.convergenceSteerAt),convergenceSteerElapsedMs:this.convergenceSteerAt==null?null:Math.max(0,this.convergenceSteerAt-this.startedAt),callsAfterConvergenceSteer:callsAfterSteer,stopConditionProgress,actualCompletionAt:iso(completedAt),blocker:text(blocker)||null,uncertainty:text(uncertainty)||null};
+    return{summary};
   }
 }
 
@@ -159,13 +199,13 @@ export function registerWorkUnitObservability(observer){
   ACTIVE_WORK_UNITS.set(registryKey(observer.taskId,observer.workUnitId),observer);return observer;
 }
 
-export function finalizeWorkUnitObservability({taskId,workUnitId,evidence=[],completedAt=Date.now(),status='completed',blocker=null,uncertainty=null}={}){
+export function finalizeWorkUnitObservability({taskId,workUnitId,evidence=null,completedAt=Date.now(),status='completed',blocker=null,uncertainty=null}={}){
   const key=registryKey(taskId,workUnitId);const observer=ACTIVE_WORK_UNITS.get(key);if(!observer)return null;
-  ACTIVE_WORK_UNITS.delete(key);const finalized=observer.finalize({evidence,completedAt,status,blocker,uncertainty});publish(observer,finalized);return finalized;
+  ACTIVE_WORK_UNITS.delete(key);const finalized=observer.finalize({evidence,completedAt,status,blocker,uncertainty});publishSummary(observer,finalized.summary);return finalized;
 }
 
 export function failWorkUnitObservability({taskId,workUnitId,completedAt=Date.now(),status='failed',blocker=null,uncertainty=null}={}){
-  return finalizeWorkUnitObservability({taskId,workUnitId,evidence:[],completedAt,status,blocker,uncertainty});
+  return finalizeWorkUnitObservability({taskId,workUnitId,evidence:null,completedAt,status,blocker,uncertainty});
 }
 
-export const WorkUnitObservabilityInternals={operationClass,commandName,itemSources,stopCriteria,registryKey};
+export const WorkUnitObservabilityInternals={operationClass,commandName,itemSources,stopCriteria,registryKey,exactEvidenceMatches};
