@@ -29,8 +29,6 @@ function rootActivityCopy(kind='initial'){
   const copy={
     initial:{title:'Root 初始判断',waiting:'正在获取 Root 执行资源。',running:'Root 正在判断当前目标并形成最小推进动作。'},
     synthesis:{title:'Root 综合结果',waiting:'当前 Work Unit 批次已结束；正在获取 Root 综合资源。',running:'Root 正在基于本批结果形成结论、证据关系与下一动作。'},
-    control:{title:'Root 控制决策',waiting:'已认证边界已就绪；正在获取 Root 控制资源。',running:'Root 正在基于已认证边界选择下一动作。'},
-    completion_repair:{title:'Root 完成修正',waiting:'Completion Contract 存在未满足项；正在获取 Root 资源。',running:'Root 正在补齐完成判断与 obligation 关系。'},
     triggered:{title:'Root 继续判断',waiting:'新的 Task 触发已就绪；正在获取 Root 资源。',running:'Root 正在基于新触发继续推进。'},
   };
   return copy[kind]||copy.triggered;
@@ -73,6 +71,7 @@ function validationError(violations=[]){
   const error=new Error(`GOVERNANCE_VALIDATION_FAILED${summary?`: ${summary}`:''}`);error.nonRetryable=true;error.governanceViolations=violations;return error;
 }
 function invalidDelegationPlan(issues=[]){const error=new Error(`ROOT_INVALID_DELEGATION_PLAN${issues.length?`: ${issues.join(' | ')}`:''}`);error.nonRetryable=true;return error;}
+function invalidControlDecision(issues=[]){const error=new Error(`ROOT_INVALID_CONTROL_DECISION${issues.length?`: ${issues.map(item=>item.reason||item).join(' | ')}`:''}`);error.nonRetryable=true;error.governanceViolations=issues;return error;}
 
 export function validateDelegationPlan(delegations,{knownWorkIds=[],availableInputRefs=null}={}){
   const raw=Array.isArray(delegations)?delegations:[],issues=[];
@@ -139,16 +138,12 @@ export class RootRuntime{
   discardSession(taskId){this.sessions.delete(taskId);this.modelRouter.release?.(taskId);}
   cleanupTaskWorkspace(taskId){return this.executor.cleanupTaskWorkspace?.(taskId)??false;}
 
-  async certifyWorkAuthority(task,session,callbacks,workUnits=[]){
+  async certifyWorkAuthority(task,callbacks,workUnits=[]){
     const candidates=authoritySemanticCandidatesForWork(task,workUnits);if(!candidates.length)return task;
-    session.actor={title:'Requirement Authority 认证',status:WorkUnitStatus.WAITING_RESOURCE,detail:'Root 已提出受治理 Work capability；等待 Requirement Authority 核对。',updatedAt:nowIso(),owner:'validator'};this.emit(session,callbacks);
-    let reviews=[];
-    if(this.taskContractFidelityVerifier){
-      const result=await this.taskContractFidelityVerifier.review({task,candidates,policyContext:this.governanceCompiler?.compileForRole?.(task,'validator')||session.policyContext,onExecutionStarted:()=>{session.actor.status=WorkUnitStatus.RUNNING;callbacks.onExecutionStarted?.({role:'validator'});this.emit(session,callbacks);},onProgress:p=>{session.actor.detail=p?.detail||p?.summary||session.actor.detail;this.emit(session,callbacks);}});
-      reviews=Array.isArray(result?.reviews)?result.reviews:[];
-    }
+    const result=this.taskContractFidelityVerifier?await this.taskContractFidelityVerifier.review({task,candidates}):{reviews:[]};
+    const reviews=Array.isArray(result?.reviews)?result.reviews:[];
     const nextContract=applyAuthorityFidelity(task.taskContract,candidates,reviews);callbacks.onTaskContractAuthority?.(nextContract.authority);
-    const next={...task,taskContract:nextContract};session.policyContext=this.governanceCompiler?.compileForTask?.(next)||session.policyContext;return next;
+    return{...task,taskContract:nextContract};
   }
 
   createSession(task){
@@ -159,16 +154,15 @@ export class RootRuntime{
       taskId:task.id,round:0,subagentResults:pendingWorkResults,currentStage:null,
       completedWorkUnits:durableWorkReceipts.map(receipt=>({id:receipt.id,stageId:null,title:receipt.workUnit.title||receipt.id,projectAccess:receipt.workUnit.projectAccess||'none',networkAccess:receipt.workUnit.networkAccess===true,status:WorkUnitStatus.COMPLETED,detail:receipt.result?.result||'工作已完成。',issuedAt:receipt.issued_at||null,startedAt:receipt.started_at||null,updatedAt:receipt.completed_at||nowIso(),completedAt:receipt.completed_at||null,failureCount:0,nextRetryAt:null,canRetry:false,owner:'subagent'})),
       cancelRequested:false,rootController:null,runningControllers:new Map(),runningPromises:new Map(),policyContext:this.governanceCompiler?.compileForTask?.(task)||null,
-      completionFeedback:null,completionRepairCount:0,completionTriggerRefs:[],
       committedProgressKeys:new Set(),lastCommittedStageResult:task.last_stage_result||null,analysisState:restoredAnalysisState,certifiedContext:restoredAnalysisState.current,certifiedKnowledgeKeys:knowledgeKeysFromState(restoredAnalysisState),
       consumedHumanGatewayIds:new Set((restoredAnalysisState.turns||[]).flatMap(turn=>turn?.triggerRefs||[]).map(text).filter(ref=>ref.startsWith('human:')).map(ref=>ref.slice(6)).filter(Boolean)),
-      issuedWorkSignatures:new Set(durableWorkReceipts.map(receipt=>text(receipt.signature)).filter(Boolean)),pendingValidation:null,rootTurnCount:0,controlHandoffCount:0,
+      issuedWorkSignatures:new Set(durableWorkReceipts.map(receipt=>text(receipt.signature)).filter(Boolean)),rootTurnCount:0,
       actor:{title:'Root 初始判断',status:WorkUnitStatus.WAITING_RESOURCE,detail:'等待可用 Root 执行资源。',updatedAt:nowIso(),owner:'root'},updatedAt:nowIso(),
     };
     this.sessions.set(task.id,session);return session;
   }
 
-  async runRootTurn(task,session,callbacks,{humanGatewayHistory=[],validationFeedback=null,previousDecision=null,rootInputs=null,authorityHandoff=false,activityKind='initial'}={}){
+  async runRootTurn(task,session,callbacks,{humanGatewayHistory=[],rootInputs=null,activityKind='initial'}={}){
     if(session.cancelRequested)return{kind:'cancelled'};
     const activity=rootActivityCopy(activityKind),issuedAt=nowIso();
     session.actor={title:activity.title,status:WorkUnitStatus.WAITING_RESOURCE,detail:activity.waiting,issuedAt,startedAt:null,completedAt:null,updatedAt:issuedAt,owner:'root'};this.emit(session,callbacks);
@@ -178,18 +172,18 @@ export class RootRuntime{
     session.rootController=controller;
     try{
       await this.modelRouter.prepare?.({role:'root',task});
-      const decision=normalizeDecision(await this.executor.runRoot({task,subagentResults:deliveredResults,activeWork,humanGatewayHistory,modelPolicy:this.modelRouter.route({role:'root',task}),policyContext:this.governanceCompiler?.compileForRole?.(task,'root')||session.policyContext,validationFeedback,previousDecision,authorityHandoff,certifiedContext:session.certifiedContext,signal:controller.signal,onExecutionStarted:()=>{const startedAt=nowIso();session.actor.status=WorkUnitStatus.RUNNING;session.actor.startedAt=session.actor.startedAt||startedAt;session.actor.detail=activity.running;session.actor.updatedAt=startedAt;callbacks.onExecutionStarted?.({role:'root'});this.emit(session,callbacks);},onProgress:progress=>{session.actor.detail=progress.detail||progress.summary||session.actor.detail;session.actor.updatedAt=nowIso();this.emit(session,callbacks);}}));
+      const decision=normalizeDecision(await this.executor.runRoot({task,subagentResults:deliveredResults,activeWork,humanGatewayHistory,modelPolicy:this.modelRouter.route({role:'root',task}),policyContext:this.governanceCompiler?.compileForRole?.(task,'root')||session.policyContext,certifiedContext:session.certifiedContext,signal:controller.signal,onExecutionStarted:()=>{const startedAt=nowIso();session.actor.status=WorkUnitStatus.RUNNING;session.actor.startedAt=session.actor.startedAt||startedAt;session.actor.detail=activity.running;session.actor.updatedAt=startedAt;callbacks.onExecutionStarted?.({role:'root'});this.emit(session,callbacks);},onProgress:progress=>{session.actor.detail=progress.detail||progress.summary||session.actor.detail;session.actor.updatedAt=nowIso();this.emit(session,callbacks);}}));
       session.rootTurnCount+=1;const completedAt=nowIso();session.actor.status=WorkUnitStatus.COMPLETED;session.actor.detail='本轮 Root 判断已形成。';session.actor.completedAt=completedAt;session.actor.updatedAt=completedAt;this.emit(session,callbacks);return decision;
     }catch(error){if(session.cancelRequested&&isInterrupted(error))return{kind:'cancelled'};throw error;}finally{session.rootController=null;}
   }
 
-  async reviewRootDecision(task,session,decision,callbacks,{humanGatewayHistory=[],rootInputs=[],triggerRefs=[],synthesizeHumanGapResolution=true}={}){
+  async reviewRootDecision(task,session,decision,callbacks,{humanGatewayHistory=[],rootInputs=[],triggerRefs=[]}={}){
     if(!this.validatorRuntime){
       if(hasGovernedCandidateDelta(decision)){const error=new Error('VALIDATOR_RUNTIME_REQUIRED: governed Candidate Delta cannot bypass Validator ownership.');error.nonRetryable=true;throw error;}
       return{decision,commits:[]};
     }
-    decision=humanGatewayTransitionCandidate(decision,humanGatewayHistory,session.analysisState,{includeGapResolution:synthesizeHumanGapResolution});
-    const reviewed=this.validatorRuntime.reviewRoot({decision,policyContext:this.governanceCompiler?.compileForRole?.(task,'validator')||session.policyContext,seenKnowledgeKeys:session.certifiedKnowledgeKeys,task,humanGatewayHistory,currentState:session.analysisState,availableEvidence:rootInputEvidence(rootInputs)});
+    decision=humanGatewayTransitionCandidate(decision,humanGatewayHistory,session.analysisState,{includeGapResolution:true});
+    const reviewed=this.validatorRuntime.reviewRoot({decision,task,humanGatewayHistory,currentState:session.analysisState,availableEvidence:rootInputEvidence(rootInputs)});
     if(reviewed.outcome!=='pass')throw validationError(reviewed.feedback||[]);
 
     const workTriggerRefs=(Array.isArray(rootInputs)?rootInputs:[]).map(item=>text(item?.delegationId||item?.workUnit?.id)).filter(Boolean).map(id=>`work:${id}`);
@@ -200,7 +194,7 @@ export class RootRuntime{
     for(const gateway of Array.isArray(humanGatewayHistory)?humanGatewayHistory:[]){
       const gatewayId=text(gateway?.id),targetGapId=text(gateway?.targetGapId??gateway?.target_gap_id);if(!gatewayId||!targetGapId||gateway?.status!=='RESOLVED')continue;
       const beforeOpen=Boolean(beforeCertifiedState?.current?.gaps?.some?.(gap=>text(gap?.id)===targetGapId)),afterOpen=Boolean(prepared?.current?.gaps?.some?.(gap=>text(gap?.id)===targetGapId));
-      recordTaskDiagnostic('human-gap-proof-result',{taskId:task.id,gatewayId,targetGapId,proofAttempted:Boolean(synthesizeHumanGapResolution&&beforeOpen),resolved:beforeOpen&&!afterOpen,gapStillOpen:afterOpen});
+      recordTaskDiagnostic('human-gap-proof-result',{taskId:task.id,gatewayId,targetGapId,proofAttempted:beforeOpen,resolved:beforeOpen&&!afterOpen,gapStillOpen:afterOpen});
     }
 
     const historyCommit=prepared.turnNode?.historyCommit?clone(prepared.turnNode.historyCommit):null;
@@ -212,17 +206,16 @@ export class RootRuntime{
       if(historyCommit){session.lastCommittedStageResult=historyCommit.detail;session.committedProgressKeys.add(`${historyCommit.title}\n${historyCommit.detail}`);}
     }else if(workReceiptIds.length)callbacks.onWorkReceiptsConsumed?.(workReceiptIds);
 
-    const blockingGap=prepared.current.gaps?.find?.(gap=>gap?.blocking===true),stateFeedback=(prepared.issues||[]).map(issue=>({ruleId:'C-003',target:issue.target||'state',reason:issue.reason,action:issue.code}));
-    const gatewayWithoutBlocker=reviewed.decision?.kind==='human_gateway'&&!blockingGap,gatewayGapId=text(reviewed.decision?.gateway?.gapId),gatewayGap=(prepared.current.gaps||[]).find(gap=>text(gap?.id)===gatewayGapId)||null;
+    const violations=(prepared.issues||[]).map(issue=>({ruleId:'C-003',target:issue.target||'state',reason:issue.reason,action:issue.code}));
+    const blockingGap=prepared.current.gaps?.find?.(gap=>gap?.blocking===true);
+    const gatewayGapId=text(reviewed.decision?.gateway?.gapId),gatewayGap=(prepared.current.gaps||[]).find(gap=>text(gap?.id)===gatewayGapId)||null;
     const normalizeQuestion=value=>text(value).replace(/\s+/g,' ');
-    const gatewayBindingConflict=reviewed.decision?.kind==='human_gateway'&&Boolean(!gatewayGapId||!gatewayGap||gatewayGap.blocking!==true||normalizeQuestion(reviewed.decision?.gateway?.question)!==normalizeQuestion(gatewayGap?.question));
-    const stateTransitionConflict=(prepared.issues||[]).length>0;
-    const requiresRootDecision=Boolean(reviewed.requiresRootDecision||(reviewed.decision?.kind==='complete'&&(blockingGap||stateTransitionConflict))||gatewayWithoutBlocker||gatewayBindingConflict);
-    if(blockingGap)stateFeedback.push({ruleId:'C-004',target:'blocking-gap',reason:`当前认证状态仍存在阻塞 Gap：${blockingGap.question}`,action:'HANDOFF_ROOT_CONTROL_DECISION'});
-    if(stateTransitionConflict)stateFeedback.push({ruleId:'C-003',target:'state-transition',reason:'候选内容与已认证状态转换冲突；Root 必须重新决定控制动作。',action:'HANDOFF_ROOT_CONTROL_DECISION'});
-    if(gatewayWithoutBlocker)stateFeedback.push({ruleId:'C-004',target:'human-gateway',reason:'当前没有 blocking Gap；Human Gateway 不能用于请求采用默认假设。',action:'HANDOFF_ROOT_CONTROL_DECISION'});
-    if(gatewayBindingConflict)stateFeedback.push({ruleId:'C-004',target:'human-gateway-binding',reason:'Human Gateway 必须绑定当前 blocking Gap 且 question 与认证问题一致。',action:'HANDOFF_ROOT_CONTROL_DECISION'});
-    return{decision:normalizeDecision(reviewed.decision),commits:historyCommit?[historyCommit]:[],feedback:[...(Array.isArray(reviewed.feedback)?reviewed.feedback:[]),...stateFeedback],actions:[...(Array.isArray(reviewed.actions)?reviewed.actions:[]),...(prepared.issues||[]).map(issue=>({action:issue.code,target:issue.target}))],requiresRootDecision,turnNode:prepared.turnNode};
+    if(reviewed.decision?.kind==='complete'&&blockingGap)violations.push({ruleId:'C-004',target:'blocking-gap',reason:`Root 选择 complete，但当前仍有 blocking Gap：${blockingGap.question}`,action:'REJECT_INVALID_CONTROL_DECISION'});
+    if(reviewed.decision?.kind==='human_gateway'&&!blockingGap)violations.push({ruleId:'C-004',target:'human-gateway',reason:'Root 选择 Human Gateway，但当前没有 blocking Gap。',action:'REJECT_INVALID_CONTROL_DECISION'});
+    if(reviewed.decision?.kind==='human_gateway'&&Boolean(!gatewayGapId||!gatewayGap||gatewayGap.blocking!==true||normalizeQuestion(reviewed.decision?.gateway?.question)!==normalizeQuestion(gatewayGap?.question)))violations.push({ruleId:'C-004',target:'human-gateway-binding',reason:'Human Gateway 必须绑定当前 blocking Gap 且 question 与认证问题一致。',action:'REJECT_INVALID_CONTROL_DECISION'});
+    if(violations.length)throw invalidControlDecision(violations);
+
+    return{decision:normalizeDecision(reviewed.decision),commits:historyCommit?[historyCommit]:[],feedback:[],actions:[...(Array.isArray(reviewed.actions)?reviewed.actions:[])],turnNode:prepared.turnNode};
   }
 
   buildWorkUnits(stage,delegations){
@@ -299,33 +292,24 @@ export class RootRuntime{
     let invocationTriggerRefs=newlyResolvedHuman.map(g=>`human:${text(g.id)}`);
     if(!invocationTriggerRefs.length){const reason=text(task?.ready_reason);if(session.rootTurnCount===0&&!reason)invocationTriggerRefs=[`task:${task.id}`];else if(reason==='NEW')invocationTriggerRefs=[`task:${task.id}`];else if(reason==='RETRY_WAIT')invocationTriggerRefs=[`technical:retry:${task.id}`];else if(reason==='WAITING_RESOURCE')invocationTriggerRefs=[`technical:resource-resume:${task.id}`];else if(reason==='SUSPENDED')invocationTriggerRefs=[`technical:manual-resume:${task.id}`];else if(session.rootTurnCount===0)invocationTriggerRefs=[`task:${task.id}`];}
     let invocationTriggerConsumed=false;
-    const capacityWait=async({title,detail,reason})=>{const delay=capacityRetryDelayMs(this.retryDelaysMs);session.actor={title,status:WorkUnitStatus.WAITING_RESOURCE,detail,updatedAt:nowIso(),owner:title.includes('Authority')?'validator':'root'};this.emit(session,callbacks);if(session.runningPromises.size){const timer=new Promise(resolveWait=>{const t=setTimeout(resolveWait,delay);t.unref?.();});await Promise.race([...session.runningPromises.values()].map(p=>p.catch(()=>null)).concat(timer));return null;}return{kind:'waiting_resource',retryAt:Date.now()+delay,snapshot:this.makeSnapshot(session),reason};};
+    const capacityWait=async({title,detail,reason})=>{const delay=capacityRetryDelayMs(this.retryDelaysMs);session.actor={title,status:WorkUnitStatus.WAITING_RESOURCE,detail,updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);if(session.runningPromises.size){const timer=new Promise(resolveWait=>{const t=setTimeout(resolveWait,delay);t.unref?.();});await Promise.race([...session.runningPromises.values()].map(p=>p.catch(()=>null)).concat(timer));return null;}return{kind:'waiting_resource',retryAt:Date.now()+delay,snapshot:this.makeSnapshot(session),reason};};
 
     while(true){
       if(session.cancelRequested)return{kind:'cancelled',quiescent:this.isQuiescent(task.id)};
-      const pendingValidation=session.pendingValidation,authorityResume=pendingValidation?.phase==='authority';
-      if(!pendingValidation&&session.currentStage){const stageOutcome=await this.runStage(task,session,callbacks);if(stageOutcome.kind==='cancelled')return{kind:'cancelled',quiescent:this.isQuiescent(task.id)};if(stageOutcome.kind!=='stage_complete')return{...stageOutcome,quiescent:this.isQuiescent(task.id)};}
+      if(session.currentStage){const stageOutcome=await this.runStage(task,session,callbacks);if(stageOutcome.kind==='cancelled')return{kind:'cancelled',quiescent:this.isQuiescent(task.id)};if(stageOutcome.kind!=='stage_complete')return{...stageOutcome,quiescent:this.isQuiescent(task.id)};}
 
-      let decision,rootInputs=pendingValidation?.rootInputs||session.subagentResults.slice(),rootTriggerRefs=Array.isArray(pendingValidation?.triggerRefs)?[...pendingValidation.triggerRefs]:[];session.pendingValidation=null;
-      if(rootInputs.length&&!rootTriggerRefs.length)rootTriggerRefs=rootInputs.map(item=>text(item?.delegationId||item?.workUnit?.id)).filter(Boolean).map(id=>`work:${id}`);
-
-      if(authorityResume){decision=pendingValidation.decision;rootInputs=[];session.actor={title:'Requirement Authority 认证',status:WorkUnitStatus.WAITING_RESOURCE,detail:'Root 的 Work 计划已保留；等待 Authority 核对同一能力请求。',updatedAt:nowIso(),owner:'validator'};this.emit(session,callbacks);}
-      else if(pendingValidation?.phase==='authority_handoff'){
-        rootInputs=[];session.actor={title:'Root 控制决策',status:WorkUnitStatus.WAITING_RESOURCE,detail:'来源边界已核对；等待 Root 基于已认证状态选择下一动作。',updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);
-        try{decision=await this.runRootTurn(task,session,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),validationFeedback:pendingValidation.feedback||[],previousDecision:pendingValidation.decision,rootInputs:[],authorityHandoff:true,activityKind:'control'});}catch(error){if(isCapacityUnavailable(error)){session.pendingValidation=pendingValidation;const outcome=await capacityWait({title:'Root 控制决策',detail:'已认证状态已保留；等待 Root 资源。',reason:'等待 Root 控制资源恢复'});if(outcome)return outcome;continue;}throw error;}
-      }else{
-        if(rootInputs.length){session.completionFeedback=null;session.completionRepairCount=0;session.completionTriggerRefs=[];}
-        if(!rootInputs.length){if(session.completionFeedback?.length&&session.completionTriggerRefs?.length)rootTriggerRefs=[...session.completionTriggerRefs];else{if(invocationTriggerConsumed||!invocationTriggerRefs.length){const error=new Error('ROOT_TURN_WITHOUT_TRIGGER: no Task/Human/Subagent/technical trigger exists for another ordinary Root Turn.');error.nonRetryable=true;throw error;}rootTriggerRefs=[...invocationTriggerRefs];invocationTriggerConsumed=true;}}
-        const activityKind=rootInputs.length?'synthesis':session.completionFeedback?.length?'completion_repair':session.rootTurnCount===0?'initial':'triggered';
-        try{decision=await this.runRootTurn(task,session,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),rootInputs,validationFeedback:session.completionFeedback?.length?session.completionFeedback:null,activityKind});}catch(error){if(isCapacityUnavailable(error)&&(rootInputs.length||session.currentStage)){const outcome=await capacityWait({title:'Root 综合结果',detail:'Work Unit 批次结果已保留；等待 Root 资源。',reason:'等待 Root 综合资源恢复'});if(outcome)return outcome;continue;}throw error;}
-      }
+      const rootInputs=session.subagentResults.slice();
+      let rootTriggerRefs=rootInputs.map(item=>text(item?.delegationId||item?.workUnit?.id)).filter(Boolean).map(id=>`work:${id}`);
+      if(!rootInputs.length){if(invocationTriggerConsumed||!invocationTriggerRefs.length){const error=new Error('ROOT_TURN_WITHOUT_TRIGGER: no Task/Human/Subagent/technical trigger exists for another ordinary Root Turn.');error.nonRetryable=true;throw error;}rootTriggerRefs=[...invocationTriggerRefs];invocationTriggerConsumed=true;}
+      const activityKind=rootInputs.length?'synthesis':session.rootTurnCount===0?'initial':'triggered';
+      let decision;
+      try{decision=await this.runRootTurn(task,session,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),rootInputs,activityKind});}
+      catch(error){if(isCapacityUnavailable(error)&&rootInputs.length){const outcome=await capacityWait({title:'Root 综合结果',detail:'Work Unit 批次结果已保留；等待 Root 资源。',reason:'等待 Root 综合资源恢复'});if(outcome)return outcome;continue;}throw error;}
       if(decision.kind==='cancelled')return{kind:'cancelled',quiescent:this.isQuiescent(task.id)};
 
-      const reviewed=authorityResume?{decision,commits:[],requiresRootDecision:false}:await this.reviewRootDecision(task,session,decision,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),rootInputs,triggerRefs:rootTriggerRefs,synthesizeHumanGapResolution:pendingValidation?.phase!=='authority_handoff'});
+      const reviewed=await this.reviewRootDecision(task,session,decision,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),rootInputs,triggerRefs:rootTriggerRefs});
       decision=reviewed.decision;
-      if(!authorityResume){consumeHumanTriggerRefs(session,rootTriggerRefs);this.consumeRootInputs(session,rootInputs);if(rootInputs.length)session.controlHandoffCount=0;}
-      if(reviewed.requiresRootDecision){if(pendingValidation?.phase==='authority_handoff'||session.controlHandoffCount>=1){const error=new Error('ROOT_CONTROL_NON_CONVERGENCE: certified state still requires a different control decision without new evidence.');error.nonRetryable=true;throw error;}session.controlHandoffCount+=1;session.pendingValidation={phase:'authority_handoff',decision,feedback:reviewed.feedback||[],rootInputs:[],triggerRefs:rootTriggerRefs};session.actor={title:'来源边界已核对',status:WorkUnitStatus.COMPLETED,detail:'控制判断交回 Root。',updatedAt:nowIso(),owner:'validator'};this.emit(session,callbacks);continue;}
-      if(decision.kind!=='complete'){session.completionFeedback=null;session.completionRepairCount=0;session.completionTriggerRefs=[];}
+      consumeHumanTriggerRefs(session,rootTriggerRefs);this.consumeRootInputs(session,rootInputs);
       if(this.hasUnfinishedWork(session)&&(decision.kind==='complete'||decision.kind==='human_gateway'))continue;
 
       if(decision.kind==='delegate'){
@@ -333,7 +317,8 @@ export class RootRuntime{
         const knownWorkIds=session.currentStage?.workUnits?.map(unit=>unit.id)||[],plan=validateDelegationPlan(decision.delegations,{knownWorkIds,availableInputRefs:taskInputRefs(task)}),batchSignatures=new Set();
         for(const item of plan.delegations){const signature=workSemanticSignature(item);if(batchSignatures.has(signature)){plan.issues.push(`同一 Root 决策重复创建了语义相同的工作：${item.title||item.id}。`);plan.valid=false;}else if(session.issuedWorkSignatures.has(signature)){plan.issues.push(`工作 ${item.title||item.id} 与当前 Task 已创建的工作语义重复。`);plan.valid=false;}batchSignatures.add(signature);if(item.skillId&&this.governanceCompiler?.hasSkill&&!this.governanceCompiler.hasSkill(item.skillId)){plan.issues.push(`工作 ${item.id} 选择了不存在的 Skill：${item.skillId}。`);plan.valid=false;}}
         if(!plan.valid)throw invalidDelegationPlan(plan.issues);
-        try{task=await this.certifyWorkAuthority(task,session,callbacks,plan.delegations);}catch(error){if(isCapacityUnavailable(error)){session.pendingValidation={phase:'authority',decision,rootInputs:[],triggerRefs:[...rootTriggerRefs]};const outcome=await capacityWait({title:'Requirement Authority 认证',detail:'Root 的 Work 计划已保留；等待 Authority 资源。',reason:'等待 Requirement Authority 资源恢复'});if(outcome)return outcome;continue;}throw error;}
+        task=await this.certifyWorkAuthority(task,callbacks,plan.delegations);
+        session.policyContext=this.governanceCompiler?.compileForTask?.(task)||session.policyContext;
         if(this.governanceCompiler?.compileForRole){plan.delegations=plan.delegations.map(item=>{const grant=this.governanceCompiler.compileForRole(task,'subagent',{skillId:item.skillId,workUnit:item})?.authorizedGrant;if(!grant){plan.issues.push(`工作 ${item.id} 缺少 AuthorizedGrant。`);plan.valid=false;return item;}const required=requiredWorkCapabilities(item);if(!capabilitiesSatisfy(required,grant)){plan.issues.push(`工作 ${item.id} 的 Required Work Semantics 超过 AuthorizedGrant。`);plan.valid=false;return item;}return{...item,projectAccess:text(grant.projectAccess||'none'),networkAccess:grant.networkAccess===true,inputRefs:Array.isArray(grant.inputRefs)?[...grant.inputRefs]:[]};});}else for(const item of plan.delegations)if(item.projectAccess!=='none'||item.networkAccess===true||item.inputRefs.length){plan.issues.push(`工作 ${item.id} 请求受治理能力但没有 GovernanceCompiler。`);plan.valid=false;}
         if(!plan.valid)throw invalidDelegationPlan(plan.issues);
         for(const item of plan.delegations)session.issuedWorkSignatures.add(workSemanticSignature(item));if(session.currentStage)this.appendToStage(session,plan.delegations);else this.createStage(session,plan.delegations);this.emit(session,callbacks);continue;
@@ -349,10 +334,9 @@ export class RootRuntime{
         if(!this.completionEvaluator){const error=new Error('COMPLETION_EVALUATOR_REQUIRED');error.nonRetryable=true;throw error;}
         let assessments=[];if(this.completionAssessmentVerifier){const verified=await this.completionAssessmentVerifier.review({task,proposal,certifiedContext:session.certifiedContext});assessments=Array.isArray(verified?.assessments)?verified.assessments:[];}
         const evaluated=this.completionEvaluator.evaluate({taskContract:task.taskContract,certifiedAssessments:assessments});
-        if(evaluated?.goalState==='satisfied'){session.completionFeedback=null;session.completionRepairCount=0;session.completionTriggerRefs=[];this.discardSession(task.id);return{kind:'goal_satisfied',goalState:evaluated.goalState,proposal,assessments,quiescent:true};}
+        if(evaluated?.goalState==='satisfied'){this.discardSession(task.id);return{kind:'goal_satisfied',goalState:evaluated.goalState,proposal,assessments,quiescent:true};}
         const unsatisfied=Array.isArray(evaluated?.unsatisfiedObligationIds)?evaluated.unsatisfiedObligationIds:[];
-        if(session.completionRepairCount>=1){const error=new Error(`ROOT_COMPLETION_NON_CONVERGENCE: governed obligations remain unsatisfied${unsatisfied.length?`: ${unsatisfied.join(', ')}`:''}`);error.nonRetryable=true;throw error;}
-        session.completionRepairCount=1;session.completionFeedback=[{ruleId:'D-018',target:'completion',reason:`CompletionEvaluator reports unsatisfied obligations${unsatisfied.length?`: ${unsatisfied.join(', ')}`:''}.`,action:'REVISE_CONTROL_DECISION'}];session.completionTriggerRefs=[...rootTriggerRefs];continue;
+        const error=new Error(`ROOT_INVALID_COMPLETION_DECISION: governed obligations remain unsatisfied${unsatisfied.length?`: ${unsatisfied.join(', ')}`:''}`);error.nonRetryable=true;throw error;
       }
 
       const error=new Error('ROOT_INVALID_DECISION');error.nonRetryable=true;throw error;
