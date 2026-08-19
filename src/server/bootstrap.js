@@ -9,6 +9,7 @@ import { SubagentRuntime } from '../core/subagent-runtime.js';
 import { Scheduler } from '../core/scheduler.js';
 import { DailyCleanupController } from '../core/cleanup-controller.js';
 import { createBuiltinExtensionRegistry } from '../extensions/builtins/index.js';
+import { registerExternalExtensions } from '../extensions/runtime/external-extension-loader.js';
 import { SurfaceManager } from '../extensions/runtime/surface-manager.js';
 import { GovernanceCompiler } from '../governance/governance-compiler.js';
 import { AnalysisResultValidator } from '../governance/analysis-validator.js';
@@ -27,9 +28,13 @@ function createPersistence({rootDir,dbFile=null}){
   return{database,repository:new JsonTaskRepository(database),storage:'json',filename};
 }
 
-export function bootstrap({rootDir,dbFile=null,executorName=process.env.TASKBOARD_EXECUTOR||'codex',startScheduler=true,taskboardUrl=process.env.TASKBOARD_URL||'http://127.0.0.1:4317'}={}){
+export function bootstrap({rootDir,dbFile=null,executorName=process.env.TASKBOARD_EXECUTOR||'codex',externalExtensions=null,startScheduler=true,taskboardUrl=process.env.TASKBOARD_URL||'http://127.0.0.1:4317'}={}){
   const persistence=createPersistence({rootDir,dbFile});const{database,repository}=persistence;
   const extensionRegistry=createBuiltinExtensionRegistry();
+  registerExternalExtensions(extensionRegistry,{
+    rootDir,
+    ...(externalExtensions===null?{}:{specs:externalExtensions}),
+  });
   const extension=extensionRegistry.create(executorName,{rootDir,taskboardUrl});
   const attachmentStore=new AttachmentStore({rootDir:resolve(rootDir,'data/attachments')});
   const taskService=new TaskService(repository,{attachmentStore,defaultExecutorKey:extension.id});
