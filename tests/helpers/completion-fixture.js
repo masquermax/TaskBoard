@@ -1,12 +1,15 @@
-import { AnalysisResultValidator } from '../../src/governance/analysis-validator.js';
 import { ValidatorRuntime } from '../../src/governance/validator-runtime.js';
 
 // Test-only Owner dependencies for tests whose subject is NOT Completion or
-// Candidate-certification semantics. Direct RootRuntime control-flow fixtures get
-// a structural Validator owner plus successful Completion owners. Production
-// Runtime never imports this helper and receives no compatibility fallback.
+// Candidate source-ledger semantics. Production Runtime never imports this helper.
 export function successfulCompletionDependenciesForControlFlowTest() {
-  const validatorRuntime = new ValidatorRuntime({ analysisValidator:new AnalysisResultValidator() });
+  const validatorRuntime = new ValidatorRuntime({
+    sourceTraceVerifier:{
+      enforce({evidence=[]}){
+        return{evidence,actions:[],verifications:evidence.map(item=>({id:item?.id||null,checked:true,verified:true,traceable:true}))};
+      },
+    },
+  });
   const completionAssessmentVerifier = {
     available() { return true; },
     async review() {
