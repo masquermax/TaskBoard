@@ -12,7 +12,6 @@ test('explicit empty product registry starts in management mode instead of inven
     rootDir,
     executorName:null,
     extensionRegistry:new ExtensionRegistry(),
-    externalExtensions:[],
     allowMissingExecutor:true,
     startScheduler:false,
   });
