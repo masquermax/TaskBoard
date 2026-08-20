@@ -198,7 +198,7 @@ export class RootRuntime{
       const id=String(d.id),dependsOn=[...new Set(list(d.dependsOn).map(String))].filter(dep=>dep!==id),waiting=dependsOn.length>0;
       return{id,title:String(d.title||`工作 ${index+1}`),goal:String(d.goal||''),expectedOutput:String(d.expectedOutput||''),stopCondition:String(d.stopCondition||''),projectAccess:['read','write'].includes(d.projectAccess)?d.projectAccess:'none',networkAccess:d.networkAccess===true,inputRefs:[...list(d.inputRefs)],skillId:d.skillId||null,dependsOn,status:waiting?WorkUnitStatus.WAITING_DEPENDENCY:WorkUnitStatus.WAITING_RESOURCE,detail:waiting?'等待前置工作完成后继续。':'工作已就绪，等待可用 Agent。',issuedAt,startedAt:null,updatedAt:issuedAt,completedAt:null,failureCount:0,nextRetryAt:Date.now(),result:null,owner:null,effectRecoveryRequired:false};
     });
-    session.currentStage=stage;return stage;
+    session.actor=null;session.currentStage=stage;return stage;
   }
   consumeRootInputs(session,rootInputs=[]){const ids=new Set(list(rootInputs).map(item=>text(item?.delegationId||item?.workUnit?.id)).filter(Boolean));if(ids.size)session.subagentResults=session.subagentResults.filter(item=>!ids.has(text(item?.delegationId||item?.workUnit?.id)));}
   depsCompleted(stage,unit){return unit.dependsOn.every(id=>stage.workUnits.find(work=>work.id===id)?.status===WorkUnitStatus.COMPLETED);}
@@ -260,7 +260,6 @@ export class RootRuntime{
       if(session.cancelRequested)return{kind:'cancelled',quiescent:this.isQuiescent(task.id)};
       if(session.currentStage){const stageOutcome=await this.runStage(task,session,callbacks);if(stageOutcome.kind==='cancelled')return{kind:'cancelled',quiescent:this.isQuiescent(task.id)};if(stageOutcome.kind!=='stage_complete')return{...stageOutcome,quiescent:this.isQuiescent(task.id)};}
 
-      // Root runs only at a natural boundary: Task/Human/technical trigger or a fully completed Stage.
       const rootInputs=session.subagentResults.slice();let rootTriggerRefs=rootInputs.map(item=>text(item?.delegationId||item?.workUnit?.id)).filter(Boolean).map(id=>`work:${id}`);
       if(!rootInputs.length){if(invocationTriggerConsumed||!invocationTriggerRefs.length){const error=new Error('ROOT_TURN_WITHOUT_TRIGGER: no Task/Human/Subagent/technical trigger exists for another Root Turn.');error.nonRetryable=true;throw error;}rootTriggerRefs=[...invocationTriggerRefs];invocationTriggerConsumed=true;}
       const activityKind=rootInputs.length?'synthesis':session.rootTurnCount===0?'initial':'triggered';let decision;
