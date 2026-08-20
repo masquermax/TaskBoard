@@ -33,7 +33,6 @@ function rig(execute){
 function createTask(repository,title='effect'){return repository.createTask({title,instruction:'perform bounded work'});}
 function attempt(taskId='T-0001'){return{id:`effect:${taskId}:W-1:1`,workUnitId:'W-1',signature:'sig',projectAccess:'write',networkAccess:false,inputRefs:['project:0'],admittedAt:new Date().toISOString(),reason:'effect-capable-work-admitted',resolved:false};}
 function suspendedSnapshot(taskId){return{taskId,actor:null,stage:{id:'S-1',title:'stage',startedAt:new Date().toISOString(),workUnits:[{id:'W-1',status:WorkUnitStatus.SUSPENDED,projectAccess:'write',networkAccess:false,failureCount:1,effectRecoveryRequired:true}]},updatedAt:new Date().toISOString()};}
-function readOnlyWork(id='W-CLOSURE'){return{id,title:'observe closure',goal:'observe',expectedOutput:'closure evidence',stopCondition:'stop after evidence',projectAccess:'read',networkAccess:false,inputRefs:['project:0'],dependsOn:[],skillId:null};}
 function writeWork(id='W-2'){return{id,title:'fresh write',goal:'change',expectedOutput:'done',stopCondition:'done',projectAccess:'write',networkAccess:false,inputRefs:['project:0'],dependsOn:[],skillId:null};}
 
 test('D-023: first unknown effect schedules one bounded recovery observation instead of blind replay',async()=>{
@@ -136,7 +135,7 @@ test('D-023: exact actuation closure preserves historical UNKNOWN but removes on
   assert.throws(()=>markEffectActuationClosed(state,{effectAttemptId:'wrong',terminal:true,canMutate:false,evidenceIds:['E-CLOSURE']}),/IDENTITY_MISMATCH/);
 });
 
-test('D-023: recovery cycle may admit a fresh effect after exact closure while retaining the old UNKNOWN history',async()=>{
+test('D-023: Root-owned closure may admit a fresh effect while retaining the old UNKNOWN history',async()=>{
   let executions=0;
   const x=rig(async(task,callbacks)=>{
     executions+=1;
@@ -148,14 +147,7 @@ test('D-023: recovery cycle may admit a fresh effect after exact closure while r
     }
     callbacks.onExecutionStarted({role:'root'});
     const old=unresolvedEffectAttempts(task.executionState)[0];
-    callbacks.onWorkReceipt({
-      id:'W-CLOSURE',signature:'closure',workUnit:readOnlyWork(),
-      result:{
-        delegationId:'W-CLOSURE',result:'old mutator closed',evidence:[],blocker:null,
-        effectActuationClosure:{effectAttemptId:old.id,terminal:true,canMutate:false,evidenceIds:['E-CLOSURE']},
-      },
-      completed_at:new Date().toISOString(),
-    });
+    callbacks.onEffectActuationClosure({effectAttemptId:old.id,terminal:true,canMutate:false,evidenceIds:['E-CLOSURE'],claimId:'C-CLOSURE'});
     const fresh={...attempt(task.id),id:`effect:${task.id}:W-2:1`,workUnitId:'W-2',signature:'sig-2'};
     callbacks.onEffectAttempt(fresh);
     callbacks.onWorkReceipt({
