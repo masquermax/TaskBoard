@@ -66,7 +66,12 @@ function humanHistoryForTriggerRefs(history=[],triggerRefs=[]){
   return ids.size?list(history).filter(item=>ids.has(text(item?.id))):[];
 }
 function consumeHumanTriggerRefs(session,triggerRefs=[]){for(const ref of list(triggerRefs)){const value=text(ref);if(value.startsWith('human:')&&value.length>6)session.consumedHumanGatewayIds.add(value.slice(6));}}
-function validationError(violations=[]){const summary=list(violations).slice(0,6).map(v=>`${v.ruleId}:${v.target}:${v.reason}`).join(' | '),error=new Error(`GOVERNANCE_VALIDATION_FAILED${summary?`: ${summary}`:''}`);error.nonRetryable=true;error.governanceViolations=violations;return error;}
+function validatorRejectionDelta(feedback=[],actions=[]){
+  return{
+    feedback:list(feedback).map(item=>({ruleId:text(item?.ruleId),target:text(item?.target),reason:text(item?.reason),action:text(item?.action)})),
+    actions:list(actions).map(item=>({action:text(item?.action),target:text(item?.target),reason:text(item?.reason)})),
+  };
+}
 function invalidDelegationPlan(issues=[]){const error=new Error(`ROOT_INVALID_DELEGATION_PLAN${issues.length?`: ${issues.join(' | ')}`:''}`);error.nonRetryable=true;return error;}
 function invalidControlDecision(issues=[]){const error=new Error(`ROOT_INVALID_CONTROL_DECISION${issues.length?`: ${issues.map(item=>item.reason||item).join(' | ')}`:''}`);error.nonRetryable=true;error.governanceViolations=issues;return error;}
 function invalidEffectClosure(issues=[]){const error=new Error(`ROOT_INVALID_EFFECT_CLOSURE${issues.length?`: ${issues.join(' | ')}`:''}`);error.nonRetryable=true;return error;}
@@ -182,14 +187,14 @@ export class RootRuntime{
     this.sessions.set(task.id,session);return session;
   }
 
-  async runRootTurn(task,session,callbacks,{humanGatewayHistory=[],rootInputs=null,activityKind='initial'}={}){
+  async runRootTurn(task,session,callbacks,{humanGatewayHistory=[],rootInputs=null,activityKind='initial',rejectionDelta=null}={}){
     if(session.cancelRequested)return{kind:'cancelled'};
     const copy=rootActivity(activityKind),issuedAt=nowIso();session.actor={title:copy.title,status:WorkUnitStatus.WAITING_RESOURCE,detail:copy.waiting,issuedAt,startedAt:null,completedAt:null,updatedAt:issuedAt,owner:'root'};this.emit(session,callbacks);
     const controller=new AbortController(),rootTask=rootTaskProjection(task),certifiedContext=rootCertifiedProjection(task,session),deliveredResults=Array.isArray(rootInputs)?rootInputs:session.subagentResults.slice();session.rootController=controller;
     try{
       await this.modelRouter.prepare?.({role:'root',task:rootTask});
       const decision=normalizeDecision(await this.executor.runRoot({
-        task:rootTask,subagentResults:deliveredResults,humanGatewayHistory,
+        task:rootTask,subagentResults:deliveredResults,humanGatewayHistory,rejectionDelta,
         modelPolicy:this.modelRouter.route({role:'root',task:rootTask}),policyContext:this.governanceCompiler?.compileForRole?.(task,'root')||session.policyContext,certifiedContext,signal:controller.signal,
         onExecutionStarted:()=>{const startedAt=nowIso();session.actor.status=WorkUnitStatus.RUNNING;session.actor.startedAt=session.actor.startedAt||startedAt;session.actor.detail=copy.running;session.actor.updatedAt=startedAt;callbacks.onExecutionStarted?.({role:'root'});this.emit(session,callbacks);},
         onProgress:progress=>{session.actor.detail=progress.detail||progress.summary||session.actor.detail;session.actor.updatedAt=nowIso();this.emit(session,callbacks);},
@@ -199,8 +204,9 @@ export class RootRuntime{
   }
 
   async reviewRootDecision(task,session,decision,callbacks,{humanGatewayHistory=[],rootInputs=[],triggerRefs=[]}={}){
-    if(!this.validatorRuntime){if(hasGovernedCandidateDelta(decision)){const error=new Error('VALIDATOR_RUNTIME_REQUIRED: governed Candidate Delta cannot bypass Validator ownership.');error.nonRetryable=true;throw error;}return{decision,turnNode:null};}
-    const reviewed=this.validatorRuntime.reviewRoot({decision,task,humanGatewayHistory,currentState:session.analysisState,availableEvidence:rootInputEvidence(rootInputs)});if(reviewed.outcome!=='pass')throw validationError(reviewed.feedback||[]);
+    if(!this.validatorRuntime){if(hasGovernedCandidateDelta(decision)){const error=new Error('VALIDATOR_RUNTIME_REQUIRED: governed Candidate Delta cannot bypass Validator ownership.');error.nonRetryable=true;throw error;}return{decision,turnNode:null,rejected:false};}
+    const reviewed=this.validatorRuntime.reviewRoot({decision,task,humanGatewayHistory,currentState:session.analysisState,availableEvidence:rootInputEvidence(rootInputs)});
+    if(reviewed.outcome!=='pass')return{decision:null,turnNode:null,rejected:true,rejectionDelta:validatorRejectionDelta(reviewed.feedback||[],reviewed.actions||[]),actions:list(reviewed.actions)};
     const workTriggerRefs=list(rootInputs).map(item=>text(item?.delegationId||item?.workUnit?.id)).filter(Boolean).map(id=>`work:${id}`),certifiedTriggerRefs=[...new Set([...list(triggerRefs),...workTriggerRefs].map(text).filter(Boolean))];
     if(!certifiedTriggerRefs.length){const error=new Error('ROOT_TURN_WITHOUT_TRIGGER: Current Certified State is context, not a trigger for another Root Turn.');error.nonRetryable=true;throw error;}
     const before=session.analysisState,prepared=applyCertifiedDelta(before,reviewed.decision,{triggerRefs:certifiedTriggerRefs});
@@ -218,7 +224,7 @@ export class RootRuntime{
     const workReceiptIds=list(rootInputs).map(item=>text(item?.delegationId||item?.workUnit?.id)).filter(Boolean);
     if(prepared.turnNode){callbacks.onCertifiedTurn?.({analysisState:prepared.state,turnNode:prepared.turnNode,workReceiptIds});session.analysisState=prepared.state;session.certifiedContext=prepared.state.current;}
     else if(workReceiptIds.length)callbacks.onWorkReceiptsConsumed?.(workReceiptIds);
-    return{decision:normalizeDecision(reviewed.decision),turnNode:prepared.turnNode,actions:list(reviewed.actions)};
+    return{decision:normalizeDecision(reviewed.decision),turnNode:prepared.turnNode,rejected:false,actions:list(reviewed.actions)};
   }
 
   createStage(session,delegations){
@@ -282,21 +288,25 @@ export class RootRuntime{
     const session=this.sessions.get(task.id)||this.createSession(task);session.cancelRequested=false;const callbacks={onProgress,onStageCompleted,onCertifiedTurn,onTaskContractAuthority,onWorkReceipt,onWorkReceiptsConsumed,onEffectAttempt,onEffectAttemptCleared,onEffectActuationClosure,onExecutionStarted};
     const newlyResolvedHuman=list(humanGatewayHistory).filter(g=>g?.status==='RESOLVED'&&text(g?.id)&&!session.consumedHumanGatewayIds.has(text(g.id)));let invocationTriggerRefs=newlyResolvedHuman.map(g=>`human:${text(g.id)}`);
     if(!invocationTriggerRefs.length){const reason=text(task?.ready_reason);if(session.rootTurnCount===0&&(!reason||reason==='NEW'))invocationTriggerRefs=[`task:${task.id}`];else if(reason==='RETRY_WAIT')invocationTriggerRefs=[`technical:retry:${task.id}`];else if(reason==='WAITING_RESOURCE')invocationTriggerRefs=[`technical:resource-resume:${task.id}`];else if(reason==='SUSPENDED')invocationTriggerRefs=[`technical:manual-resume:${task.id}`];else if(session.rootTurnCount===0)invocationTriggerRefs=[`task:${task.id}`];}
-    let invocationTriggerConsumed=false;
+    let invocationTriggerConsumed=false,rejectionDelta=null,rejectionTriggerRefs=[];
     const capacityWait=async({title,detail,reason})=>{const delay=capacityRetryDelayMs(this.retryDelaysMs);session.actor={title,status:WorkUnitStatus.WAITING_RESOURCE,detail,updatedAt:nowIso(),owner:'root'};this.emit(session,callbacks);return{kind:'waiting_resource',retryAt:Date.now()+delay,snapshot:this.makeSnapshot(session),reason};};
 
     while(true){
       if(session.cancelRequested)return{kind:'cancelled',quiescent:this.isQuiescent(task.id)};
       if(session.currentStage){const stageOutcome=await this.runStage(task,session,callbacks);if(stageOutcome.kind==='cancelled')return{kind:'cancelled',quiescent:this.isQuiescent(task.id)};if(stageOutcome.kind!=='stage_complete')return{...stageOutcome,quiescent:this.isQuiescent(task.id)};}
 
-      const rootInputs=session.subagentResults.slice();let rootTriggerRefs=rootInputs.map(item=>text(item?.delegationId||item?.workUnit?.id)).filter(Boolean).map(id=>`work:${id}`);
-      if(!rootInputs.length){if(invocationTriggerConsumed||!invocationTriggerRefs.length){const error=new Error('ROOT_TURN_WITHOUT_TRIGGER: no Task/Human/Subagent/technical trigger exists for another Root Turn.');error.nonRetryable=true;throw error;}rootTriggerRefs=[...invocationTriggerRefs];invocationTriggerConsumed=true;}
+      const rootInputs=session.subagentResults.slice(),workTriggerRefs=rootInputs.map(item=>text(item?.delegationId||item?.workUnit?.id)).filter(Boolean).map(id=>`work:${id}`);let rootTriggerRefs=[...workTriggerRefs];
+      if(rejectionDelta){rootTriggerRefs.push(...rejectionTriggerRefs,`validator:rejection:${task.id}:${session.rootTurnCount}`);}
+      else if(!rootInputs.length){if(invocationTriggerConsumed||!invocationTriggerRefs.length){const error=new Error('ROOT_TURN_WITHOUT_TRIGGER: no Task/Human/Subagent/technical trigger exists for another Root Turn.');error.nonRetryable=true;throw error;}rootTriggerRefs=[...invocationTriggerRefs];invocationTriggerConsumed=true;}
+      rootTriggerRefs=[...new Set(rootTriggerRefs.map(text).filter(Boolean))];
       const activityKind=rootInputs.length?'synthesis':session.rootTurnCount===0?'initial':'triggered';let decision;
-      try{decision=await this.runRootTurn(task,session,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),rootInputs,activityKind});}
+      try{decision=await this.runRootTurn(task,session,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),rootInputs,activityKind,rejectionDelta});}
       catch(error){if(isCapacityUnavailable(error)&&rootInputs.length)return capacityWait({title:'Root 综合结果',detail:'Work Unit 批次结果已保留；等待 Root 资源。',reason:'等待 Root 综合资源恢复'});throw error;}
       if(decision.kind==='cancelled')return{kind:'cancelled',quiescent:this.isQuiescent(task.id)};
 
-      const reviewed=await this.reviewRootDecision(task,session,decision,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),rootInputs,triggerRefs:rootTriggerRefs});decision=reviewed.decision;task=this.applyEffectClosures(task,session,decision,callbacks);consumeHumanTriggerRefs(session,rootTriggerRefs);this.consumeRootInputs(session,rootInputs);
+      const reviewed=await this.reviewRootDecision(task,session,decision,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),rootInputs,triggerRefs:rootTriggerRefs});
+      if(reviewed.rejected){rejectionDelta=reviewed.rejectionDelta;rejectionTriggerRefs=[...rootTriggerRefs];continue;}
+      rejectionDelta=null;rejectionTriggerRefs=[];decision=reviewed.decision;task=this.applyEffectClosures(task,session,decision,callbacks);consumeHumanTriggerRefs(session,rootTriggerRefs);this.consumeRootInputs(session,rootInputs);
 
       if(decision.kind==='delegate'){
         if(!decision.delegations.length)throw invalidDelegationPlan(['delegate 决策必须至少包含一个 Work Unit。']);
