@@ -27,16 +27,16 @@ Prerequisites: Node.js 16.6+ and a usable Codex runtime. The stock distribution 
 ## Semantic owners
 
 - **Scheduler** — Task lifecycle and admission.
-- **Root** — Task reasoning, planning, bounded Work Unit creation and synthesis.
-- **Subagent** — one bounded TaskBoard Work Unit execution.
-- **Validator** — Root Candidate certification and History semantic-value decision.
+- **Root** — sole Task reasoning, planning, bounded Work Unit creation, synthesis and next-action owner.
+- **Subagent** — one bounded TaskBoard Work Unit execution; returns execution output/source/blocker only.
+- **Validator** — deterministic source/provenance ledger checker; no model turn or Task-level semantic judgment.
 - **Task Core** — durable business facts and atomic persistence.
 - **Skill** — reusable method only.
-- **Executor** — concrete operations and runtime facts.
+- **Executor** — concrete operations and runtime facts inside `AuthorizedGrant`.
 - **Human Gateway** — genuinely human-owned information/choice transport.
 - **UI / Surface** — presentation and user intent only.
 
-Project-specific authority is derived only by `GovernanceCompiler` into `AuthorizedGrant` from the machine Role capability, certified `TaskContract` authority, selected Project scope and Work Unit request. Goal Satisfaction is derived only by `CompletionEvaluator`. Other components consume or project those results rather than independently re-deriving them.
+Project-specific authority is derived only by `GovernanceCompiler` into `AuthorizedGrant` from the machine Role capability, certified `TaskContract` authority, selected Project scope and Work Unit request. Goal Satisfaction is checked deterministically by `CompletionEvaluator` from Root-owned certified obligation mappings. Other components consume or project those results rather than independently re-deriving Task meaning.
 
 A certified blocking Gap constrains only work/convergence that truly depends on the unresolved fact. Independent governed evidence acquisition remains possible when its own authority and safety boundary is satisfied.
 
@@ -78,4 +78,4 @@ The release gate requires syntax/tests, release-identity consistency and fresh-u
 - `docs/EXTENSIONS.md` — external Executor/connection composition contract.
 - `docs/CODEX_INTEGRATION.md` — stock Codex Extension/runtime integration.
 - `docs/ADR.md` — durable design rationale.
-- `docs/VERIFICATION.md` — current verification status.
+- `docs/VERIFICATION.md` — exact-tree verification history/status; descendant commits require their own proof.
