@@ -34,7 +34,7 @@ test('Codex profile fields and Codex-specific error copy stay inside the Codex E
   assert.match(codexSettings,/Codex 当前账号/);
   assert.match(codexSettings,/errors:\{/);
   assert.match(codexSettings,/EXECUTOR_CONNECTION_AUTH_REQUIRED:'Codex 当前登录已失效或未登录/);
-  assert.match(codexSettings,/EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID:'Codex 当前账号没有落到内置 OpenAI provider/);
+  assert.match(codexSettings,/EXECUTOR_CONNECTION_ACCOUNT_PROVIDER_INVALID:'Codex 当前账号没有落到未被覆盖的内置 OpenAI provider/);
   assert.doesNotMatch(html,/API Key|API 地址|默认模型（可选）/);
 });
 
