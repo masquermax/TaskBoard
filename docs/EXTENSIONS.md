@@ -1,6 +1,10 @@
 # TaskBoard Extension Contract
 
-TaskBoard Core owns Task lifecycle, governed Authority, Root/Subagent/Validator semantics, certified state and Completion. An Extension supplies removable execution/runtime capability behind stable ports; removing one Extension must not make Core reinterpret those semantics.
+TaskBoard Core owns Task lifecycle, governed Authority, Root/Subagent/Validator semantics, model-facing instructions/context/response contracts, Certified State and Completion. An Extension supplies removable execution/runtime capability behind stable ports; removing one Extension must not make Core reinterpret those semantics.
+
+The governing rule is:
+
+> Do not copy a Core capability into an Extension. If a responsibility is not Extension-owned, the Extension does not implement it.
 
 ## Public author API
 
@@ -24,16 +28,53 @@ import {
 
 `EXTENSION_API_VERSION` is the Runtime compatibility major for the Extension factory contract. Every Extension must declare exactly the supported API version; missing or unsupported versions fail closed before the Extension can bind.
 
+## Executor request boundary
+
+TaskBoard Core compiles each executable turn before calling an Extension:
+
+```js
+{
+  instructions,
+  context,
+  responseContract,
+  authorizedGrant,
+  modelPolicy,
+  runtime,
+}
+```
+
+The Core-only `ExecutorRuntimeAdapter` converts internal Root/Subagent calls into this generic request. `ExecutorPort` exposes `execute(request)`; an Executor Extension realizes the request and returns the raw structured response.
+
+Therefore an Executor Extension owns:
+
+- Provider/API configuration and authentication;
+- model discovery and provider-specific model invocation;
+- provider/runtime launch and transport;
+- technical realization of `authorizedGrant`;
+- attachment/workspace staging required by that Runtime;
+- normalized provider/runtime failure facts.
+
+It does **not** own or copy:
+
+- Root or Subagent protocol;
+- Evidence/Claim/Gap/Step semantics;
+- Root/Subagent response schemas;
+- Validator rules;
+- Task completion semantics;
+- Task-level retry/progression policy.
+
+If an Executor cannot realize the compiled request faithfully, it reports unavailable/failure; it does not weaken or reinterpret the request.
+
 ## Composition
 
 External distributions may compose their own registry without editing TaskBoard Core:
 
 ```js
 import { bootstrap } from 'taskboard-codex/bootstrap';
-import { createBuiltinExtensionRegistry } from 'taskboard-codex/extensions';
+import { ExtensionRegistry } from 'taskboard-codex/extensions';
 import { createMyExecutorExtension } from './my-extension.js';
 
-const registry=createBuiltinExtensionRegistry()
+const registry=new ExtensionRegistry()
   .register('my-executor',createMyExecutorExtension);
 
 const runtime=bootstrap({
@@ -43,7 +84,7 @@ const runtime=bootstrap({
 });
 ```
 
-`createBuiltinExtensionRegistry()` remains the stock composition. Passing another registry is a Composition Root choice, not a new Task/Core semantic owner.
+Passing the registry is a Composition Root choice, not a new Task/Core semantic owner. Core does not scan the filesystem for Extensions.
 
 ## Extension shape
 
@@ -63,11 +104,10 @@ An Extension factory returns:
 }
 ```
 
-- `apiVersion` is required and must equal the Host-supported `EXTENSION_API_VERSION`.
-- `executor` implements TaskBoard execution semantics.
+- `executor` implements generic `execute(request)` when this Artifact provides execution.
 - `capabilityProvider` reports normalized Runtime/model capability facts. Capability creates no Authority.
-- `connectionSettings` is optional. When present it implements `ConnectionSettingsPort`: `describe()`, `getPublic()`, `update()`, plus optional read-only `discover()`.
-- `continuation` is optional. When present it implements `ContinuationPort`: `health()`, `read()`, `write()`.
+- `connectionSettings` is optional and implements `describe()`, `getPublic()`, `update()`, plus optional read-only `discover()`.
+- `continuation` is optional and implements `health()`, `read()`, `write()`.
 - `presentation` carries safe display metadata only.
 - `surfaceHosts[]` are optional interaction surfaces and may coexist as facets of the owning Extension.
 
@@ -75,30 +115,21 @@ Provider/Profile secrets, provider identity and provider-specific launch project
 
 ## Model catalog and model selection
 
-Models are Executor capability, not a third Extension Point. A Capability snapshot separates two different facts:
+Models are Executor capability, not a third Extension Point. A capability snapshot separates availability from per-turn selection:
 
 ```js
 {
   defaults: { model: 'model-a' },
-  modelSelection: {
-    explicitPerTurn: true,
-    maxPerTurn: 1,
-  },
-  models: [ /* zero or more discovered models */ ],
+  modelSelection: { explicitPerTurn: true, maxPerTurn: 1 },
+  models: [ /* discovered models */ ],
 }
 ```
 
-- `models[]` is the set of Runtime-discovered choices known for the current Provider/Profile identity. It may contain zero, one or many models.
-- `modelSelection.explicitPerTurn` states whether the Executor can faithfully accept a TaskBoard-selected model for an individual Turn.
-- `modelSelection.maxPerTurn` is the cardinality of the selected model inside one Turn; the current normalized contract is one model per Turn.
-- Missing capability or `explicitPerTurn:false` means `ModelRouter` leaves the model unset and the Executor/Runtime owns its configured default. A large catalog never implies that TaskBoard is allowed to override the model.
-- When explicit selection is supported and routing evidence is safe, `ModelRouter` may choose one minimum-sufficient model from normalized metadata. Provider-specific model ids or brands do not become Core routing rules.
-
-This keeps the semantic cardinality precise: many installed/available models, at most one selected for a Turn, and only when the active Executor actually supports that operation.
+`models[]` may contain zero, one or many choices. `modelSelection.explicitPerTurn` says whether the Executor can faithfully accept a Core-selected model for an individual turn. Missing capability or `false` leaves the model unset so the Runtime/provider default remains authoritative. A large catalog never grants TaskBoard permission to override a model.
 
 ## Runtime failure facts and retry ownership
 
-An Executor may normalize provider/runtime failures before they cross the public boundary:
+An Executor may attach normalized provider/runtime failure facts:
 
 ```js
 throw attachRuntimeFailure(error, {
@@ -109,38 +140,32 @@ throw attachRuntimeFailure(error, {
 });
 ```
 
-The normalized facts are observations, not retry policy. Current generic codes include `NETWORK`, `TIMEOUT`, `RATE_LIMIT`, `QUOTA`, `AUTH_REQUIRED`, `UPSTREAM_REJECTED`, `INVALID_REQUEST`, `ABORTED` and `UNKNOWN`.
+These are observations, not retry policy. Core owns retry/recovery classification. An Executor call represents one Runtime attempt; Extensions must not hide provider retry loops or silently fall back to another model/provider/orchestration mode.
 
-TaskBoard Core owns retry/recovery classification. An Executor invocation represents one Runtime attempt; Extensions must not hide provider retry loops or silently fall back to a different model/provider/orchestration mode. `status`, `retryAfterMs` and `requestId` may preserve useful upstream evidence, but they do not grant Authority and do not decide whether the Task should retry.
+## Connection presentation and discovery
 
-Core retains message-based classification only as a compatibility fallback for older/third-party Executors that do not yet attach structured Runtime failure facts. New adapters should prefer the structured boundary so wording changes such as `stream disconnected` or `error sending request` do not change semantic failure classification.
+TaskBoard does not encode one Executor's settings form. A configurable Extension returns a safe declarative descriptor from `connectionSettings.describe()`.
+
+Current renderer supports:
+
+- `text`
+- `url`
+- `secret`
+- `model`
+- `reasoning`
+- `select`
+
+When discovery is declared, TaskBoard may pass current unsaved field values to the same Extension's optional `discover()` method. This is a transient, Extension-owned read-only lookup used to populate model/reasoning choices before save. TaskBoard transports the values but does not interpret provider semantics or persist the discovery request/secret as a side effect. Failure is fail-closed and leaves saved state unchanged.
 
 ## Artifact and contribution boundary
 
-An Extension Artifact is the install/version/enable/disable/remove boundary. One Artifact may carry multiple facets that share that lifecycle. Do not split executor capability, connection settings and presentation merely because they are separate code modules.
+An Extension Artifact is the install/version/enable/disable/remove boundary. One Artifact may carry multiple facets that share that lifecycle. Independent Extension Points are introduced only when real product/runtime evidence establishes an independent contract and lifecycle.
 
-Independent Extension Points are introduced only when real product/runtime evidence establishes a meaningful independent contract and lifecycle. `executor` and `continuation` are independently bindable points; ecosystem source layout or UI categories must not manufacture additional Core Extension Points. Model catalog/selection remains a capability of the active Executor rather than an independently installed/bound point.
-
-Skill is a different Artifact type and uses the Skill Library boundary. A Skill is reusable method content and never gains Task Authority merely because it is installable beside Runtime Extensions.
+Skill is a different Artifact type and uses the Skill Library boundary. A Skill is reusable method content and gains no Task Authority merely because it is installable beside Runtime Extensions.
 
 ## Continuation is optional working cognition
 
-`continuation` exists for removable cross-session cognition systems such as AI-Context. It is not TaskBoard product truth, certified state, Task Authority, Completion evidence or a Runtime/build/test dependency.
-
-A continuation implementation provides only the mechanical persistence boundary. The continuation system's current routing/governance rules and the Agent decide what is worth reading or writing. Before continuation cognition constrains product work, the relevant real Git/Runtime state must be re-verified.
-
-TaskBoard may bind one active continuation Artifact independently from the active Executor:
-
-```js
-const runtime=bootstrap({
-  rootDir,
-  executorName:'my-executor',
-  continuationName:'my-continuation',
-  extensionRegistry:registry,
-});
-```
-
-No continuation is the normal stock state. Removing or disabling continuation must leave Executor/Core semantics unchanged.
+`continuation` exists for removable cross-session cognition systems such as AI-Context. It is not TaskBoard product truth, Certified State, Task Authority, Completion evidence or a Runtime/build/test dependency. Removing or disabling continuation must leave Executor/Core semantics unchanged.
 
 ## Orchestration modes are not interchangeable
 
@@ -150,57 +175,13 @@ No continuation is the normal stock state. Removing or disabling continuation mu
 TaskBoard Root
   -> TaskBoard Work Unit
   -> TaskBoard Subagent
-  -> Executor realization
+  -> Core-compiled Executor request
+  -> Extension transport
 ```
 
-The current Runtime path supports only this mode.
+The current Runtime supports only this mode.
 
-`OrchestrationMode.RUNTIME_NATIVE` is reserved for a future distinct contract where an Executor Runtime owns an internal native-agent tree. It is deliberately rejected by the current bootstrap. A Runtime-native Agent must not silently become a TaskBoard Subagent, WorkReceipt, certified claim or concurrency slot.
-
-There is no implicit hybrid mode. An execution is admitted under one orchestration owner; native collaboration cannot be smuggled through `runSubagent()`.
-
-## Connection presentation and discovery
-
-TaskBoard does not encode one Executor's settings form. A configurable Extension returns a safe declarative descriptor from `connectionSettings.describe()`.
-
-Current renderer supports the minimum field types required by real Extensions:
-
-- `text`
-- `url`
-- `secret`
-- `model`
-- `reasoning`
-- `select`
-
-A profile-based descriptor can declare labels, fields and operation names. Public profile state may expose non-secret values plus flags such as `editable`, `deletable` and `apiKeyConfigured`; the secret itself never returns through the API/UI state.
-
-Example:
-
-```js
-{
-  schemaVersion:1,
-  kind:'profiles',
-  title:'AI 连接',
-  fields:[
-    {key:'name',type:'text',label:'连接名称'},
-    {key:'baseUrl',type:'url',label:'API 地址'},
-    {key:'apiKey',type:'secret',label:'API Key',configuredKey:'apiKeyConfigured'},
-    {key:'defaultModel',type:'model',label:'默认模型'},
-    {key:'reasoningEffort',type:'reasoning',label:'推理等级',modelField:'defaultModel'}
-  ],
-  discovery:{auto:true,debounceMs:500,label:'获取模型'},
-  actions:{
-    select:'selectProfile',
-    save:'saveProfile',
-    delete:'deleteProfile',
-    discover:'discover'
-  }
-}
-```
-
-When `discovery` is declared, TaskBoard may POST the current unsaved field values to the same Extension's optional `connectionSettings.discover()` method. This is a transient, Extension-owned read-only lookup used to populate values such as model/reasoning choices before save. TaskBoard does not interpret provider semantics and must not persist a discovery request or secret merely because it transported it. The Extension returns only safe discovery output for UI use. If `discover()` is unavailable or fails, the operation fails closed and does not change saved connection state.
-
-TaskBoard renders the descriptor and transports the chosen operation; the Extension still owns validation, persistence, Runtime restart/rollback and provider-specific interpretation.
+`OrchestrationMode.RUNTIME_NATIVE` is reserved for a future distinct contract where an Executor Runtime owns an internal native-agent tree. It is deliberately rejected by the current bootstrap. Native collaboration cannot be smuggled through the generic TaskBoard executor request and silently become TaskBoard Subagents, WorkReceipts or Claims.
 
 ## Cardinality
 
@@ -209,34 +190,23 @@ Installation and active binding are different concepts.
 - A registry may contain multiple Executor or Continuation Extensions.
 - One TaskBoard process currently binds one active Executor Extension.
 - One TaskBoard process binds zero or one active Continuation Extension.
-- Executor and Continuation bindings are independent; the absence of Continuation never blocks TaskBoard execution.
-- One active Executor may expose many models through its capability catalog; an individual Turn uses at most one explicit model when the Executor advertises that selection capability.
-- Provider/Profile cardinality is Extension-owned; the current Codex Extension supports many saved profiles and one active profile per Codex child.
+- One active Executor may expose many models; one turn uses at most one explicit model when supported.
+- Provider/Profile cardinality is Extension-owned.
 - `surfaceHosts[]` may have multiple simultaneous contributors inside the active Extension composition.
 
-Simultaneous multi-Executor or multi-Provider execution inside one Task is not implied by plugin installation. It requires separate resource, routing, provenance, failure and recovery semantics.
+Simultaneous multi-Executor or multi-Provider execution inside one Task is not implied by plugin installation; it requires separate resource/routing/provenance/recovery semantics.
 
 ## Compatibility proof
 
-A new Extension is not compatible merely because its methods have matching names. Compatibility requires:
+A new Executor Extension is compatible only when all of these hold:
 
-```text
-API version acceptance
--> Protocol surface
--> semantic compatibility
--> Runtime confirmation
-```
+1. supported `EXTENSION_API_VERSION` is declared;
+2. it imports only public author surfaces;
+3. it implements generic `execute(request)` rather than Root/Subagent domain methods;
+4. it realizes `authorizedGrant` exactly or fails closed;
+5. it consumes Core `instructions/context/responseContract` without duplicating/reinterpreting TaskBoard governance;
+6. capability/connection data stay normalized and Extension-owned;
+7. a real Runtime turn completes on the intended value path;
+8. disabling/removing the Extension leaves stock TaskBoard semantics valid.
 
-At minimum verify:
-
-1. the external Artifact declares the supported Extension API version and imports only public author surfaces;
-2. the external registry can bootstrap the Extension without Core changes;
-3. required TaskBoard Work/Authority/Context semantics can be realized without weakening them;
-4. model/capability and connection presentation remain normalized at the boundary;
-5. optional discovery, when advertised, is read-only/fail-closed and does not persist secrets by transport side effect;
-6. a real Runtime turn completes on the intended value path;
-7. disabling/removing the Extension leaves stock TaskBoard semantics and tests valid.
-
-For a Continuation Extension, compatibility additionally requires that removing it leaves stock execution semantics unchanged and that continuation content is never treated as product/runtime truth without fresh verification.
-
-If an Executor cannot realize a required semantic safely, report `UNAVAILABLE`; do not silently downgrade or borrow another orchestration mode.
+For a Continuation Extension, removing it must likewise leave stock execution semantics unchanged and its content must never become product/runtime truth without fresh verification.
