@@ -24,11 +24,10 @@ test('Gate B: Runtime has no parallel stage-result, semantic History, Validator-
 });
 
 test('Gate B: analysis rendering is presentation, never a semantic Validator implementation',()=>{
-  const presentation=source('src/governance/analysis-presentation.js'),compat=source('src/governance/analysis-validator.js');
+  const presentation=source('src/governance/analysis-presentation.js'),root=source('src/core/root-runtime.js');
   assert.doesNotMatch(presentation,/class\s+AnalysisResultValidator|modelVerifier|semanticVerifier|runValidator|reviewRoot/);
-  assert.match(compat,/Compatibility bridge only/);
-  assert.match(compat,/from '.\/analysis-presentation\.js'/);
-  assert.doesNotMatch(compat,/function\s+|class\s+/,'legacy filename must not regain implementation ownership');
+  assert.match(root,/from '..\/governance\/analysis-presentation\.js'/);
+  assert.equal(existsSync(resolve('src/governance/analysis-validator.js')),false,'legacy semantic-Validator filename must stay removed');
 });
 
 test('Gate B: removed Runtime wrappers and governance document loaders stay absent',()=>{
