@@ -13,7 +13,7 @@ import readline from 'node:readline';
 if(process.argv.includes('--version')){console.log('codex-fake 1.0');process.exit(0);}
 const rl=readline.createInterface({input:process.stdin});
 const send=value=>process.stdout.write(JSON.stringify(value)+'\\n');
-let turnNo=0;
+let turnNo=0,projectScanned=false;
 rl.on('line',line=>{
   const msg=JSON.parse(line);
   if(msg.method==='initialize')return send({id:msg.id,result:{}});
@@ -28,11 +28,11 @@ rl.on('line',line=>{
   send({id:msg.id,result:{turn:{id:turnId,status:'inProgress',items:[]}}});
   let payload;
   if(prompt.includes('Work Unit protocol:')){
+    projectScanned=true;
     payload={delegationId:'project-scan',result:'项目范围核对完成；当前项目本身不能决定本次业务范围。',evidence:[],blocker:null};
   }else{
-    const hasProjectResult=prompt.includes('project-scan')&&prompt.includes('项目范围核对完成');
     const answered=prompt.includes('"answer": "基础办公"');
-    if(!hasProjectResult){
+    if(!projectScanned){
       payload={kind:'delegate',summary:'先取得项目侧最小事实',finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[],gateway:null,delegations:[{id:'project-scan',title:'核对项目范围',goal:'确认项目现状能否直接决定本次 OA 业务范围',expectedOutput:'返回项目是否能决定范围的局部结果',stopCondition:'得到该有限判断所需事实后停止',projectAccess:'read',networkAccess:false,skillId:null,dependsOn:[],inputRefs:['project:0']}]};
     }else if(!answered){
       payload={kind:'human_gateway',summary:'项目事实不足以替用户决定业务范围',finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[{id:'G-1',question:'OA 核心范围？',reason:'当前项目事实不能替用户决定本次业务范围',kind:'business_decision',blocking:true,evidenceIds:[]}],recommendations:[],steps:[],gapResolutions:[],gateway:{gapId:'G-1',question:'OA 核心范围？',context:'范围由用户拥有',options:['基础办公']},delegations:[]};
