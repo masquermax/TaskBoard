@@ -6,13 +6,16 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { bootstrap } from '../src/server/bootstrap.js';
 import { createApp } from '../src/server/app.js';
+import { ExtensionRegistry, EXTENSION_API_VERSION } from '../src/extensions/runtime/extension-registry.js';
+import { MockExecutor } from '../src/extensions/executors/mock/mock-executor.js';
 import { installSuccessfulCompletionFixture } from './helpers/completion-fixture.js';
 
 async function requestJson(url,options={}){const response=await fetch(url,options),body=await response.json();assert.ok(response.ok,`${response.status} ${JSON.stringify(body)}`);return body;}
+function mockRegistry(){return new ExtensionRegistry().register('mock',()=>({apiVersion:EXTENSION_API_VERSION,displayName:'Mock',executor:new MockExecutor()}));}
 
 test('HTTP user path reaches Root and completes a read-only project Task without authority promotion or Validator model role',async()=>{
   const rootDir=mkdtempSync(join(tmpdir(),'taskboard-authority-http-')),projectDir=join(rootDir,'project');mkdirSync(projectDir,{recursive:true});
-  const runtime=bootstrap({rootDir,executorName:'mock',startScheduler:false});installSuccessfulCompletionFixture(runtime.rootRuntime);let rootCalls=0;const originalRoot=runtime.executor.runRoot.bind(runtime.executor);runtime.executor.runRoot=async request=>{rootCalls+=1;return originalRoot(request);};
+  const runtime=bootstrap({rootDir,executorName:'mock',extensionRegistry:mockRegistry(),startScheduler:false});installSuccessfulCompletionFixture(runtime.rootRuntime);let rootCalls=0;const originalRoot=runtime.executor.runRoot.bind(runtime.executor);runtime.executor.runRoot=async request=>{rootCalls+=1;return originalRoot(request);};
   const server=createServer(createApp({taskService:runtime.taskService,executor:runtime.executor,scheduler:runtime.scheduler,uiRoot:resolve('src/ui')}));await new Promise(resolveReady=>server.listen(0,'127.0.0.1',resolveReady));const base=`http://127.0.0.1:${server.address().port}`;
   try{
     const {project}=await requestJson(`${base}/api/projects`,{method:'POST',headers:{'content-type':'application/json','x-taskboard-action':'ui'},body:JSON.stringify({name:'Read only project',path:projectDir})});
