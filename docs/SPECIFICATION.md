@@ -26,7 +26,7 @@ Task/Human/technical trigger
       Validator
    provenance ledger
           ↓
- Certified State / complete / next Work / Human Gateway
+ Certified State / rejected delta back to Root / complete / next Work / Human Gateway
 ```
 
 Runtime does not create another semantic owner around this chain.
@@ -56,7 +56,7 @@ Root is the sole Task-level judgment owner. It owns:
 
 Root has no Project filesystem/network execution capability. It receives the Task input catalog, current Claims/Gaps/unresolved obligations, fresh Work Unit results and the current Human trigger only.
 
-Current Certified State is context, not a self-trigger. A new Root turn requires Task start, a completed Work batch, a resolved Human Gateway or a technical resume.
+Current Certified State is context, not a self-trigger. A new Root turn requires Task start, a completed Work batch, a resolved Human Gateway, a Validator rejection delta or a technical resume.
 
 ## Work Unit
 
@@ -85,9 +85,8 @@ It returns only:
 - `result`
 - source-near `evidence[]`
 - optional `blocker`
-- narrow effect-recovery closure metadata only when Runtime safety requires it.
 
-It does not own Findings as Task semantics, Claims, Gaps, Recommendations, confidence/uncertainty classification, Discoveries, next work, completion or Human Gateway.
+It does not own Findings as Task semantics, Claims, Gaps, Recommendations, confidence/uncertainty classification, Discoveries, next work, effect closure, completion or Human Gateway.
 
 Dependencies are resolved inside the current Stage. Independent siblings may execute concurrently. Root consumes the Stage batch after all issued siblings reach the Stage boundary; it is not awakened once per sibling.
 
@@ -115,6 +114,8 @@ It may not:
 - use a model turn.
 
 Validator PASS means the source ledger is valid, not that Validator independently agrees with the conclusion.
+
+Validator REJECT means only that the current Candidate Delta is not admitted. It is not a Task failure or suspension. The deterministic rejection feedback returns to Root as a fresh delta; the rejected Candidate does not enter Certified State and its triggering Work receipts remain available until Root produces a passing decision.
 
 ## Certified State and publication
 
@@ -173,15 +174,26 @@ TaskBoard Core defines only an injected Skill-method boundary. Concrete Skill as
 
 ## Extension boundary
 
-An Extension may provide Executor, Capability Provider, connection settings, presentation metadata, Surface Host and continuation integration. TaskBoard currently admits TaskBoard-owned orchestration only:
+TaskBoard Core owns all Task/role semantics and compiles one generic Executor request containing:
+
+- `instructions`
+- `context`
+- `responseContract`
+- `authorizedGrant`
+- `modelPolicy`
+- minimum Runtime transport metadata
+
+The Core-only ExecutorRuntimeAdapter translates Root/Subagent Runtime calls into that request. An Executor Extension implements only generic `execute(request)` plus optional technical capability/lifecycle surfaces. It does not own Root/Subagent protocol, Evidence/Claim/Gap/Step rules or response schemas.
+
+An Extension may additionally provide Capability Provider, connection settings, presentation metadata, Surface Host and continuation integration. TaskBoard currently admits TaskBoard-owned orchestration only:
 
 ```text
-Root → Work Unit → TaskBoard Subagent
+Root → Work Unit → TaskBoard Subagent → Core-compiled Executor request → Extension transport
 ```
 
 A runtime-native internal agent tree requires a distinct future contract. It is not implicitly counted as TaskBoard Subagents or converted into WorkReceipts/Claims.
 
-Codex is the stock Executor implementation, not a Task Core dependency. Provider/auth/settings semantics stay extension-local.
+Codex is the stock Executor implementation, not a Task Core dependency. Provider/auth/settings/model-discovery semantics stay extension-local.
 
 ## Cleanup and UI
 
@@ -201,6 +213,7 @@ Current Runtime intentionally contains no:
 - runtime telemetry wrapper/convergence heuristic;
 - Root Project/network execution;
 - automatic Human-answer interpretation;
+- Extension-owned Root/Subagent governance/schema copies;
 - formal Project Knowledge subsystem;
 - replayable generic Project Search/Runtime evidence store;
 - runtime-native Agent-tree orchestration.
