@@ -15,7 +15,7 @@ rl.on('line',line=>{const m=JSON.parse(line);if(m.method==='initialize')return s
 `);}
 
 test('Codex client consumes item/completed as the final agent message and releases the turn',async()=>{
-  if(process.platform==='win32')return;const dir=mkdtempSync(join(tmpdir(),'taskboard-codex-normal-')),diagnostics=[],client=new CodexAppServerClient({command:normalFake(dir),diagnosticLogger:line=>diagnostics.push(line)});
+  if(process.platform==='win32')return;const dir=mkdtempSync(join(tmpdir(),'taskboard-codex-normal-')),diagnostics=[],client=new CodexAppServerClient({command:normalFake(dir),logLevel:'debug',diagnosticLogger:line=>diagnostics.push(line)});
   try{const text=await client.runTurn({cwd:dir,prompt:'test',inputItems:[],outputSchema:{type:'object'},networkAccess:false,...grant(dir)});assert.match(text,/"kind":"complete"/);assert.equal(client.activeTurnCount,0);const events=diagnostics.map(line=>JSON.parse(line.replace(/^\[codex-runtime\] /,'')));assert.ok(events.some(x=>x.event==='turn-started'));assert.ok(events.some(x=>x.event==='turn-released'&&x.activeTurnCount===0));}finally{client.close();rmSync(dir,{recursive:true,force:true});}
 });
 
