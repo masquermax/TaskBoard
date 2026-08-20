@@ -48,6 +48,14 @@ test('generic extension registry carries independent execution, capability, sett
   assert.throws(()=>registry.register('demo',()=>({})),/EXTENSION_DUPLICATE/);
 });
 
+test('connection discovery is an optional fail-closed author capability',async()=>{
+  const base=new DemoConnectionSettings();
+  await assert.rejects(base.discover({values:{}}),/EXTENSION_CONNECTION_DISCOVERY_UNAVAILABLE/);
+  class DiscoveringSettings extends DemoConnectionSettings { async discover(request){return{models:[{id:'model-a'}],received:request};} }
+  const request={values:{baseUrl:'https://api.example/v1'}};
+  assert.deepEqual(await new DiscoveringSettings().discover(request),{models:[{id:'model-a'}],received:request});
+});
+
 test('extension api version is explicit and fails closed before incompatible code can bind',()=>{
   const missing=new ExtensionRegistry().register('missing',()=>({executor:new DemoExecutor()}));
   assert.throws(()=>missing.create('missing'),/EXTENSION_API_VERSION_REQUIRED:missing/);
