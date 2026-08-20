@@ -56,8 +56,10 @@ function ledgerViolations(decision,evidenceById,currentState){
   }
 
   for(const step of list(decision.steps)){
-    const missing=uniqueStrings(step?.sourceIds).filter(ref=>!claimById.has(ref));
+    const refs=uniqueStrings(step?.sourceIds),missing=refs.filter(ref=>!claimById.has(ref));
     if(missing.length)violations.push(feedback(`step:${step?.order??'?'}`,`Step 引用了不存在的 Claim：${missing.join(', ')}。`));
+    const unconfirmed=refs.map(ref=>claimById.get(ref)).filter(Boolean).filter(claim=>claim?.level!==ClaimLevel.CONFIRMED).map(claim=>text(claim?.id)).filter(Boolean);
+    if(unconfirmed.length)violations.push(feedback(`step:${step?.order??'?'}`,`已确认 Step 依赖未确认 Claim：${unconfirmed.join(', ')}；展示可信度不能高于来源 Claim。`,'REJECT_TRUST_ESCALATION'));
   }
   return violations;
 }
