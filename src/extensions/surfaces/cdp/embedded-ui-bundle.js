@@ -25,6 +25,12 @@ function inlineTimeImport(source,timeSource){
   const replacement=`${timeSource}\n${aliases.length?`${aliases.join('\n')}\n`:''}`;
   return `${source.slice(0,match.index)}${replacement}${source.slice(match.index+match[0].length)}`;
 }
+function inlineSideEffectImport(source,specifier,moduleSource){
+  const escaped=specifier.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  const pattern=new RegExp(`^\\s*import\\s+["']${escaped}["'];?\\s*`,'m');
+  const match=pattern.exec(source);if(!match)throw new Error(`TaskBoard local side-effect import could not be bundled: ${specifier}`);
+  return `${source.slice(0,match.index)}${moduleSource}\n${source.slice(match.index+match[0].length)}`;
+}
 function moduleExpression(source,{timeSource=null,name='module'}={}){
   let value=timeSource?inlineTimeImport(source,timeSource):source;
   if(/^\s*(?:import|export)\s/m.test(value))throw new Error(`TaskBoard ${name} module contains an unsupported module boundary`);
@@ -35,7 +41,8 @@ export function loadEmbeddedTaskboardUi(uiRoot){
   const html=readFileSync(join(uiRoot,'index.html'),'utf8');
   const css=readFileSync(join(uiRoot,'app.css'),'utf8');
   const app=readFileSync(join(uiRoot,'app.js'),'utf8');
-  const connection=readFileSync(join(uiRoot,'connection-settings.js'),'utf8');
+  const extensionManagement=readFileSync(join(uiRoot,'extension-management.js'),'utf8');
+  const connection=inlineSideEffectImport(readFileSync(join(uiRoot,'connection-settings.js'),'utf8'),'./extension-management.js',extensionManagement);
   const time=readFileSync(join(uiRoot,'time.js'),'utf8');
   return{
     bodyHtml:extractBody(html),
