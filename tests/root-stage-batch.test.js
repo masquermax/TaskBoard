@@ -5,7 +5,7 @@ import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { ModelRouter } from '../src/core/model-router.js';
 import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
 
-function executionComplete(){return{kind:'complete',summary:'done',stageResult:'done',finalResult:'done',resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[]};}
+function executionComplete(){return{kind:'complete',summary:'done',finalResult:'done',resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[]};}
 function work(id){return{id,title:`W${id}`,goal:`execute ${id}`,expectedOutput:`result ${id}`,stopCondition:`result ${id} returned`,projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[]};}
 function deferred(){let resolve,reject;const promise=new Promise((res,rej)=>{resolve=res;reject=rej;});return{promise,resolve,reject};}
 
@@ -23,7 +23,7 @@ test('Root splits one parallel stage and is woken once after all sibling Work Un
     async runRoot({subagentResults,onExecutionStarted}){
       rootCalls+=1;onExecutionStarted?.();
       rootInputBatches.push((subagentResults||[]).map(item=>item.delegationId).sort());
-      if(rootCalls===1)return{kind:'delegate',summary:'split 3',stageResult:null,finalResult:null,resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[work('1'),work('2'),work('3')]};
+      if(rootCalls===1)return{kind:'delegate',summary:'split 3',finalResult:null,resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[work('1'),work('2'),work('3')]};
       return executionComplete();
     },
     async runSubagent({delegation,onExecutionStarted}){
@@ -50,7 +50,7 @@ test('all sibling Work Units can start concurrently and partial completion canno
   const executor={
     async runRoot({subagentResults,onExecutionStarted}){
       rootCalls+=1;onExecutionStarted?.();
-      if(rootCalls===1)return{kind:'delegate',summary:'split 3',stageResult:null,finalResult:null,resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[work('1'),work('2'),work('3')]};
+      if(rootCalls===1)return{kind:'delegate',summary:'split 3',finalResult:null,resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[work('1'),work('2'),work('3')]};
       assert.deepEqual((subagentResults||[]).map(item=>item.delegationId).sort(),['1','2','3']);
       return executionComplete();
     },
