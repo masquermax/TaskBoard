@@ -150,9 +150,8 @@ export class SourceTraceVerifier{
       const reference=references.find(r=>locator.includes(text(r?.source_task_id))||locator.includes(text(r?.title))) || (references.length===1?references[0]:null);
       if(!reference)return untraceable('Reference Evidence locator 没有指向当前 Task 的真实引用结果。');
       const material=[text(reference?.title),text(reference?.final_result)].filter(Boolean).join('\n');
-      if(!direct)return traceable('Reference 来源真实存在；INDIRECT 转述不升级。',{context:sourceContext(material,observation,locator)});
       if(!observationOccurs(material,observation))return untraceable('Reference Evidence 的 observation 不存在于 locator 指向的引用结果。');
-      return verified({context:sourceContext(material,observation,locator)});
+      return traceable('Reference 指向真实的历史 Task Result，但原始来源链不随引用结果自动继承；只可作为 INDIRECT 参考。',{context:sourceContext(material,observation,locator)});
     }
 
     if(evidence.sourceType===EvidenceSourceType.ATTACHMENT_VISUAL){
