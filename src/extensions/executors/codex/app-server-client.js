@@ -83,13 +83,13 @@ export class CodexAppServerClient{
     if(!this.sameRuntimeRoots(executionGrant.roots,thread?.runtimeWorkspaceRoots||[])){this.recordDiagnostic('runtime-roots-mismatch',{...routeMeta,requestedPermissionProfile:executionGrant.profile,activePermissionProfile,requestedRuntimeWorkspaceRoots:executionGrant.roots,returnedRuntimeWorkspaceRoots:thread?.runtimeWorkspaceRoots??null,cwd,command:this.command||null,version:this.version||null},'error');const error=new Error('CODEX_RUNTIME_ROOTS_NOT_APPLIED: app-server did not confirm the exact Runtime workspace roots.');error.nonRetryable=true;throw error;}
     const threadId=thread.thread.id,resolvedThreadModel=thread?.thread?.model||thread?.thread?.modelId||null;onProgress?.({summary:'Codex 会话已建立',detail:`正在启动本轮 ${roleLabel} 执行。`});
     const start=await this.request('turn/start',{threadId,input:[{type:'text',text:prompt},...inputItems],approvalPolicy:'never',outputSchema,...(model?{model}:{}),...(reasoningEffort?{effort:reasoningEffort}:{})}),turnId=start.turn.id,resolvedTurnModel=start?.turn?.model||start?.turn?.modelId||resolvedThreadModel||null;
-    this.activeTurnCount+=1;const activeAtStart=this.activeTurnCount;this.recordDiagnostic('turn-started',{...routeMeta,threadId,turnId,resolvedModel:resolvedThreadModel||null,activeTurnCount:activeAtStart});
+    this.activeTurnCount+=1;const activeAtStart=this.activeTurnCount;this.recordDiagnostic('turn-started',{...routeMeta,threadId,turnId,resolvedModel:resolvedTurnModel||null,activeTurnCount:activeAtStart});
     const workUnitObserver=role==='subagent'?registerWorkUnitObservability(new WorkUnitObservability({taskId:routeMeta.taskId,workUnitId:routeMeta.workUnitId,turnId,startedAt:Date.now(),emitDiagnostic:(event,data,level)=>this.recordDiagnostic(event,data,level)})):null;
     let interruptRequested=false;const interrupt=()=>{if(interruptRequested)return;interruptRequested=true;this.request('turn/interrupt',{threadId,turnId},8_000).catch(error=>console.error('[codex interrupt]',error.message||error));};
     signal?.addEventListener?.('abort',interrupt,{once:true});if(signal?.aborted)interrupt();
     const agentMessages=[];let toolCallCount=0,completed=null;
     try{
-      onExecutionStarted?.({threadId,turnId,requestedModel:model||null,resolvedModel:resolvedThreadModel,reasoningEffort:reasoningEffort||null});onProgress?.({summary:'Codex 正在执行',detail:runningDetail});
+      onExecutionStarted?.({threadId,turnId,requestedModel:model||null,resolvedModel:resolvedTurnModel,reasoningEffort:reasoningEffort||null});onProgress?.({summary:'Codex 正在执行',detail:runningDetail});
       while(!completed){
         const event=await this.waitFor(msg=>{if(msg.method==='item/started'||msg.method==='item/completed')return msg.params?.threadId===threadId&&msg.params?.turnId===turnId;return msg.method==='turn/completed'&&msg.params?.turn?.id===turnId;},this.turnEventTimeoutMs);
         if(event.method==='item/started'){
@@ -107,12 +107,12 @@ export class CodexAppServerClient{
       }
       const turn=completed.params.turn;if(turn.status!=='completed'){const error=new Error(turn.error?.message||`Codex turn ${turn.status}`);if(turn.status==='interrupted'||signal?.aborted)error.interrupted=true;throw error;}
       const fallback=Array.isArray(turn.items)?[...turn.items].reverse().find(i=>i?.type==='agentMessage'&&typeof i.text==='string'&&i.text.trim())?.text:null,finalText=agentMessages.length?agentMessages[agentMessages.length-1]:fallback;if(!finalText)throw new Error('Codex returned no final agent message');
-      const usage=turn?.usage||turn?.tokenUsage||turn?.tokens||null;this.recordDiagnostic('turn-completed',{...routeMeta,threadId,turnId,resolvedModel:turn?.model||turn?.modelId||resolvedThreadModel||null,elapsedMs:Date.now()-executionStartedAt,toolCallCount,outputBytes:Buffer.byteLength(finalText,'utf8'),usage:usage&&typeof usage==='object'?usage:null,activeTurnCount:this.activeTurnCount});
+      const usage=turn?.usage||turn?.tokenUsage||turn?.tokens||null;this.recordDiagnostic('turn-completed',{...routeMeta,threadId,turnId,resolvedModel:turn?.model||turn?.modelId||resolvedTurnModel||null,elapsedMs:Date.now()-executionStartedAt,toolCallCount,outputBytes:Buffer.byteLength(finalText,'utf8'),usage:usage&&typeof usage==='object'?usage:null,activeTurnCount:this.activeTurnCount});
       if(workUnitObserver)setTimeout(()=>failWorkUnitObservability({taskId:routeMeta.taskId,workUnitId:routeMeta.workUnitId,status:'diagnostic-finalization-timeout',blocker:'Structured Work Unit result was not finalized after transport completion.'}),5_000).unref?.();
       onProgress?.({summary:'Codex 本轮执行完成',detail:completedDetail});return finalText;
     }catch(error){
       if(workUnitObserver)try{failWorkUnitObservability({taskId:routeMeta.taskId,workUnitId:routeMeta.workUnitId,status:error?.interrupted||signal?.aborted?'interrupted':'failed',blocker:error?.message||String(error)});}catch{/* diagnostics only */}
-      this.recordDiagnostic('turn-failed',{...routeMeta,threadId,turnId,resolvedModel:resolvedThreadModel||null,elapsedMs:Date.now()-executionStartedAt,toolCallCount,activeTurnCount:this.activeTurnCount,interrupted:Boolean(error?.interrupted||signal?.aborted),error:error?.message||String(error)},error?.interrupted?'warn':'error');throw error;
+      this.recordDiagnostic('turn-failed',{...routeMeta,threadId,turnId,resolvedModel:resolvedTurnModel||null,elapsedMs:Date.now()-executionStartedAt,toolCallCount,activeTurnCount:this.activeTurnCount,interrupted:Boolean(error?.interrupted||signal?.aborted),error:error?.message||String(error)},error?.interrupted?'warn':'error');throw error;
     }finally{signal?.removeEventListener?.('abort',interrupt);this.activeTurnCount=Math.max(0,this.activeTurnCount-1);this.recordDiagnostic('turn-released',{...routeMeta,threadId,turnId,activeTurnCount:this.activeTurnCount},'debug');}
   }
 
