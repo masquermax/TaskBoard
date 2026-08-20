@@ -24,6 +24,7 @@ function taskboardExtensionBody(displayName, executorName) {
     executor: {
       readiness() { return { ready: true, preparing: false, reason: null, message: null }; },
       async health() { return { executor: '${executorName}', available: true, ready: true }; },
+      async execute(request) { return { request, executor: '${executorName}' }; },
       cleanupTaskWorkspace() { return false; },
       close() {}
     },
@@ -59,6 +60,7 @@ test('external extension module registers through the v0.9.2 generic registry co
   assert.equal(created.apiVersion, EXTENSION_API_VERSION);
   assert.equal(created.displayName, 'External Test');
   assert.equal(created.orchestrationMode, 'taskboard');
+  assert.equal(typeof created.executor.execute,'function');
 });
 
 test('bootstrap accepts only an explicitly composed registry rather than loading extension specs itself', () => {
@@ -111,8 +113,8 @@ test('invalid or duplicate external extensions fail closed', () => {
     /EXTERNAL_EXTENSION_FACTORY_REQUIRED:broken/,
   );
 
-  const duplicate = tempModule(`module.exports = { id: 'same', createExtension() { return { apiVersion: 1 }; } };`);
-  const registry = new ExtensionRegistry().register('same', () => ({ apiVersion: 1 }));
+  const duplicate = tempModule(`module.exports = { id: 'same', createExtension() { return { apiVersion: 1, executor:{ async execute(){} } }; } };`);
+  const registry = new ExtensionRegistry().register('same', () => ({ apiVersion: 1, executor:{ async execute(){} } }));
   assert.throws(
     () => registerExternalExtensions(registry, { rootDir: duplicate.root, specs: [duplicate.file] }),
     /EXTENSION_DUPLICATE:same/,
