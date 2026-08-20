@@ -6,33 +6,10 @@ const task=text=>({id:'T',title:'T',instruction:text,requirementSources:[{id:'RE
 const ref=text=>({sourceId:'REQ',start:0,end:text.length});
 const candidate=(id,key,text)=>createAuthoritySemanticCandidate({id,key,value:true,requirementRefs:[ref(text)]});
 
-test('explicit human project mutation deterministically supports projectWrite',async()=>{
-  const text='请修改项目中的目标文件，但不得联网。';
-  const out=await new TaskContractFidelityVerifier({executor:{async runValidator(){throw new Error('MODEL_MUST_NOT_RUN');}}}).review({task:task(text),candidates:[candidate('write','projectWrite',text)]});
-  assert.equal(out.reviews[0].certification,'supported');
-});
+test('explicit human project mutation deterministically supports projectWrite',async()=>{const text='请修改项目中的目标文件，但不得联网。',out=await new TaskContractFidelityVerifier().review({task:task(text),candidates:[candidate('write','projectWrite',text)]});assert.equal(out.reviews[0].certification,'supported');});
 
-test('read-only or negated mutation never expands projectWrite authority',async()=>{
-  for(const text of ['只读检查项目，不得修改文件。','分析当前实现，不要修改代码。']){
-    const out=await new TaskContractFidelityVerifier().review({task:task(text),candidates:[candidate('write','projectWrite',text)]});
-    assert.equal(out.reviews[0].certification,'unresolved');
-  }
-});
+test('read-only or negated mutation never expands projectWrite authority',async()=>{for(const text of ['只读检查项目，不得修改文件。','分析当前实现，不要修改代码。']){const out=await new TaskContractFidelityVerifier().review({task:task(text),candidates:[candidate('write','projectWrite',text)]});assert.equal(out.reviews[0].certification,'unresolved');}});
 
-test('network authority requires an explicit human network request',async()=>{
-  const allowed='请联网搜索官方资料。';
-  const denied='检查本地项目，不得联网。';
-  const verifier=new TaskContractFidelityVerifier();
-  assert.equal((await verifier.review({task:task(allowed),candidates:[candidate('net','networkAccess',allowed)]})).reviews[0].certification,'supported');
-  assert.equal((await verifier.review({task:task(denied),candidates:[candidate('net','networkAccess',denied)]})).reviews[0].certification,'unresolved');
-});
+test('network authority requires an explicit human network request',async()=>{const allowed='请联网搜索官方资料。',denied='检查本地项目，不得联网。',verifier=new TaskContractFidelityVerifier();assert.equal((await verifier.review({task:task(allowed),candidates:[candidate('net','networkAccess',allowed)]})).reviews[0].certification,'supported');assert.equal((await verifier.review({task:task(denied),candidates:[candidate('net','networkAccess',denied)]})).reviews[0].certification,'unresolved');});
 
-test('invalid provenance and unknown authority key fail closed without a model',async()=>{
-  let modelCalls=0;
-  const verifier=new TaskContractFidelityVerifier({executor:{async runValidator(){modelCalls+=1;return{reviews:[]};}}});
-  const bad=createAuthoritySemanticCandidate({id:'bad',key:'projectWrite',value:true,requirementRefs:[{sourceId:'missing',start:0,end:1}]});
-  const unknown=createAuthoritySemanticCandidate({id:'unknown',key:'dbMutation',value:true,requirementRefs:[ref('修改数据库')]});
-  assert.equal((await verifier.review({task:task('修改数据库'),candidates:[bad]})).reviews[0].certification,'unresolved');
-  assert.equal((await verifier.review({task:task('修改数据库'),candidates:[unknown]})).reviews[0].certification,'unresolved');
-  assert.equal(modelCalls,0);
-});
+test('invalid provenance and unknown authority key fail closed inside the deterministic projection',async()=>{const verifier=new TaskContractFidelityVerifier(),bad=createAuthoritySemanticCandidate({id:'bad',key:'projectWrite',value:true,requirementRefs:[{sourceId:'missing',start:0,end:1}]}),unknown=createAuthoritySemanticCandidate({id:'unknown',key:'dbMutation',value:true,requirementRefs:[ref('修改数据库')]});assert.equal((await verifier.review({task:task('修改数据库'),candidates:[bad]})).reviews[0].certification,'unresolved');assert.equal((await verifier.review({task:task('修改数据库'),candidates:[unknown]})).reviews[0].certification,'unresolved');assert.equal(typeof verifier.runValidator,'undefined');});
