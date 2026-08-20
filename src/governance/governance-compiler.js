@@ -10,16 +10,14 @@ const ACCESS_RANK=Object.freeze({none:0,read:1,write:2});
 function access(value){const normalized=String(value||'none').trim().toLowerCase();return normalized in ACCESS_RANK?normalized:'none';}
 function meetAccess(...values){let result='write';for(const value of values){const next=access(value);if(ACCESS_RANK[next]<ACCESS_RANK[result])result=next;}return result;}
 function selectedProjectAccessCeiling(task,workUnit){
-  const refs=strings(workUnit?.inputRefs).filter(ref=>ref.startsWith('project:'));
-  const count=Array.isArray(task?.projectScopes)?task.projectScopes.length:0;
-  const hasSelected=refs.some(ref=>{const index=Number(ref.slice('project:'.length));return Number.isInteger(index)&&index>=0&&index<count;});
+  const refs=strings(workUnit?.inputRefs).filter(ref=>ref.startsWith('project:')),count=Array.isArray(task?.projectScopes)?task.projectScopes.length:0,hasSelected=refs.some(ref=>{const index=Number(ref.slice('project:'.length));return Number.isInteger(index)&&index>=0&&index<count;});
   if(!hasSelected)return 'none';
   return certifiedTrue(task,'projectWrite')?'write':'read';
 }
 
 export function compileAuthorizedGrant({role,task=null,workUnit=null}={}){
-  const capability=roleCapabilityContract(role);
-  if(!capability)return{role:String(role||'unknown'),projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'none',environmentAccess:'none'};
+  const normalized=String(role||'').trim().toLowerCase(),capability=roleCapabilityContract(normalized);
+  if(!capability){const error=new Error(`ROLE_NOT_EXECUTABLE:${normalized||'missing'}`);error.nonRetryable=true;throw error;}
   if(capability.role==='root')return{role:'root',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'none',environmentAccess:'none'};
   const inputRefs=strings(workUnit?.inputRefs);
   return{
@@ -35,29 +33,17 @@ export function compileAuthorizedGrant({role,task=null,workUnit=null}={}){
 function rolePrompt(role,skill=null){
   const base=role==='root'
     ? 'ROLE ROOT — sole Task-level judgment/planning owner; no Project or network execution.'
-    : role==='subagent'
-      ? 'ROLE SUBAGENT — execute exactly one bounded Work Unit; return execution output/source only; no Task-level judgment.'
-      : '';
+    : 'ROLE SUBAGENT — execute exactly one bounded Work Unit; return execution output/source only; no Task-level judgment.';
   return [base,skill?`SELECTED METHOD\n${skill.raw}`:''].filter(Boolean).join('\n\n');
 }
 
-/**
- * GovernanceCompiler projects only executable authority and selected method
- * context. Product docs/Constitution remain product truth and tests, not prompt
- * payload or a second Runtime data plane.
- */
+/** GovernanceCompiler only projects executable Root/Subagent authority and method context. */
 export class GovernanceCompiler{
   constructor({skillLibrary=null}={}){this.skills=normalizeSkillLibrary(skillLibrary);}
   compileForTask(task){return deepFreeze({authorizedGrant:compileAuthorizedGrant({role:'root',task}),skillCatalog:this.skills.list(),prompt:rolePrompt('root')});}
   compileForRole(task,role,{skillId=null,workUnit=null}={}){
-    const normalized=String(role||'').trim().toLowerCase(),skill=skillId?this.skills.get(skillId):null;
-    return deepFreeze({
-      role:normalized,
-      authorizedGrant:compileAuthorizedGrant({role:normalized,task,workUnit}),
-      selectedSkill:skill?{id:skill.id,purpose:[...skill.purpose]}:null,
-      skillCatalog:normalized==='root'?this.skills.list():[],
-      prompt:rolePrompt(normalized,skill),
-    });
+    const normalized=String(role||'').trim().toLowerCase(),grant=compileAuthorizedGrant({role:normalized,task,workUnit}),skill=skillId?this.skills.get(skillId):null;
+    return deepFreeze({role:normalized,authorizedGrant:grant,selectedSkill:skill?{id:skill.id,purpose:[...skill.purpose]}:null,skillCatalog:normalized==='root'?this.skills.list():[],prompt:rolePrompt(normalized,skill)});
   }
   hasSkill(id){return this.skills.has(id);}
   skillCatalog(){return this.skills.list();}
