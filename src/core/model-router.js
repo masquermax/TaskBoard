@@ -20,7 +20,13 @@ function chooseModelForTier(models,requiredTier,configured){const available=(Arr
 export class ModelRouter{
   constructor({capabilityProvider=null}={}){this.capabilityProvider=capabilityProvider;this.prepared=new Map();}
   release(taskId){if(taskId)this.prepared.delete(taskId);}
-  async prepare({task}={}){if(!this.capabilityProvider?.discover)return null;let snapshot=null;try{snapshot=await this.capabilityProvider.discover({context:taskContext(task)});}catch{snapshot=this.capabilityProvider.snapshot?.()||null;}if(task?.id)this.prepared.set(task.id,snapshot);return snapshot;}
+  async prepare({role,task}={}){
+    if(!this.capabilityProvider?.discover)return null;
+    // Only a selected Subagent Project scope may influence cwd-sensitive capability discovery.
+    // Root owns judgment, not Project execution, so Root discovery receives no local Project path.
+    const context=role==='subagent'?taskContext(task):null;
+    let snapshot=null;try{snapshot=await this.capabilityProvider.discover(context?{context}:{});}catch{snapshot=this.capabilityProvider.snapshot?.()||null;}if(task?.id)this.prepared.set(task.id,snapshot);return snapshot;
+  }
   route({role,task,work=null}){
     if(!['root','subagent'].includes(role)){const error=new Error(`MODEL_ROUTE_ROLE_INVALID:${String(role||'missing')}`);error.nonRetryable=true;throw error;}
     const snapshot=(task?.id&&this.prepared.get(task.id))||this.capabilityProvider?.snapshot?.()||null,configured=configuredModel(snapshot),requiredTier=requiredModelTier(role,task,work),policy={quality:requiredTier==='frontier'?'quality':'balanced',model:null,configuredDefaultModel:configured,reasoningEffort:null,capabilityLevel:snapshot?.discoveryLevel||'basic',routeReason:'executor-default'};
