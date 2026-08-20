@@ -143,7 +143,7 @@ User-visible Task states remain:
 
 Scheduler alone owns those transitions. RUNNING begins only after a real Executor operation reports admission.
 
-Work Unit timestamps belong to the Work Unit. Retry/failure of a child Work Unit must not redefine the Task's original lifecycle meaning. Runtime snapshots distinguish Work issuance, first execution start, last activity and completion.
+Timing follows the smallest owning unit. Task lifecycle time is not redefined by a child retry. A Work Unit keeps its issuance identity, while `startedAt / completedAt` describe the current or successful execution attempt; entering retry clears the stale failed-attempt timing before a new attempt starts. Runtime snapshots distinguish Work issuance, current-attempt execution start, last activity and completion.
 
 ## 9. Recovery is safety, not another thinker
 
