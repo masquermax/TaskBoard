@@ -6,7 +6,7 @@ const text=value=>String(value??'').trim();
 const list=value=>Array.isArray(value)?value:[];
 const strings=values=>[...new Set(list(values).map(text).filter(Boolean))];
 const supported=value=>value?.certification==='supported';
-const resultText=proposal=>text(proposal?.finalResult)||text(proposal?.summary)||text(proposal?.stageResult);
+const resultText=proposal=>text(proposal?.finalResult)||text(proposal?.summary);
 
 function obligations(task){return list(task?.taskContract?.obligations).filter(item=>text(item?.id));}
 function confirmedClaims(certifiedContext){return list(certifiedContext?.claims).filter(claim=>claim?.level===ClaimLevel.CONFIRMED&&text(claim?.id)&&text(claim?.statement));}
