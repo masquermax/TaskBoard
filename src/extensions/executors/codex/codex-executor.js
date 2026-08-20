@@ -12,14 +12,14 @@ const rootEvidenceSchema={...evidenceSchema,properties:{...evidenceSchema.proper
 const rootSchema={
   type:'object',
   properties:{
-    kind:{type:'string',enum:['complete','human_gateway','delegate']},summary:{type:'string'},stageResult:{type:['string','null']},finalResult:{type:['string','null']},
+    kind:{type:'string',enum:['complete','human_gateway','delegate']},summary:{type:'string'},finalResult:{type:['string','null']},
     ...analysisFieldsSchema,
     evidence:{type:'array',items:rootEvidenceSchema,maxItems:50},
     gateway:{anyOf:[{type:'null'},{type:'object',properties:{gapId:{type:'string'},question:{type:'string'},context:{type:'string'},options:{type:'array',items:{type:'string'},maxItems:6}},required:['gapId','question','context','options'],additionalProperties:false}]},
     gapResolutions:{type:'array',items:gapResolutionSchema,maxItems:30},
     delegations:{type:'array',items:{type:'object',properties:{id:{type:'string'},title:{type:'string'},goal:{type:'string'},expectedOutput:{type:'string'},stopCondition:{type:'string'},projectAccess:{type:'string',enum:['none','read','write']},networkAccess:{type:'boolean'},skillId:{type:['string','null']},dependsOn:{type:'array',items:{type:'string'}},inputRefs:{type:'array',items:{type:'string'},maxItems:40}},required:['id','title','goal','expectedOutput','stopCondition','projectAccess','networkAccess','skillId','dependsOn','inputRefs'],additionalProperties:false}},
   },
-  required:['kind','summary','stageResult','finalResult','resultMode','evidence','claims','gaps','recommendations','steps','gateway','gapResolutions','delegations'],additionalProperties:false,
+  required:['kind','summary','finalResult','resultMode','evidence','claims','gaps','recommendations','steps','gateway','gapResolutions','delegations'],additionalProperties:false,
 };
 const subagentSchema={type:'object',properties:{delegationId:{type:'string'},result:{type:'string'},evidence:{type:'array',items:evidenceSchema,maxItems:40},blocker:{type:['string','null']}},required:['delegationId','result','evidence','blocker'],additionalProperties:false};
 
@@ -99,7 +99,6 @@ Available Skills:\n${JSON.stringify(skillCatalog,null,2)}
 Task Input Catalog:\n${JSON.stringify(taskInputCatalog(task),null,2)}
 Referenced completed Results:\n${JSON.stringify(refs,null,2)}
 Resolved Human answers for this trigger:\n${JSON.stringify(resolvedHuman,null,2)}
-Last valuable stage result:\n${task.last_stage_result||'(none)'}
 Fresh Work Unit result delta:\n${JSON.stringify(subagentResults,null,2)}
 Current semantic grid (Claims / Gaps / unresolved obligations):\n${JSON.stringify(certifiedContext||null,null,2)}
 TaskBoard Scratch:\n${scratchPath||'(none)'}
