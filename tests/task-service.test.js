@@ -9,6 +9,7 @@ import { TaskStatus } from '../src/core/types.js';
 import { Scheduler } from '../src/core/scheduler.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
 import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
+import { asRuntimeExecutor } from './helpers/runtime-executor.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { ModelRouter } from '../src/core/model-router.js';
 import { MockExecutor } from '../src/extensions/executors/mock/mock-executor.js';
@@ -18,7 +19,7 @@ function setup() {
   const db = new JsonTaskDatabase(join(dir, 'db.json'));
   const repo = new JsonTaskRepository(db);
   const service = new TaskService(repo);
-  const executor = new MockExecutor(); const router = new ModelRouter();
+  const extensionExecutor = new MockExecutor(); const executor=asRuntimeExecutor(extensionExecutor); const router = new ModelRouter();
   const subagentRuntime = new SubagentRuntime({ executor, modelRouter:router });
   const rootRuntime = new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(), executor, modelRouter:router, subagentRuntime });
   const scheduler = new Scheduler({ repository:repo, taskService:service, rootRuntime, intervalMs:999999 });
