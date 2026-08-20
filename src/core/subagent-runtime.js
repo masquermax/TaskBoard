@@ -49,13 +49,12 @@ export class SubagentRuntime {
   constructor({ executor, modelRouter, sourceTraceVerifier = new SourceTraceVerifier() }) {
     this.executor = executor;
     this.modelRouter = modelRouter;
+    // SourceTrace belongs to Validator. This verifier is retained only for the
+    // narrow pre-Root safety proof that can close an uncertain prior actuation.
     this.sourceTraceVerifier = sourceTraceVerifier;
   }
 
   async run(task, delegation, { onProgress = null, onExecutionStarted = null, signal = null, policyContext = null } = {}) {
-    // Subagent executes one Root-issued Work Unit. Dependency interpretation and
-    // any next Task decision belong to Root, so a blocked prerequisite ends this
-    // Work Unit without another model/tool turn.
     const dependencyBlocker=blockedDependency(delegation);
     if(dependencyBlocker)return unmetDependencyResult(delegation,dependencyBlocker);
 
@@ -67,7 +66,6 @@ export class SubagentRuntime {
       raw = await this.executor.runSubagent({
         task:scopedTask,
         delegation,
-        validationFeedback:null,
         modelPolicy:this.modelRouter.route({ role:'subagent', task:scopedTask, work:delegation }),
         policyContext,
         onProgress,
@@ -76,40 +74,34 @@ export class SubagentRuntime {
       });
     } catch (error) {
       try{failWorkUnitObservability({...diagnosticIdentity,status:error?.executionBoundary?'execution-boundary':(error?.interrupted?'interrupted':'failed'),blocker:error?.message||String(error)});}catch{/* diagnostics only */}
-      // The technical lease is only an execution fact. A read-only Work Unit that
-      // reaches it returns that fact to Root; effect-capable Work keeps the stricter
-      // recovery/suspension path because Reality may already have changed.
       if(error?.executionBoundary===true && !workMayMutate(delegation)) return boundedNonConvergence(delegation);
       throw error;
     }
 
-    let evidence;
-    try{
-      const rawEvidence=Array.isArray(raw?.evidence)?raw.evidence:[];
-      const traced=this.sourceTraceVerifier.enforce({task:scopedTask,evidence:rawEvidence,humanGatewayHistory:[]});
-      evidence=Array.isArray(traced.evidence)?traced.evidence:[];
-    }catch(error){
-      try{failWorkUnitObservability({...diagnosticIdentity,status:'evidence-verification-failed',blocker:error?.message||String(error)});}catch{/* diagnostics only */}
-      throw error;
+    // Ordinary Work evidence is execution output, not certified Task truth.
+    // Root decides what it means; Validator checks only the evidence Root cites.
+    const evidence=Array.isArray(raw?.evidence)?raw.evidence:[];
+
+    // Effect recovery is the one place where provenance must be checked before
+    // Root: fresh mutation cannot be re-enabled from an unverified closure claim.
+    let closureEvidence=evidence;
+    if(raw?.effectActuationClosure){
+      try{
+        const traced=this.sourceTraceVerifier.enforce({task:scopedTask,evidence,humanGatewayHistory:[]});
+        closureEvidence=Array.isArray(traced.evidence)?traced.evidence:[];
+      }catch(error){
+        try{failWorkUnitObservability({...diagnosticIdentity,status:'recovery-evidence-verification-failed',blocker:error?.message||String(error)});}catch{/* diagnostics only */}
+        throw error;
+      }
     }
 
-    const effectActuationClosure=normalizeEffectActuationClosure(raw?.effectActuationClosure,task,delegation,evidence);
+    const effectActuationClosure=normalizeEffectActuationClosure(raw?.effectActuationClosure,task,delegation,closureEvidence);
     const blocker=text(raw?.blocker)||null;
 
-    // Observability records execution facts only. It cannot create a Finding,
-    // Task Claim, Gap, recommendation or next action.
     try {
-      finalizeWorkUnitObservability({
-        ...diagnosticIdentity,
-        evidence,
-        status:'completed',
-        blocker,
-      });
+      finalizeWorkUnitObservability({...diagnosticIdentity,evidence,status:'completed',blocker});
     } catch { /* diagnostics must never affect Work Unit semantics */ }
 
-    // Runtime allow-list: Subagent is hands, not the Task brain. Return only the
-    // requested execution output, traceable source material and an execution
-    // blocker when the Work Unit could not be completed. Root owns all judgment.
     return {
       delegationId:text(delegation?.id),
       result:text(raw?.result),
