@@ -34,6 +34,8 @@ export class JsonTaskDatabase {
         if (task.analysis_state === undefined) task.analysis_state = null;
         if (!Array.isArray(task.work_receipts)) task.work_receipts = [];
         if (task.completion_reason === undefined) task.completion_reason = null;
+        // v0.9.2 no longer has a parallel stage-result cognition channel.
+        delete task.last_stage_result;
         const contractState = bootstrapTaskContractState(task);
         task.requirement_sources = contractState.requirement_sources;
         task.task_contract = contractState.task_contract;
@@ -98,7 +100,7 @@ export class JsonTaskRepository {
         if(!source||source.status!==TaskStatus.COMPLETED||source.deleted_at)throw new Error('REFERENCE_MUST_BE_COMPLETED');
         return source;
       });
-      this.state.tasks.push({ id,title:title.trim(),instruction:normalizedInstruction,status:TaskStatus.READY,ready_reason:ReadyReason.NEW,status_entered_at:now,created_at:now,completed_at:null,completion_reason:null,last_stage_result:null,final_result:null,executor_key:executorKey,locked:false,deleted_at:null,cancel_requested_at:null,execution_state:null,analysis_state:null,work_receipts:[],requirement_sources:contractState.requirement_sources,task_contract:contractState.task_contract });
+      this.state.tasks.push({ id,title:title.trim(),instruction:normalizedInstruction,status:TaskStatus.READY,ready_reason:ReadyReason.NEW,status_entered_at:now,created_at:now,completed_at:null,completion_reason:null,final_result:null,executor_key:executorKey,locked:false,deleted_at:null,cancel_requested_at:null,execution_state:null,analysis_state:null,work_receipts:[],requirement_sources:contractState.requirement_sources,task_contract:contractState.task_contract });
       this.addPhase(id,TaskStatus.READY,now);
       if(project)this.addScope({taskId:id,source:'registry',projectId:project.id,label:project.name,path:project.path,createdAt:now});
       if(temporaryProjectPath?.trim())this.addScope({taskId:id,source:'temporary',projectId:null,label:'临时项目范围',path:temporaryProjectPath.trim(),createdAt:now});
@@ -139,13 +141,12 @@ export class JsonTaskRepository {
   }
   getAttachment(taskId,attachmentId){const a=this.state.attachments.find(x=>x.task_id===taskId&&x.id===attachmentId);return a?clone({id:a.id,taskId:a.task_id,name:a.name,mimeType:a.mime_type,size:a.size_bytes,path:a.path,createdAt:a.created_at}):null;}
 
-  transitionTask(id,nextStatus,{finalResult=null,lastStageResult=undefined,readyReason=undefined,completionReason=undefined,clearCancel=false,executionState=undefined}={}){
+  transitionTask(id,nextStatus,{finalResult=null,readyReason=undefined,completionReason=undefined,clearCancel=false,executionState=undefined}={}){
     const task=this.state.tasks.find(t=>t.id===id);if(!task)throw new Error('TASK_NOT_FOUND');if(nextStatus===TaskStatus.COMPLETED&&completionReason==null)throw new Error('TASK_COMPLETION_REASON_REQUIRED');const now=this.now();
-    this.store.transaction(()=>{this.closeOpenPhase(id,now);this.addPhase(id,nextStatus,now);task.status=nextStatus;task.status_entered_at=now;if(readyReason!==undefined)task.ready_reason=readyReason;task.completed_at=nextStatus===TaskStatus.COMPLETED?now:null;task.completion_reason=nextStatus===TaskStatus.COMPLETED?completionReason:null;if(finalResult!=null)task.final_result=finalResult;if(lastStageResult!==undefined&&lastStageResult!==null)task.last_stage_result=lastStageResult;if(clearCancel)task.cancel_requested_at=null;if(executionState!==undefined)task.execution_state=executionState;});
+    this.store.transaction(()=>{this.closeOpenPhase(id,now);this.addPhase(id,nextStatus,now);task.status=nextStatus;task.status_entered_at=now;if(readyReason!==undefined)task.ready_reason=readyReason;task.completed_at=nextStatus===TaskStatus.COMPLETED?now:null;task.completion_reason=nextStatus===TaskStatus.COMPLETED?completionReason:null;if(finalResult!=null)task.final_result=finalResult;if(clearCancel)task.cancel_requested_at=null;if(executionState!==undefined)task.execution_state=executionState;});
     return this.getTask(id);
   }
   touchTask(id,{readyReason=undefined,executionState=undefined}={}){const t=this.state.tasks.find(x=>x.id===id);if(!t)throw new Error('TASK_NOT_FOUND');this.store.transaction(()=>{if(readyReason!==undefined)t.ready_reason=readyReason;if(executionState!==undefined)t.execution_state=executionState;});return this.getTask(id);}
-  updateStageResult(id,value){const t=this.state.tasks.find(x=>x.id===id);if(!t)throw new Error('TASK_NOT_FOUND');this.store.transaction(()=>{t.last_stage_result=value||null;});return this.getTask(id);}
   setExecutionState(id,state){const t=this.state.tasks.find(x=>x.id===id);if(!t)throw new Error('TASK_NOT_FOUND');this.store.transaction(()=>{t.execution_state=state;});return this.getTask(id);}
   commitWorkReceipt(taskId,receipt){
     const t=this.state.tasks.find(x=>x.id===taskId);if(!t)throw new Error('TASK_NOT_FOUND');
@@ -168,7 +169,7 @@ export class JsonTaskRepository {
     this.store.transaction(()=>{for(const receipt of t.work_receipts||[])if(consumed.has(String(receipt?.id||''))&&!receipt.consumed_at)receipt.consumed_at=this.now();});
     return this.getTask(taskId);
   }
-  commitCertifiedTurn(taskId,{analysisState,historyCommit=null,workReceiptIds=[]}){const t=this.state.tasks.find(x=>x.id===taskId);if(!t)throw new Error('TASK_NOT_FOUND');this.store.transaction(()=>{t.analysis_state=analysisState==null?null:clone(analysisState);const consumed=new Set((Array.isArray(workReceiptIds)?workReceiptIds:[]).map(value=>String(value||'').trim()).filter(Boolean));if(consumed.size){for(const receipt of t.work_receipts||[])if(consumed.has(String(receipt?.id||''))&&!receipt.consumed_at)receipt.consumed_at=this.now();}if(historyCommit?.title&&historyCommit?.detail){this.state.progressHistory.push({id:++this.state.counters.progress,task_id:taskId,title:historyCommit.title,detail:historyCommit.detail,completed_at:historyCommit.completedAt||this.now()});t.last_stage_result=historyCommit.detail||null;}});return this.getTask(taskId);}
+  commitCertifiedTurn(taskId,{analysisState,workReceiptIds=[]}){const t=this.state.tasks.find(x=>x.id===taskId);if(!t)throw new Error('TASK_NOT_FOUND');this.store.transaction(()=>{t.analysis_state=analysisState==null?null:clone(analysisState);const consumed=new Set((Array.isArray(workReceiptIds)?workReceiptIds:[]).map(value=>String(value||'').trim()).filter(Boolean));if(consumed.size){for(const receipt of t.work_receipts||[])if(consumed.has(String(receipt?.id||''))&&!receipt.consumed_at)receipt.consumed_at=this.now();}});return this.getTask(taskId);}
   commitTaskContractAuthority(taskId,authority={}){const t=this.state.tasks.find(x=>x.id===taskId);if(!t)throw new Error('TASK_NOT_FOUND');if(!t.task_contract||typeof t.task_contract!=='object')throw new Error('TASK_CONTRACT_REQUIRED');const incoming=authority&&typeof authority==='object'?clone(authority):{};this.store.transaction(()=>{const current=t.task_contract.authority&&typeof t.task_contract.authority==='object'?t.task_contract.authority:{};for(const [key,value] of Object.entries(incoming)){if(Object.prototype.hasOwnProperty.call(current,key)&&JSON.stringify(current[key])!==JSON.stringify(value))throw new Error(`TASK_CONTRACT_AUTHORITY_CONFLICT:${key}`);if(!Object.prototype.hasOwnProperty.call(current,key))current[key]=clone(value);}t.task_contract.authority=current;});return this.getTask(taskId);}
   setCancelRequested(id,value=true){const t=this.state.tasks.find(x=>x.id===id);if(!t)throw new Error('TASK_NOT_FOUND');this.store.transaction(()=>{t.cancel_requested_at=value?this.now():null;});return this.getTask(id);}
   setDeleted(id,value=true){const t=this.state.tasks.find(x=>x.id===id);if(!t)throw new Error('TASK_NOT_FOUND');this.store.transaction(()=>{t.deleted_at=value?this.now():null;});return this.getTask(id);}
@@ -179,7 +180,7 @@ export class JsonTaskRepository {
   cancelPendingGateway(taskId){this.store.transaction(()=>{for(const g of this.state.gateways)if(g.task_id===taskId&&g.status==='PENDING'){g.status='CANCELLED';g.resolved_at=this.now();}});}
   listGatewayHistory(taskId){return clone(this.state.gateways.filter(g=>g.task_id===taskId).sort((a,b)=>a.created_at.localeCompare(b.created_at)));}
 
-  commitProgressHistory(taskId,{title,detail='',completedAt=null}){const t=this.state.tasks.find(x=>x.id===taskId);if(!t)throw new Error('TASK_NOT_FOUND');this.store.transaction(()=>{this.state.progressHistory.push({id:++this.state.counters.progress,task_id:taskId,title,detail,completed_at:completedAt||this.now()});t.last_stage_result=detail||null;});return this.getTask(taskId);}
+  // Legacy progress rows remain readable for old data/UI only; Runtime has no writer.
   getProgressHistory(taskId){return clone(this.state.progressHistory.filter(p=>p.task_id===taskId).sort((a,b)=>a.id-b.id));}
   getPhaseHistory(taskId){return clone(this.state.phaseHistory.filter(p=>p.task_id===taskId).sort((a,b)=>a.id-b.id).map(({phase,entered_at,exited_at})=>({phase,entered_at,exited_at})))}
   listStaleRunningTasks(){return this.state.tasks.filter(t=>t.status===TaskStatus.RUNNING).map(t=>this.hydrateTask(t));}
