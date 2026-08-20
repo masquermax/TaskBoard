@@ -171,7 +171,8 @@ export class Scheduler {
   closeEffectActuation(taskId,closure,observedAt=null){
     if(this.shuttingDown){const error=new Error('EFFECT_RECOVERY_PERSISTENCE_UNAVAILABLE_DURING_SHUTDOWN');error.nonRetryable=true;throw error;}
     const current=this.repository.getTask(taskId);if(!current)throw new Error('TASK_NOT_FOUND');
-    this.repository.setExecutionState(taskId,markEffectActuationClosed(current.executionState,{...closure,observedAt:observedAt||closure?.observedAt||null}));
+    const updated=this.repository.setExecutionState(taskId,markEffectActuationClosed(current.executionState,{...closure,observedAt:observedAt||closure?.observedAt||null}));
+    return updated.executionState;
   }
 
   async runClaimed(taskId) {
@@ -210,10 +211,10 @@ export class Scheduler {
           this.persistEffectAttempt(taskId,attempt);
         },
         onEffectAttemptCleared:attemptId=>this.clearEffectAttempt(taskId,attemptId),
+        onEffectActuationClosure:closure=>this.closeEffectActuation(taskId,closure),
         onWorkReceipt:receipt=>{
           if(this.shuttingDown){const error=new Error('WORK_RECEIPT_PERSISTENCE_UNAVAILABLE_DURING_SHUTDOWN');error.nonRetryable=true;throw error;}
           this.repository.commitWorkReceipt(taskId,receipt);
-          if(receipt?.result?.effectActuationClosure)this.closeEffectActuation(taskId,receipt.result.effectActuationClosure,receipt.completed_at||null);
           if(receipt?.effectAttemptId)this.clearEffectAttempt(taskId,receipt.effectAttemptId);
         },
         onWorkReceiptsConsumed:ids=>{if(!this.shuttingDown)this.repository.consumeWorkReceipts(taskId,ids);},
