@@ -1,64 +1,106 @@
 # Current State
 
-Status: RUNTIME_HARDENING_REQUIRED
+Status: RUNTIME_HARDENING
 Release lane: `v0.9.2`
 
-`v0.9.2` remains the current integration lane. The product architecture and governance baseline are substantially formed, but real Runtime acceptance has exposed convergence, retry-continuation, execution-budget and observability defects that must be fixed before treating this lane as release-ready.
+This file is a continuation checkpoint, not a second architecture definition. `docs/ARCHITECTURE.md`, `docs/SPECIFICATION.md`, the current code and newly verified Runtime evidence outrank stale wording here.
 
-## Current truths
+## Current Runtime truth
 
-- Runtime vocabulary is **Project / Root / Subagent / Validator / Executor**.
-- Scheduler uniquely owns Task lifecycle/admission. Root owns Task reasoning/planning. Subagent executes one bounded Work Unit. Validator certifies Root Candidate Deltas and owns History semantic-value decisions. Task Core owns durable facts/atomic persistence. Executor owns operations, not business truth.
-- Project-specific authority is derived only by `GovernanceCompiler` into `AuthorizedGrant` from the machine Role capability, certified `TaskContract` authority, selected Project scope and Work Unit request.
-- Goal Satisfaction is derived only by `CompletionEvaluator`; execution occurrence, receipts and projections cannot independently create Completion truth.
-- Blocking Gaps constrain only their real dependency radius and do not globally revoke independent governed evidence acquisition.
-- Analysis cognition advances through certified `Evidence + Claim + Gap`; Recommendations/Steps are recomputed projections.
-- Root/Subagent/Validator contexts are allow-list constructed. Root does not receive Project Scope filesystem paths or network capability merely because those inputs exist.
-- Persistence has one current implementation: JSON.
-- Concrete Skill content remains outside core; core exposes only the selected-method library boundary.
-- Current Progress is runtime projection, not durable History.
-- Model routing consumes provider-described capability when available and otherwise falls back to the configured/default Executor model.
-- Codex connection configuration is extension-local. Account mode and Custom Provider mode are distinct transports/configuration paths; Task Core does not own provider/authentication semantics.
+The active owner chain is singular:
 
-## Real Runtime acceptance checkpoint
+```text
+Scheduler
+  ↓ lifecycle / admission
+Root
+  ↓ judgment / minimum Work Unit batch
+Subagent(s)
+  ↓ execution result + source-near Evidence + blocker
+Root
+  ↓ Task meaning / next action / explicit obligation relation
+Validator
+  ↓ deterministic provenance ledger only
+Certified State / Task Core
+  ↓
+next Work / Human Gateway / completion
+```
 
-Latest user-side acceptance evidence was produced on Windows with Node 24, TaskBoard `0.9.2`, Codex account mode resolving to `account/openai`, and `codex-cli 0.147.0`.
+- **Root is the only Task-level reasoning owner.** It decides decomposition, meaning, sufficiency, Claims/Gaps, next work, Human Gateway and completion intent.
+- **Subagent executes one bounded Work Unit only.** It does not create Task judgment, confidence, recommendations, next work or completion.
+- **Validator is a deterministic accountant.** It checks source/locator/reference/trust relations and has no model lifecycle, semantic proof turn, repair loop, re-investigation authority or History-value authority.
+- **Scheduler alone owns Task lifecycle/admission/concurrency.**
+- **Task Core owns durable facts and atomic persistence.**
+- **Human Gateway transports a human-owned answer only.** The answer returns to Root as a fresh trigger; Runtime does not interpret it automatically.
+- **Executor realizes operations inside `AuthorizedGrant`; it owns no Task semantics.**
 
-The connection path itself was healthy enough to start and complete Root/Subagent/Validator turns. The dominant remaining defects were Runtime behavior rather than provider connectivity:
+## Current convergence model
 
-1. **Convergence defect** — after three useful read-only Subagent Work Units had completed, Root later produced `ROOT_EMPTY_DELEGATION`, suspending the whole Task instead of converting the already-known state into the smallest legal next action.
-2. **Retry-continuation defect** — root-level manual retry discards the in-memory Root session and reconstructs it from durable facts. Certified State and WorkReceipts survive, but control/convergence state such as `rootTurnCount`, pending validation and repair counters does not; the UI therefore restarts from “Root 初始判断” and can repeat already-earned control work.
-3. **Completion convergence defect** — the same audit later suspended with `ROOT_COMPLETION_NON_CONVERGENCE: governed obligations remain unsatisfied: OBL-T-0009-GOAL` after another Root/Validator repair cycle.
-4. **Execution-budget defect** — the three parallel audit Subagents consumed roughly 80–133 tool calls each and about 13–14 minutes wall-clock per Work Unit despite a convergence steer at about 10 minutes.
-5. **Context-growth defect** — Root input grew from roughly 7.5 KB to 22 KB, then 58 KB and about 80 KB across later turns, showing insufficient delta/summary compaction during continuation.
-6. **Observability defect** — stock UI prominently renders `status_entered_at`, so a retry changes the visible top time to the new RUNNING phase time rather than preserving an obvious Task-total start/elapsed view.
-7. **Windows sandbox test limitation observed during the audit** — several targeted tests did not reach assertions because `mkdtemp` under the current sandbox returned `EPERM`. This is an environment-execution fact, not proof that the tested semantics failed or passed.
+Root advances by incremental semantic closure rather than replaying the Task history.
 
-## Runtime hardening target
+```text
+current Claims / Gaps / unresolved obligations
++ fresh Work/Human delta
+        ↓
+Root pushes relevant old×old / new×old / new×new relations to a fixed point
+        ↓
+goal satisfied → complete
+remaining discriminator → minimum Work Unit batch
+human-owned blocker → Human Gateway
+```
 
-Do not add unrelated product surface while this checkpoint is active. The next work should improve Runtime without weakening the existing governance invariants.
+A Stage is a strict Root↔Subagent batch boundary. Independent siblings may run concurrently, dependencies are local to the current batch, and partial sibling completion does not wake Root. Root receives the completed batch once and continues from the resulting delta.
 
-Primary acceptance target for the same class of read-only audit task:
+Root context is intentionally compact: old Work receipts, raw historical Evidence and full analysis history are not replayed into each turn. Current Certified State is context, not a trigger.
 
-- one continuous run without manual retry;
-- no empty delegation or Root/Validator control loop;
-- completed Work/Evidence is not re-investigated after retry/resume;
-- bounded tool/model/context budget per Work Unit;
-- explicit Task total elapsed time plus per-Root/Subagent/Validator/Wait/Retry timing;
-- preserve Authority, SourceTrace, Evidence certification, CompletionEvaluator, fail-closed behavior and Extension boundaries;
-- target approximately 10–20 minutes wall-clock for this audit class unless the actual evidence dependency graph justifies more.
+## Removed parallel chains
 
-## Branch / continuation rule
+The current Runtime no longer contains or relies on:
 
-Continue Runtime hardening on the existing `v0.9.2` lane. Do not create another branch merely for the Runtime work unless a genuinely independent experiment requires isolation.
+- `stageResult` / `last_stage_result` cognition;
+- semantic History writer/value owner;
+- Validator model / semantic proof / semantic repair;
+- Validator resource-resume lifecycle;
+- planning-repair / completion-repair / authority-handoff model loops;
+- Runtime telemetry wrapper / convergence-steer / saturation heuristics;
+- Root Project filesystem/network execution;
+- automatic Human-answer → Evidence/Gap-resolution interpretation.
 
-`main` remains the stable baseline until `v0.9.2` reaches real Runtime acceptance. Old experimental branch refs are historical evidence only and are not active continuation lanes.
+Legacy progress rows may remain readable for old data/UI compatibility, but current Runtime does not write or replay them as cognition.
 
-## Verification boundary
+## Necessary non-thinking enforcement
 
-Historical generic CI GREEN remains useful implementation evidence, but it does not override the real Runtime checkpoint above. A future release-ready claim requires both:
+These remain because the owner chain cannot safely realize the requirement without them:
 
-1. current exact-head Test/CI verification; and
-2. real Runtime acceptance on representative tasks proving convergence, continuation, budget and timing behavior.
+- Work Unit structural validation and semantic-duplicate rejection;
+- deterministic Task authority fidelity and `AuthorizedGrant` narrowing;
+- source/provenance ledger checks;
+- monotonic Certified State merge;
+- deterministic CompletionEvaluator over Root-owned `claim.obligationRefs[]`;
+- retry/capacity lifecycle;
+- WorkReceipt persistence for restart/resume;
+- fail-closed effect recovery when an already-started mutation has unknown Reality outcome;
+- minimal operational diagnostics/timing facts.
 
-Real Git / Runtime / Reality evidence outranks this document if they ever diverge.
+None of these mechanisms may become a second Task reasoning owner.
+
+## Remaining acceptance work
+
+The architecture slimming is not itself Runtime acceptance. Representative real runs still need to prove that the current skeleton actually converges efficiently:
+
+- Root wakes only on legal Task/Human/technical/full-stage triggers;
+- one completed sibling batch causes one Root synthesis turn;
+- Subagent stops at the Work Unit boundary without Task-level reasoning;
+- Validator performs no model turn and checks only the current source ledger;
+- Root input does not regrow through historical replay;
+- retry changes the smallest owned Work Unit/attempt state without redefining Task-level timing;
+- effect recovery never replays an uncertain mutation without independent Reality closure;
+- final completion follows explicit certified obligation mappings;
+- wall time, Root/Subagent turn counts, Work Unit duration, critical path and final tail can be measured from operational diagnostics.
+
+Exact token/billing usage is not an acceptance dependency when the provider does not expose it.
+
+## Continuation rule
+
+Continue on `v0.9.2` and inspect the current code/evidence before acting. Do not restore a removed mechanism merely because an old test, document or historical trace names it. A residual reference must either be compatibility-only or be deleted/rewritten to the current owner skeleton.
+
+Before a release-ready claim, require current exact-head Test/CI proof plus representative real Runtime acceptance. Real Git / Runtime / Reality evidence always outranks this checkpoint.
