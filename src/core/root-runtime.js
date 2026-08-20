@@ -1,7 +1,7 @@
 import { WorkUnitStatus } from './types.js';
 import { MAX_TOTAL_ATTEMPTS, capacityRetryDelayMs, capacityWaitingInstruction, classifyRetry, isCapacityUnavailable, isInterrupted, retryDelayMs, suspendedInstruction, waitingRetryInstruction } from './retry-policy.js';
 import { normalizeAnalysisFields } from '../governance/analysis-contract.js';
-import { canonicalAnalysisSummary, hasGovernedCandidateDelta, renderAnalysisResult } from '../governance/analysis-validator.js';
+import { canonicalAnalysisSummary, hasGovernedCandidateDelta, renderAnalysisResult } from '../governance/analysis-presentation.js';
 import { applyCertifiedDelta, decisionFromCertifiedState, normalizeCertifiedState } from '../governance/certified-state.js';
 import { taskInputRefs } from './task-input-scope.js';
 import { applyAuthorityFidelity, authoritySemanticCandidatesForWork } from '../governance/task-contract-fidelity.js';
@@ -132,7 +132,7 @@ export class RootRuntime{
   emit(session,callbacks){session.updatedAt=nowIso();callbacks.onProgress?.(this.makeSnapshot(session));}
   requestQuiesce(taskId){const session=this.sessions.get(taskId);if(!session)return false;session.cancelRequested=true;if(session.rootController)session.rootController.abort();for(const controller of session.runningControllers.values())controller.abort();return true;}
   interruptForShutdown(taskId){const session=this.sessions.get(taskId);if(!session)return false;if(session.rootController)session.rootController.abort();for(const controller of session.runningControllers.values())controller.abort();return true;}
-  retryWorkUnit(taskId,workUnitId){const session=this.sessions.get(taskId),unit=session?.currentStage?.workUnits.find(x=>x.id===workUnitId);if(!unit||unit.status!==WorkUnitStatus.SUSPENDED||unit.effectRecoveryRequired===true)return false;unit.failureCount=0;unit.nextRetryAt=Date.now();unit.status=WorkUnitStatus.WAITING_RESOURCE;unit.detail='已收到重新尝试请求，将从第 1/5 次开始重新执行。';unit.updatedAt=nowIso();session.updatedAt=unit.updatedAt;return true;}
+  retryWorkUnit(taskId,workUnitId){const session=this.sessions.get(taskId),unit=session?.currentStage?.workUnits.find(x=>x.id===workUnitId);if(!unit||unit.status!==WorkUnitStatus.SUSPENDED||unit.effectRecoveryRequired===true)return false;unit.failureCount=0;unit.nextRetryAt=Date.now();unit.status=WorkUnitStatus.WAITING_RESOURCE;unit.owner=null;unit.startedAt=null;unit.completedAt=null;unit.result=null;unit.detail='已收到重新尝试请求，将从第 1/5 次开始重新执行。';unit.updatedAt=nowIso();session.updatedAt=unit.updatedAt;return true;}
   discardSession(taskId){this.sessions.delete(taskId);this.modelRouter.release?.(taskId);}
   cleanupTaskWorkspace(taskId){return this.executor.cleanupTaskWorkspace?.(taskId)??false;}
 
@@ -155,7 +155,7 @@ export class RootRuntime{
       else if(!claim)issues.push(`effectClosure ${effectAttemptId||'?'} 引用了不存在的 Claim：${claimId}。`);
       else if(claim?.level!=='confirmed')issues.push(`effectClosure ${effectAttemptId||'?'} 必须引用 CONFIRMED Claim：${claimId}。`);
       else if(!list(claim?.evidenceIds).map(text).filter(Boolean).length)issues.push(`effectClosure ${effectAttemptId||'?'} 的 Claim 没有来源凭证：${claimId}。`);
-      if(effectAttemptId&&claimId&&claim?.level==='confirmed'&&list(claim?.evidenceIds).length)prepared.push({effectAttemptId,claimId,evidenceIds:[...new Set(list(claim.evidenceIds).map(text).filter(Boolean))]});
+      if(effectAttemptId&&claimId&&claim?.level==='confirmed'&&list(claim.evidenceIds).length)prepared.push({effectAttemptId,claimId,evidenceIds:[...new Set(list(claim.evidenceIds).map(text).filter(Boolean))]});
     }
     if(issues.length)throw invalidEffectClosure(issues);
     if(typeof callbacks.onEffectActuationClosure!=='function')throw invalidEffectClosure(['Runtime 没有可持久化 effect closure 的 Scheduler 边界。']);
@@ -243,7 +243,7 @@ export class RootRuntime{
     if(effectCapable){try{callbacks.onEffectAttempt?.({id:effectAttemptId,workUnitId:unit.id,signature:workSemanticSignature(workUnit),projectAccess:workUnit.projectAccess,networkAccess:workUnit.networkAccess,inputRefs:[...workUnit.inputRefs],admittedAt:nowIso(),reason:'effect-capable-work-admitted',resolved:false});effectAttemptOpen=true;}catch(error){unit.status=WorkUnitStatus.SUSPENDED;unit.nextRetryAt=null;unit.effectRecoveryRequired=true;unit.detail=`无法在现实操作前持久化恢复边界：${error?.message||error}`;unit.updatedAt=nowIso();session.runningControllers.delete(unit.id);this.emit(session,callbacks);return Promise.resolve();}}
     const promise=this.subagentRuntime.run(task,{...workUnit,dependencyResults},{
       signal:controller.signal,policyContext:this.governanceCompiler?.compileForRole?.(task,'subagent',{skillId:unit.skillId,workUnit:unit})||session.policyContext,
-      onExecutionStarted:()=>{executionStarted=true;const startedAt=nowIso();unit.status=WorkUnitStatus.RUNNING;unit.owner='subagent';unit.detail=unit.failureCount?`正在进行第 ${unit.failureCount+1}/${MAX_TOTAL_ATTEMPTS} 次尝试。`:'正在执行分配的具体工作。';unit.startedAt=unit.startedAt||startedAt;unit.updatedAt=startedAt;callbacks.onExecutionStarted?.({role:'subagent',workUnitId:unit.id});this.emit(session,callbacks);},
+      onExecutionStarted:()=>{executionStarted=true;const startedAt=nowIso();unit.status=WorkUnitStatus.RUNNING;unit.owner='subagent';unit.detail=unit.failureCount?`正在进行第 ${unit.failureCount+1}/${MAX_TOTAL_ATTEMPTS} 次尝试。`:'正在执行分配的具体工作。';unit.startedAt=startedAt;unit.completedAt=null;unit.result=null;unit.updatedAt=startedAt;callbacks.onExecutionStarted?.({role:'subagent',workUnitId:unit.id});this.emit(session,callbacks);},
       onProgress:progress=>{unit.owner='subagent';unit.detail=progress.detail||progress.summary||unit.detail;unit.updatedAt=nowIso();this.emit(session,callbacks);},
     })
       .then(result=>{unit.result=result;unit.status=WorkUnitStatus.COMPLETED;unit.owner='subagent';unit.effectRecoveryRequired=false;unit.detail=result?.result||'工作已完成。';unit.completedAt=nowIso();unit.updatedAt=unit.completedAt;const receipt={id:unit.id,signature:workSemanticSignature(workUnit),workUnit,result:clone(result),issued_at:unit.issuedAt||null,started_at:unit.startedAt||null,completed_at:unit.completedAt,...(effectAttemptId?{effectAttemptId}:{})};try{callbacks.onWorkReceipt?.(receipt);effectAttemptOpen=false;}catch(error){error.nonRetryable=true;error.workReceiptPersistence=true;throw error;}session.subagentResults.push({...result,workUnit});})
@@ -253,7 +253,7 @@ export class RootRuntime{
         if(effectCapable&&!executionStarted&&!clearSafeAdmission())return;
         unit.failureCount+=1;unit.owner='subagent';
         if(effectCapable&&executionStarted){unit.status=WorkUnitStatus.SUSPENDED;unit.nextRetryAt=null;unit.effectRecoveryRequired=true;unit.detail=`执行连接在现实操作可能发生后失去确定结果；已停止自动重放，需先核对当前现实。${error?.message?` ${error.message}`:''}`;unit.updatedAt=nowIso();return;}
-        const policy=classifyRetry(error);if(!policy.retryable||unit.failureCount>=MAX_TOTAL_ATTEMPTS){unit.status=WorkUnitStatus.SUSPENDED;unit.nextRetryAt=null;unit.detail=suspendedInstruction(policy.reason,policy.message,unit.failureCount);}else{const delay=retryDelayMs(unit.failureCount,this.retryDelaysMs);unit.status=WorkUnitStatus.RETRY_WAIT;unit.nextRetryAt=Date.now()+delay;unit.detail=waitingRetryInstruction(policy.reason,policy.message,unit.failureCount,delay);}unit.updatedAt=nowIso();
+        const policy=classifyRetry(error);if(!policy.retryable||unit.failureCount>=MAX_TOTAL_ATTEMPTS){unit.status=WorkUnitStatus.SUSPENDED;unit.nextRetryAt=null;unit.detail=suspendedInstruction(policy.reason,policy.message,unit.failureCount);}else{const delay=retryDelayMs(unit.failureCount,this.retryDelaysMs);unit.status=WorkUnitStatus.RETRY_WAIT;unit.nextRetryAt=Date.now()+delay;unit.startedAt=null;unit.completedAt=null;unit.result=null;unit.detail=waitingRetryInstruction(policy.reason,policy.message,unit.failureCount,delay);}unit.updatedAt=nowIso();
       })
       .finally(()=>{session.runningControllers.delete(unit.id);session.runningPromises.delete(unit.id);this.emit(session,callbacks);});
     session.runningPromises.set(unit.id,promise);return promise;
