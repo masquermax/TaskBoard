@@ -34,7 +34,7 @@ export function addUnresolvedEffectAttempt(executionState,attempt){
 
 export function markEffectActuationClosed(executionState,closure={}){
   const state=stateObject(executionState);
-  const effectAttemptId=text(closure?.effectAttemptId);
+  const effectAttemptId=text(closure?.effectAttemptId),claimId=text(closure?.claimId);
   const evidenceIds=[...new Set((Array.isArray(closure?.evidenceIds)?closure.evidenceIds:[]).map(text).filter(Boolean))];
   if(!effectAttemptId){const error=new Error('EFFECT_RECOVERY_CLOSURE_ID_REQUIRED');error.nonRetryable=true;throw error;}
   if(closure?.terminal!==true||closure?.canMutate!==false){const error=new Error('EFFECT_RECOVERY_CLOSURE_NOT_TERMINAL');error.nonRetryable=true;throw error;}
@@ -50,6 +50,7 @@ export function markEffectActuationClosed(executionState,closure={}){
       terminal:true,
       canMutate:false,
       evidenceIds,
+      ...(claimId?{claimId}:{}),
       observedAt:text(closure?.observedAt)||new Date().toISOString(),
     },
   };
@@ -107,8 +108,8 @@ function recoveredAttempt(task,unit,index){
 /**
  * Reconstruct only the minimum safety fact needed at a process boundary.
  * A successful durable WorkReceipt closes its own attempt. Otherwise a clearly
- * Root/Validator or read-only snapshot may resume; missing/ambiguous state never
- * proves that an old effect-capable executor failed to obtain control.
+ * read-only snapshot may resume; missing/ambiguous state never proves that an
+ * old effect-capable executor failed to obtain control.
  */
 export function recoverStaleEffectState(task){
   let state=reconcileEffectReceipts(task?.executionState,task?.workReceipts);
@@ -129,8 +130,6 @@ export function recoverStaleEffectState(task){
     state=addUnresolvedEffectAttempt(state,recoveredAttempt(task,unit,index));
   }
   if(hasUnresolvedEffectRecovery(state))return state;
-  const owner=text(snapshot?.actor?.owner);
-  if(owner==='root'||owner==='validator'||running.length>0)return state;
   if(!snapshot?.actor&&!snapshot?.stage)return addUnresolvedEffectAttempt(state,{
     id:`recovered:${text(task?.id)||'task'}:ambiguous`,workUnitId:null,signature:null,
     projectAccess:'unknown',networkAccess:null,inputRefs:[],
