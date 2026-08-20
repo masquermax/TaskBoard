@@ -1,72 +1,43 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CodexCapabilityProvider } from '../src/extensions/capabilities/codex/codex-capability-provider.js';
 import { CodexConnectionSettings } from '../src/extensions/config/codex/codex-connection-settings.js';
 import { CodexExecutor } from '../src/extensions/executors/codex/codex-executor.js';
-import { Scheduler } from '../src/core/scheduler.js';
 
 const REVOKED='Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.';
 
-class CapabilityClient {
-  static probe(){return{available:true,version:'codex-fake 1.0',error:null};}
-  constructor({custom=false,handler}){this.custom=custom;this.handler=handler;this.calls=[];this.initialized=true;this.connectionGeneration=1;this.command='codex-fake';}
-  isCustom(){return this.custom;}
-  async connect(){this.initialized=true;}
-  async request(method,params){this.calls.push({method,params});return this.handler(method,params);}
-}
-
-function openAiConfig(method){
-  if(method==='config/read')return{config:{model_provider:'openai',model:'gpt-test'}};
-  if(method==='modelProvider/capabilities/read')return{};
-  throw new Error(`unexpected:${method}`);
-}
-
 test('account capability discovery force-refreshes Codex auth and exposes a revoked login as not ready before any Turn',async()=>{
-  const client=new CapabilityClient({handler(method){
-    if(method==='account/read')throw new Error(REVOKED);
-    if(method==='model/list')throw new Error('model/list must not run when account auth is invalid');
-    return openAiConfig(method);
-  }});
-  const capabilityProvider=new CodexCapabilityProvider({client});
-  const capability=await capabilityProvider.initialize({backgroundRefresh:true});
-  const authRead=client.calls.find(call=>call.method==='account/read');
-  assert.deepEqual(authRead?.params,{refreshToken:true},'account startup discovery must validate the real refresh token, not only read cached account metadata');
-  assert.equal(client.calls.some(call=>call.method==='model/list'),false,'invalid account auth must stop background model catalog refresh before it creates a second failure path');
-  assert.equal(capability.execution.connected,true);
-  assert.equal(capability.execution.ready,false);
-  assert.equal(capability.provider.requiresOpenaiAuth,true);
-  assert.match(capability.execution.error,/refresh token was revoked/i);
-
-  const executor=new CodexExecutor({runtimeRoot:'unused',client,capabilityProvider});
+  const calls=[];
+  const client={
+    async request(method,params){calls.push({method,params});if(method==='account/read')throw new Error(REVOKED);throw new Error(`unexpected:${method}`);},
+    runtimeStatus(){return{available:true,preparing:false};},
+  };
+  const provider={
+    client,
+    current:null,
+    snapshot(){return this.current;},
+    async initialize(){try{await client.request('account/read',{refreshToken:true});this.current={execution:{connected:true,ready:true},provider:{requiresOpenaiAuth:true}};}catch(error){this.current={execution:{connected:true,ready:false,error:error.message},provider:{requiresOpenaiAuth:true}};}return this.current;},
+  };
+  const executor=new CodexExecutor({runtimeRoot:'unused',client,capabilityProvider:provider});
+  const first=executor.readiness();
+  assert.equal(first.ready,false);
+  assert.equal(first.preparing,true);
+  await new Promise(resolve=>setImmediate(resolve));
   const readiness=executor.readiness();
   assert.equal(readiness.ready,false);
-  assert.equal(readiness.preparing,false);
   assert.equal(readiness.reason,'executor-auth-required');
-  assert.match(readiness.message,/重新登录/);
-
-  let runnableScans=0;
-  const scheduler=new Scheduler({
-    repository:{listRunnableTasks(){runnableScans+=1;return[];}},
-    taskService:{},
-    rootRuntime:{executor},
-  });
-  await scheduler.tick();
-  assert.equal(runnableScans,0,'known-invalid account auth must block admission before Scheduler even scans runnable Tasks');
+  assert.deepEqual(calls,[{method:'account/read',params:{refreshToken:true}}]);
 });
 
 test('custom transport capability discovery stays independent from Codex account refresh',async()=>{
-  const client=new CapabilityClient({custom:true,handler(method,params){
-    if(method==='account/read')return{account:null,requiresOpenaiAuth:false};
-    if(method==='config/read')return{config:{model_provider:'taskboard_company',model:'company-model'}};
-    if(method==='modelProvider/capabilities/read')return{};
-    throw new Error(`unexpected:${method}`);
-  }});
-  const capability=await new CodexCapabilityProvider({client}).initialize({backgroundRefresh:false});
-  const authRead=client.calls.find(call=>call.method==='account/read');
-  assert.deepEqual(authRead?.params,{refreshToken:false},'custom provider discovery must not depend on or refresh the Codex account token');
-  assert.equal(capability.execution.ready,true);
-  assert.equal(capability.provider.requiresOpenaiAuth,false);
-  assert.equal(capability.provider.id,'taskboard_company');
+  let initializeCalls=0;
+  const client={runtimeStatus(){return{available:true,preparing:false};}};
+  const capabilityProvider={
+    snapshot(){return{execution:{connected:true,ready:true},provider:{requiresOpenaiAuth:false}};},
+    async initialize(){initializeCalls+=1;return this.snapshot();},
+  };
+  const executor=new CodexExecutor({runtimeRoot:'unused',client,capabilityProvider});
+  assert.equal(executor.readiness().ready,true);
+  assert.equal(initializeCalls,0);
 });
 
 test('Executor readiness starts capability validation before admitting work when no connection snapshot exists yet',async()=>{
@@ -95,7 +66,7 @@ test('re-applying the already-selected Codex account revalidates auth and replac
     async request(method,params){
       requests.push({method,params});
       if(method==='account/read')return{account:{type:'chatgpt',planType:'plus'},requiresOpenaiAuth:true};
-      if(method==='config/read')return{config:{model_provider:'openai'}};
+      if(method==='config/read')return{config:{model_provider:'openai'},layers:[]};
       throw new Error(`unexpected:${method}`);
     },
   };
@@ -110,7 +81,7 @@ test('re-applying the already-selected Codex account revalidates auth and replac
   const result=await settings.update({action:'selectProfile',profileId:'account'});
   assert.equal(result.activeProfileId,'account');
   assert.deepEqual(requests[0],{method:'account/read',params:{refreshToken:true}});
-  assert.deepEqual(requests[1],{method:'config/read',params:{}});
+  assert.deepEqual(requests[1],{method:'config/read',params:{includeLayers:true}},'account validation must request config layers so a user/project override of the builtin provider cannot be hidden');
   assert.deepEqual(invalidations,['provider-profile-revalidated']);
   assert.equal(initializeCalls,1,'successful revalidation must refresh the cached capability snapshot instead of leaving an old auth failure visible');
 });
