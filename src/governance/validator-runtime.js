@@ -44,6 +44,7 @@ function ledgerViolations(decision,evidenceById,currentState){
   for(const resolution of normalizeGapResolutions(decision?.gapResolutions)){
     const id=text(resolution?.gapId)||'gap',checked=refsExist(resolution?.evidenceIds,evidenceById);
     if(!gapById.has(id))violations.push(feedback(`gap:${id}`,'Gap resolution 指向不存在的 Gap。'));
+    if(!checked.refs.length)violations.push(feedback(`gap:${id}`,'Gap resolution 没有来源凭证；不能把不确定性静默删除。','REJECT_TRUST_ESCALATION'));
     if(checked.missing.length)violations.push(feedback(`gap:${id}`,`Gap resolution 引用了不存在的 Evidence：${checked.missing.join(', ')}。`));
     if(checked.refs.length&&!checked.refs.some(ref=>evidenceById.get(ref)?.strength==='direct'))violations.push(feedback(`gap:${id}`,'Gap resolution 没有 DIRECT 来源凭证；不能把不确定性静默删除。','REJECT_TRUST_ESCALATION'));
   }
