@@ -22,6 +22,14 @@ test('Gate B: Runtime has no parallel stage-result, semantic History, Validator-
   assert.doesNotMatch(repository,/last_stage_result\s*:/,'new Task state must not create the removed stage-result field');
 });
 
+test('Gate B: analysis rendering is presentation, never a semantic Validator implementation',()=>{
+  const presentation=source('src/governance/analysis-presentation.js'),compat=source('src/governance/analysis-validator.js');
+  assert.doesNotMatch(presentation,/class\s+AnalysisResultValidator|modelVerifier|semanticVerifier|runValidator|reviewRoot/);
+  assert.match(compat,/Compatibility bridge only/);
+  assert.match(compat,/from '.\/analysis-presentation\.js'/);
+  assert.doesNotMatch(compat,/function\s+|class\s+/,'legacy filename must not regain implementation ownership');
+});
+
 test('Gate B: removed Runtime wrappers and governance document loaders stay absent',()=>{
   for(const path of [
     'src/core/runtime-telemetry.js',
