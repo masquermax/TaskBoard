@@ -70,7 +70,7 @@ test('D-023: recovery observation may run Root but cannot manufacture closure fo
     }
     assert.equal(task.executionState?.retry?.scope,'effect-recovery-observe');
     callbacks.onExecutionStarted({role:'root'});
-    return{kind:'goal_satisfied',proposal:{finalResult:'observed current reality',stageResult:null,summary:'observation turn finished'}};
+    return{kind:'goal_satisfied',proposal:{finalResult:'observed current reality',summary:'observation turn finished'}};
   });
   try{
     const task=createTask(x.repository,'observe');
@@ -151,7 +151,7 @@ test('D-023: recovery cycle may admit a fresh effect after exact closure while r
     callbacks.onWorkReceipt({
       id:'W-CLOSURE',signature:'closure',workUnit:readOnlyWork(),
       result:{
-        delegationId:'W-CLOSURE',result:'old mutator closed',evidence:[],findings:[],discoveries:[],blocker:null,uncertainty:'historical outcome remains unknown',
+        delegationId:'W-CLOSURE',result:'old mutator closed',evidence:[],blocker:null,
         effectActuationClosure:{effectAttemptId:old.id,terminal:true,canMutate:false,evidenceIds:['E-CLOSURE']},
       },
       completed_at:new Date().toISOString(),
@@ -160,10 +160,10 @@ test('D-023: recovery cycle may admit a fresh effect after exact closure while r
     callbacks.onEffectAttempt(fresh);
     callbacks.onWorkReceipt({
       id:'W-2',signature:'sig-2',effectAttemptId:fresh.id,workUnit:writeWork(),
-      result:{delegationId:'W-2',result:'fresh done',evidence:[],findings:[],discoveries:[],blocker:null,uncertainty:null},
+      result:{delegationId:'W-2',result:'fresh done',evidence:[],blocker:null},
       completed_at:new Date().toISOString(),
     });
-    return{kind:'goal_satisfied',proposal:{finalResult:'fresh done',stageResult:null,summary:'fresh effect completed from stable current reality'}};
+    return{kind:'goal_satisfied',proposal:{finalResult:'fresh done',summary:'fresh effect completed from stable current reality'}};
   });
   try{
     const task=createTask(x.repository,'closed-old-mutator');
@@ -188,7 +188,7 @@ test('D-023: restart converts ambiguous stale RUNNING into one bounded machine r
     executions+=1;
     assert.equal(task.executionState?.retry?.scope,'effect-recovery-observe');
     callbacks.onExecutionStarted({role:'root'});
-    return{kind:'goal_satisfied',proposal:{finalResult:'observed',stageResult:null,summary:'observed'}};
+    return{kind:'goal_satisfied',proposal:{finalResult:'observed',summary:'observed'}};
   });
   try{
     const task=createTask(x.repository,'restart');
@@ -217,10 +217,10 @@ test('D-023: a durable WorkReceipt clears only its matching effect attempt',asyn
     callbacks.onWorkReceipt({
       id:'W-1',signature:'sig',effectAttemptId:value.id,
       workUnit:{id:'W-1',title:'write',goal:'change',expectedOutput:'done',stopCondition:'done',projectAccess:'write',networkAccess:false,inputRefs:[],dependsOn:[],skillId:null},
-      result:{delegationId:'W-1',result:'done',evidence:[],findings:[],discoveries:[],blocker:null,uncertainty:null},
+      result:{delegationId:'W-1',result:'done',evidence:[],blocker:null},
       completed_at:new Date().toISOString(),
     });
-    return{kind:'goal_satisfied',proposal:{finalResult:'done',stageResult:null,summary:'done'}};
+    return{kind:'goal_satisfied',proposal:{finalResult:'done',summary:'done'}};
   });
   try{
     const task=createTask(x.repository,'receipt');
@@ -251,7 +251,7 @@ test('D-023: cancellation ends lifecycle but preserves unresolved reality truth'
 
 test('D-023: unresolved recovery is local and does not freeze an independent Task',async()=>{
   let executions=0;
-  const x=rig(async(task,callbacks)=>{executions+=1;callbacks.onExecutionStarted({role:'root'});return{kind:'goal_satisfied',proposal:{finalResult:task.title,stageResult:null,summary:'done'}};});
+  const x=rig(async(task,callbacks)=>{executions+=1;callbacks.onExecutionStarted({role:'root'});return{kind:'goal_satisfied',proposal:{finalResult:task.title,summary:'done'}};});
   try{
     const blocked=createTask(x.repository,'X');
     const blockedState=addUnresolvedEffectAttempt(null,attempt(blocked.id));
