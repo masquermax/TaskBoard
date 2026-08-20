@@ -32,7 +32,7 @@ test('Executor prompt combines a compact role boundary with optional selected Sk
     const rootPrompt=executor.rootPrompt({task,subagentResults:[],humanGatewayHistory:[],policyContext:compiler.compileForRole(task,'root'),certifiedContext:{claims:[],gaps:[],unresolvedObligations:[]}});
     assert.match(rootPrompt,/ROLE ROOT/);assert.match(rootPrompt,/sole Task-level judgment/i);assert.match(rootPrompt,/fixed point/i);assert.doesNotMatch(rootPrompt,/PRODUCT CONSTITUTION|C-001|CAPABILITY CONTRACT/);
     const subPrompt=executor.subagentPrompt({task,delegation:{id:'w',title:'查证',goal:'定位一个事实',expectedOutput:'证据',stopCondition:'事实闭合',projectAccess:'none',networkAccess:false,inputRefs:[],dependsOn:[],skillId:'source-investigation'},policyContext:compiler.compileForRole(task,'subagent',{skillId:'source-investigation',workUnit:{projectAccess:'none',networkAccess:false,inputRefs:[]}})});
-    assert.match(subPrompt,/ROLE SUBAGENT/);assert.match(subPrompt,/SELECTED METHOD/);assert.match(subPrompt,/Do not classify correctness, confidence, Task truth/i);assert.doesNotMatch(subPrompt,/PRODUCT CONSTITUTION|C-001|CAPABILITY CONTRACT/);
+    assert.match(subPrompt,/ROLE SUBAGENT/);assert.match(subPrompt,/SELECTED METHOD/);assert.match(subPrompt,/Do not classify Task truth, confidence/i);assert.doesNotMatch(subPrompt,/PRODUCT CONSTITUTION|C-001|CAPABILITY CONTRACT/);
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
