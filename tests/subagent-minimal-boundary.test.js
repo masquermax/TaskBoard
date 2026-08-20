@@ -3,9 +3,6 @@ import assert from 'node:assert/strict';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 
 test('Subagent result boundary keeps only execution output, source evidence, and execution blocker', async()=>{
-  const sourceTraceVerifier={
-    enforce({evidence}){return{evidence:Array.isArray(evidence)?evidence:[],actions:[],verifications:[]};},
-  };
   const executor={
     async runSubagent(){
       return{
@@ -19,11 +16,12 @@ test('Subagent result boundary keeps only execution output, source evidence, and
         discoveries:[{summary:'顺便发现另一个问题',whyRelevant:'可能值得继续研究',suggestedNextQuestion:'是否再创建一个 Work Unit？'}],
         blocker:null,
         uncertainty:'模型自己的局部判断不应越过执行边界',
+        effectActuationClosure:{effectAttemptId:'effect:old',terminal:true,canMutate:false,evidenceIds:['E-1']},
       };
     },
   };
   const modelRouter={async prepare(){},route(){return{};}};
-  const runtime=new SubagentRuntime({executor,modelRouter,sourceTraceVerifier});
+  const runtime=new SubagentRuntime({executor,modelRouter});
   const task={id:'T-1',title:'定位目标文件',instruction:'定位目标文件',projectScopes:[],attachments:[],references:[]};
   const delegation={id:'WU-1',title:'定位文件',goal:'定位目标逻辑所在文件',expectedOutput:'文件定位和直接证据',stopCondition:'找到并核对目标逻辑后立即停止',projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[]};
 
@@ -41,4 +39,5 @@ test('Subagent result boundary keeps only execution output, source evidence, and
   assert.equal('findings' in result,false,'Subagent does not own interpretation of its execution output');
   assert.equal('discoveries' in result,false,'Subagent cannot propose Task-level next work');
   assert.equal('uncertainty' in result,false,'uncertainty classification belongs to Root');
+  assert.equal('effectActuationClosure' in result,false,'effect/liveness judgment belongs to Root');
 });
