@@ -15,6 +15,12 @@ function normalizePresentation(value={}){
   };
 }
 
+function validateExecutor(id,executor){
+  if(!executor)return null;
+  if(typeof executor.execute!=='function')throw new Error(`EXTENSION_EXECUTOR_INVALID:${id}:execute`);
+  return executor;
+}
+
 function validateConnectionSettings(id,settings){
   if(!settings)return null;
   if(typeof settings.describe!=='function'||typeof settings.getPublic!=='function'||typeof settings.update!=='function'){
@@ -70,7 +76,7 @@ export class ExtensionRegistry {
       apiVersion,
       displayName: extension.displayName || key,
       orchestrationMode,
-      executor: extension.executor || null,
+      executor: validateExecutor(key,extension.executor||null),
       capabilityProvider: extension.capabilityProvider || null,
       connectionSettings: validateConnectionSettings(key,extension.connectionSettings||null),
       continuation: validateContinuation(key,extension.continuation||null),
