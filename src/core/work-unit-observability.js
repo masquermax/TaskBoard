@@ -16,16 +16,16 @@ function publishSummary(observer,summary){if(!observer?.emitDiagnostic||!summary
  * depend on telemetry heuristics.
  */
 export class WorkUnitObservability{
-  constructor({taskId=null,workUnitId=null,turnId=null,startedAt=Date.now(),now=()=>Date.now(),emitDiagnostic=null}={}){this.taskId=taskId||null;this.workUnitId=workUnitId||null;this.turnId=turnId||null;this.startedAt=startedAt;this.now=now;this.emitDiagnostic=typeof emitDiagnostic==='function'?emitDiagnostic:null;this.records=[];this.active=new Map();this.completed=new Map();this.finalized=false;}
+  constructor({taskId=null,workUnitId=null,turnId=null,startedAt=Date.now(),now=()=>Date.now(),emitDiagnostic=null}={}){this.taskId=taskId||null;this.workUnitId=workUnitId||null;this.turnId=turnId||null;this.startedAt=startedAt;this.now=now;this.emitDiagnostic=typeof emitDiagnostic==='function'?emitDiagnostic:null;this.records=[];this.active=new Map();this.finalized=false;}
   setTurnId(turnId){this.turnId=turnId||this.turnId;}
   isToolItem(item){return TOOL_TYPES.has(text(item?.type));}
   start(item,at=this.now()){
-    if(!this.isToolItem(item))return null;const id=text(item?.id)||`tool-${this.records.length+1}`;if(this.active.has(id))return this.active.get(id);if(this.completed.has(id))return this.completed.get(id);
+    if(!this.isToolItem(item))return null;const id=text(item?.id)||`tool-${this.records.length+1}`;if(this.active.has(id))return this.active.get(id);
     const record={id,seq:this.records.length+1,toolType:text(item?.type),target:targetFor(item),startedAt:at,completedAt:null,durationMs:null,success:null,resultBytes:0};this.records.push(record);this.active.set(id,record);return record;
   }
   complete(item,at=this.now()){
-    if(!this.isToolItem(item))return null;const id=text(item?.id)||null;if(id&&this.completed.has(id))return this.completed.get(id);let record=id?this.active.get(id):null;if(!record)record=this.start(item,at);if(!record)return null;
-    record.completedAt=at;record.durationMs=Number.isFinite(item?.durationMs)?Number(item.durationMs):Math.max(0,at-record.startedAt);record.success=succeeded(item);record.resultBytes=resultBytes(item);record.target=targetFor(item)||record.target;this.active.delete(record.id);this.completed.set(record.id,record);
+    if(!this.isToolItem(item))return null;const id=text(item?.id)||null;let record=id?this.active.get(id):null;if(!record)record=this.start(item,at);if(!record)return null;
+    record.completedAt=at;record.durationMs=Number.isFinite(item?.durationMs)?Number(item.durationMs):Math.max(0,at-record.startedAt);record.success=succeeded(item);record.resultBytes=resultBytes(item);record.target=targetFor(item)||record.target;this.active.delete(record.id);
     this.emitDiagnostic?.('tool-completed',{taskId:this.taskId,workUnitId:this.workUnitId,turnId:this.turnId,seq:record.seq,toolType:record.toolType,target:record.target,startedAt:iso(record.startedAt),durationMs:record.durationMs,success:record.success,resultBytes:record.resultBytes},'debug');return record;
   }
   finalize({evidence=null,completedAt=this.now(),status='completed',blocker=null}={}){
