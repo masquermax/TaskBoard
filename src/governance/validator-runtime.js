@@ -7,7 +7,7 @@ function list(value){return Array.isArray(value)?value:[];}
 function uniqueStrings(values){return[...new Set(list(values).map(text).filter(Boolean))];}
 function copyAnalysis(result={}){
   const fields=normalizeAnalysisFields(result);
-  return{kind:result?.kind||null,summary:text(result?.summary),stageResult:result?.stageResult==null?null:text(result.stageResult),finalResult:result?.finalResult==null?null:text(result.finalResult),...fields,gateway:result?.gateway||null,gapResolutions:normalizeGapResolutions(result?.gapResolutions),delegations:list(result?.delegations)};
+  return{kind:result?.kind||null,summary:text(result?.summary),finalResult:result?.finalResult==null?null:text(result.finalResult),...fields,gateway:result?.gateway||null,gapResolutions:normalizeGapResolutions(result?.gapResolutions),delegations:list(result?.delegations)};
 }
 function byId(values=[]){return new Map(list(values).map(item=>[text(item?.id),item]).filter(([id])=>id));}
 function mergeUniqueById(...groups){const out=[],seen=new Set();for(const item of groups.flatMap(group=>list(group))){const id=text(item?.id);if(!id||seen.has(id))continue;seen.add(id);out.push(item);}return out;}
@@ -95,7 +95,7 @@ export class ValidatorRuntime{
     for(const action of list(traced.actions))if(action?.action==='REJECT_UNTRACEABLE_SOURCE')violations.push(feedback(`evidence:${text(action?.target)||'unknown'}`,text(action?.reason)||'Evidence 来源无法追溯。','REJECT_UNTRACEABLE_SOURCE'));
     violations.push(...ledgerViolations(proposed,evidenceById,currentState));
 
-    if(violations.length)return{outcome:'reject',decision:proposed,feedback:violations,actions:[...list(traced.actions)],commits:[],observedKnowledgeKeys:[],sourceVerifications:traced.verifications};
-    return{outcome:'pass',decision:proposed,feedback:[],actions:[...list(traced.actions)],commits:[],observedKnowledgeKeys:[],sourceVerifications:traced.verifications,requiresRootDecision:false};
+    if(violations.length)return{outcome:'reject',decision:proposed,feedback:violations,actions:[...list(traced.actions)],sourceVerifications:traced.verifications};
+    return{outcome:'pass',decision:proposed,feedback:[],actions:[...list(traced.actions)],sourceVerifications:traced.verifications};
   }
 }
