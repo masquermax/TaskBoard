@@ -6,6 +6,7 @@ import { AttachmentStore } from '../core/attachment-store.js';
 import { ModelRouter } from '../core/model-router.js';
 import { RootRuntime } from '../core/root-runtime.js';
 import { SubagentRuntime } from '../core/subagent-runtime.js';
+import { ExecutorRuntimeAdapter } from '../core/executor-runtime.js';
 import { Scheduler } from '../core/scheduler.js';
 import { DailyCleanupController } from '../core/cleanup-controller.js';
 import { ExtensionRegistry, OrchestrationMode } from '../extensions/runtime/extension-registry.js';
@@ -29,8 +30,8 @@ function createUnavailableExecutor(){
   return {
     readiness(){return{ready:false,preparing:false,reason:'executor-not-configured',message:'尚未加载 Executor 扩展。请先在管理 → 导入扩展中登记扩展并重启 TaskBoard。'};},
     async health(){return{executor:null,displayName:'未配置',available:false,ready:false,error:'EXECUTOR_NOT_CONFIGURED'};},
-    async runRoot(){return unavailable();},
-    async runSubagent(){return unavailable();},
+    async execute(){return unavailable();},
+    runtimeContext(){return null;},
     cleanupTaskWorkspace(){return false;},
     close(){},
   };
@@ -63,7 +64,8 @@ export function bootstrap({
   const attachmentStore=new AttachmentStore({rootDir:resolve(rootDir,'data/attachments')});
   const taskService=new TaskService(repository,{attachmentStore,defaultExecutorKey:extension?.id||'unconfigured'});
   if(extension&&!extension.executor)throw new Error(`EXTENSION_HAS_NO_EXECUTOR:${extensionKey}`);
-  const executor=extension?.executor||createUnavailableExecutor();
+  const extensionExecutor=extension?.executor||createUnavailableExecutor();
+  const executor=new ExecutorRuntimeAdapter(extensionExecutor);
   const capabilityProvider=extension?.capabilityProvider||null;
   const surfaceManager=new SurfaceManager({hosts:extension?.surfaceHosts||[]});
 
@@ -84,5 +86,5 @@ export function bootstrap({
   const recovered=scheduler.recoverStaleRunningTasks();if(recovered)console.log(`[recovery] reconciled ${recovered} stale RUNNING task(s)`);
   const cleanup=new DailyCleanupController({repository,attachmentStore});
   if(startScheduler)scheduler.start();
-  return{database,repository,taskService,executor,capabilityProvider,extension,extensionRegistry:registry,continuation,continuationExtension,surfaceManager,governanceCompiler,validatorRuntime,rootRuntime,scheduler,cleanup,settingsStore,runtimeSettingsState,applyRuntimeSettings,storage:persistence.storage,storageFile:persistence.filename};
+  return{database,repository,taskService,executor,extensionExecutor,capabilityProvider,extension,extensionRegistry:registry,continuation,continuationExtension,surfaceManager,governanceCompiler,validatorRuntime,rootRuntime,scheduler,cleanup,settingsStore,runtimeSettingsState,applyRuntimeSettings,storage:persistence.storage,storageFile:persistence.filename};
 }
