@@ -50,7 +50,6 @@ Capability discovery is an internal control-plane mechanism, not a user workflow
 CDP may be used to embed TaskBoard into compatible Chromium/Electron hosts without moving Task ownership or execution into that host. CDP endpoints are local-only, injection must be idempotent, and failure of a CDP Surface must leave the standalone TaskBoard and execution pipeline available.
 
 
-
 ## ADR-0021 🔒 — Executor Runtime Bootstrap Stays Behind the Executor
 Task Core 不管理外部执行器安装。某个 Executor 可以为自己的机械运行依赖做只读解析和必要的自动 bootstrap，但不得借此管理登录、API Key、Provider 或计费配置。Codex/Windows 优先复用现有 CLI；缺失时使用 OpenAI 官方 standalone installer 后台准备运行时，不要求 npm。该过程不进入 Human Gateway，失败也不得由高频健康检查无限重复安装。
 
@@ -70,13 +69,12 @@ The Work Unit owns the concrete goal/output/stop/access boundary; Environment/Ex
 
 
 ## ADR-0029 🔒 — Runtime Context Is a Projection, Not a Repeated Rule Stack
-Derived from C-001 / C-004. Product Constitution defines the system and Capability Contracts translate that definition into owned runtime surfaces. Ordinary Root/Subagent/Validator turns therefore receive the current role Capability Contract plus current Task/Work Unit inputs; a selected external method is added only to that Work Unit executor when applicable. Constitution, ADR and superseded Analysis Rules are not re-injected for each role to reinterpret.
+Derived from C-001 / C-004. Product Constitution defines the system and Capability Contracts translate that definition into owned runtime surfaces. Root/Subagent model turns therefore receive only the current executable role projection plus current Task/Work Unit inputs; a selected external method is added only to that Work Unit executor when applicable. Constitution, ADR and superseded Analysis Rules are not re-injected for each model turn to reinterpret.
 
-The context compiler is deterministic and read-only. Runtime enforcement and schemas carry the authority boundary; role context describes the owned capability and current work rather than repeating system-wide prohibitions.
-
+Validator is not a model turn. It receives only the current candidate/source ledger needed for deterministic provenance checks. The context compiler is deterministic and read-only; Runtime enforcement and schemas carry the authority boundary rather than repeating system-wide prohibitions.
 
 
 ## ADR-0030 🔒 — Project Mutation Is an Explicit Delegated Work Unit Capability
 Derived from C-001 / C-004 / C-005. Root is the Task reasoning/organization authority, not an implicit project reader/writer. Root control Turns receive only TaskBoard-managed scratch and do not receive Project Scope filesystem access or network capability. Project read/write is represented by a delegated Work Unit with explicit `projectAccess` plus selected `inputRefs`; `projectAccess` is a request, not an Authority fact. `GovernanceCompiler` may preserve `write` in the effective `AuthorizedGrant` only when machine Role capability, certified `TaskContract` Project authority, selected Project scope and the Work Unit request all permit it. `taskMode` does not grant Project mutation.
 
-When Root reaches a certified Task convergence decision, remaining no-side-effect read-only Work Units may be stopped because they no longer have future value. This does not change the non-preemption rule for resource-limit reductions, and write-capable Work Units are not force-aborted merely to shorten completion latency; they first reach a safe boundary.
+A Root-issued Stage is a bounded batch. Dependencies are local to that batch; independent siblings may run concurrently, but partial sibling completion does not create a new Root trigger. Root consumes the batch after the Stage reaches its boundary. Runtime therefore does not add a second mid-Stage convergence/preemption path merely to shorten the tail; side-effecting Work continues to use the separate fail-closed effect-recovery safety boundary.
