@@ -4,7 +4,6 @@ import { normalizeAnalysisFields } from '../governance/analysis-contract.js';
 import { canonicalAnalysisSummary, hasGovernedCandidateDelta, renderAnalysisResult } from '../governance/analysis-validator.js';
 import { applyCertifiedDelta, decisionFromCertifiedState, normalizeCertifiedState } from '../governance/certified-state.js';
 import { taskInputRefs } from './task-input-scope.js';
-import { humanGatewayTransitionCandidate } from '../governance/human-gateway-evidence.js';
 import { applyAuthorityFidelity, authoritySemanticCandidatesForWork } from '../governance/task-contract-fidelity.js';
 import { recordTaskDiagnostic } from './runtime-diagnostic.js';
 import { capabilitiesSatisfy, requiredWorkCapabilities, workMayMutate } from './work-capability.js';
@@ -47,7 +46,7 @@ function workSemanticSignature(item){
 function normalizeDecision(decision){
   const analysis=normalizeAnalysisFields(decision);
   return{
-    kind:decision?.kind||null,summary:text(decision?.summary),stageResult:decision?.stageResult==null?null:text(decision.stageResult),finalResult:decision?.finalResult==null?null:text(decision.finalResult),
+    kind:decision?.kind||null,summary:text(decision?.summary),finalResult:decision?.finalResult==null?null:text(decision.finalResult),
     ...analysis,delegations:list(decision?.delegations),gateway:decision?.gateway||null,gapResolutions:list(decision?.gapResolutions),
   };
 }
@@ -148,7 +147,7 @@ export class RootRuntime{
       taskId:task.id,round:0,subagentResults:pendingWorkResults,currentStage:null,
       completedWorkUnits:durableWorkReceipts.map(receipt=>({id:receipt.id,stageId:null,title:receipt.workUnit.title||receipt.id,projectAccess:receipt.workUnit.projectAccess||'none',networkAccess:receipt.workUnit.networkAccess===true,status:WorkUnitStatus.COMPLETED,detail:receipt.result?.result||'工作已完成。',issuedAt:receipt.issued_at||null,startedAt:receipt.started_at||null,updatedAt:receipt.completed_at||nowIso(),completedAt:receipt.completed_at||null,failureCount:0,nextRetryAt:null,canRetry:false,owner:'subagent'})),
       cancelRequested:false,rootController:null,runningControllers:new Map(),runningPromises:new Map(),policyContext:this.governanceCompiler?.compileForTask?.(task)||null,
-      lastCommittedStageResult:task.last_stage_result||null,analysisState:restoredAnalysisState,certifiedContext:restoredAnalysisState.current,
+      analysisState:restoredAnalysisState,certifiedContext:restoredAnalysisState.current,
       consumedHumanGatewayIds:new Set(list(restoredAnalysisState.turns).flatMap(turn=>list(turn?.triggerRefs)).map(text).filter(ref=>ref.startsWith('human:')).map(ref=>ref.slice(6)).filter(Boolean)),
       issuedWorkSignatures:new Set(durableWorkReceipts.map(receipt=>text(receipt.signature)).filter(Boolean)),rootTurnCount:0,
       actor:{title:'Root 初始判断',status:WorkUnitStatus.WAITING_RESOURCE,detail:'等待可用 Root 执行资源。',updatedAt:nowIso(),owner:'root'},updatedAt:nowIso(),
@@ -170,7 +169,6 @@ export class RootRuntime{
 
   async reviewRootDecision(task,session,decision,callbacks,{humanGatewayHistory=[],rootInputs=[],triggerRefs=[]}={}){
     if(!this.validatorRuntime){if(hasGovernedCandidateDelta(decision)){const error=new Error('VALIDATOR_RUNTIME_REQUIRED: governed Candidate Delta cannot bypass Validator ownership.');error.nonRetryable=true;throw error;}return{decision,turnNode:null};}
-    decision=humanGatewayTransitionCandidate(decision,humanGatewayHistory,session.analysisState,{includeGapResolution:true});
     const reviewed=this.validatorRuntime.reviewRoot({decision,task,humanGatewayHistory,currentState:session.analysisState,availableEvidence:rootInputEvidence(rootInputs)});if(reviewed.outcome!=='pass')throw validationError(reviewed.feedback||[]);
     const workTriggerRefs=list(rootInputs).map(item=>text(item?.delegationId||item?.workUnit?.id)).filter(Boolean).map(id=>`work:${id}`),certifiedTriggerRefs=[...new Set([...list(triggerRefs),...workTriggerRefs].map(text).filter(Boolean))];
     if(!certifiedTriggerRefs.length){const error=new Error('ROOT_TURN_WITHOUT_TRIGGER: Current Certified State is context, not a trigger for another Root Turn.');error.nonRetryable=true;throw error;}
@@ -186,10 +184,9 @@ export class RootRuntime{
       const beforeOpen=Boolean(beforeCertifiedState?.current?.gaps?.some?.(gap=>text(gap?.id)===targetGapId)),afterOpen=Boolean(prepared?.current?.gaps?.some?.(gap=>text(gap?.id)===targetGapId));recordTaskDiagnostic('human-gap-proof-result',{taskId:task.id,gatewayId,targetGapId,proofAttempted:beforeOpen,resolved:beforeOpen&&!afterOpen,gapStillOpen:afterOpen});
     }
 
-    const historyCommit=prepared.turnNode?.historyCommit?clone(prepared.turnNode.historyCommit):null,workReceiptIds=list(rootInputs).map(item=>text(item?.delegationId||item?.workUnit?.id)).filter(Boolean);
+    const workReceiptIds=list(rootInputs).map(item=>text(item?.delegationId||item?.workUnit?.id)).filter(Boolean);
     if(prepared.turnNode){
-      const commitPayload={analysisState:prepared.state,turnNode:prepared.turnNode,historyCommit:historyCommit?{...historyCommit,completedAt:prepared.turnNode.committedAt}:null,workReceiptIds};
-      callbacks.onCertifiedTurn?.(commitPayload);session.analysisState=prepared.state;session.certifiedContext=prepared.state.current;if(historyCommit)session.lastCommittedStageResult=historyCommit.detail;
+      callbacks.onCertifiedTurn?.({analysisState:prepared.state,turnNode:prepared.turnNode,workReceiptIds});session.analysisState=prepared.state;session.certifiedContext=prepared.state.current;
     }else if(workReceiptIds.length)callbacks.onWorkReceiptsConsumed?.(workReceiptIds);
     return{decision:normalizeDecision(reviewed.decision),turnNode:prepared.turnNode,actions:list(reviewed.actions)};
   }
@@ -244,8 +241,8 @@ export class RootRuntime{
     }
   }
 
-  async execute(task,{humanGatewayHistory=[],onProgress=null,onStageCompleted=null,onProgressCommit=null,onCertifiedTurn=null,onTaskContractAuthority=null,onWorkReceipt=null,onWorkReceiptsConsumed=null,onEffectAttempt=null,onEffectAttemptCleared=null,onExecutionStarted=null}={}){
-    const session=this.sessions.get(task.id)||this.createSession(task);session.cancelRequested=false;const callbacks={onProgress,onStageCompleted,onProgressCommit,onCertifiedTurn,onTaskContractAuthority,onWorkReceipt,onWorkReceiptsConsumed,onEffectAttempt,onEffectAttemptCleared,onExecutionStarted};
+  async execute(task,{humanGatewayHistory=[],onProgress=null,onStageCompleted=null,onCertifiedTurn=null,onTaskContractAuthority=null,onWorkReceipt=null,onWorkReceiptsConsumed=null,onEffectAttempt=null,onEffectAttemptCleared=null,onExecutionStarted=null}={}){
+    const session=this.sessions.get(task.id)||this.createSession(task);session.cancelRequested=false;const callbacks={onProgress,onStageCompleted,onCertifiedTurn,onTaskContractAuthority,onWorkReceipt,onWorkReceiptsConsumed,onEffectAttempt,onEffectAttemptCleared,onExecutionStarted};
     const newlyResolvedHuman=list(humanGatewayHistory).filter(g=>g?.status==='RESOLVED'&&text(g?.id)&&!session.consumedHumanGatewayIds.has(text(g.id)));let invocationTriggerRefs=newlyResolvedHuman.map(g=>`human:${text(g.id)}`);
     if(!invocationTriggerRefs.length){const reason=text(task?.ready_reason);if(session.rootTurnCount===0&&!reason)invocationTriggerRefs=[`task:${task.id}`];else if(reason==='NEW')invocationTriggerRefs=[`task:${task.id}`];else if(reason==='RETRY_WAIT')invocationTriggerRefs=[`technical:retry:${task.id}`];else if(reason==='WAITING_RESOURCE')invocationTriggerRefs=[`technical:resource-resume:${task.id}`];else if(reason==='SUSPENDED')invocationTriggerRefs=[`technical:manual-resume:${task.id}`];else if(session.rootTurnCount===0)invocationTriggerRefs=[`task:${task.id}`];}
     let invocationTriggerConsumed=false;
@@ -272,11 +269,11 @@ export class RootRuntime{
       }
 
       if(decision.kind==='human_gateway'){
-        if(!decision.gateway?.question?.trim()){const error=new Error('ROOT_INVALID_HUMAN_GATEWAY');error.nonRetryable=true;throw error;}const snapshot=this.makeSnapshot(session);this.discardSession(task.id);return{kind:'needs_human',gateway:{...decision.gateway,targetGapId:decision.gateway.gapId||null},summary:decision.summary,stageResult:session.lastCommittedStageResult,snapshot,quiescent:true};
+        if(!decision.gateway?.question?.trim()){const error=new Error('ROOT_INVALID_HUMAN_GATEWAY');error.nonRetryable=true;throw error;}const snapshot=this.makeSnapshot(session);this.discardSession(task.id);return{kind:'needs_human',gateway:{...decision.gateway,targetGapId:decision.gateway.gapId||null},summary:decision.summary,snapshot,quiescent:true};
       }
 
       if(decision.kind==='complete'){
-        const finalView=decision.resultMode==='analysis'?decisionFromCertifiedState(session.analysisState,decision):null,finalResult=finalView?renderAnalysisResult(finalView):composeExecutionResult(decision),finalSummary=finalView?canonicalAnalysisSummary(finalView):decision.summary,stageResult=session.lastCommittedStageResult||null,proposal={finalResult,summary:finalSummary,stageResult};
+        const finalView=decision.resultMode==='analysis'?decisionFromCertifiedState(session.analysisState,decision):null,finalResult=finalView?renderAnalysisResult(finalView):composeExecutionResult(decision),finalSummary=finalView?canonicalAnalysisSummary(finalView):decision.summary,proposal={finalResult,summary:finalSummary};
         if(!this.completionEvaluator){const error=new Error('COMPLETION_EVALUATOR_REQUIRED');error.nonRetryable=true;throw error;}
         const evaluated=this.completionEvaluator.evaluate({task,proposal,certifiedContext:session.certifiedContext});
         if(evaluated?.goalState==='satisfied'){this.discardSession(task.id);return{kind:'goal_satisfied',goalState:evaluated.goalState,proposal,assessments:list(evaluated.assessments),quiescent:true};}
