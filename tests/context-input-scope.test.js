@@ -91,7 +91,9 @@ test('Validator rejects Root-authored Project/Attachment Evidence that did not a
     {id:'E-A',strength:'direct',kind:'fact',sourceType:'attachment_text',coverage:'component',statement:'attachment fact',basis:'source',locator:'A-1',observation:'attachment fact'},
   ],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[]};
   const reviewed=validator.reviewRoot({decision:candidate,task:{id:'T'}});
-  assert.deepEqual(reviewed.decision.evidence,[]);assert.deepEqual(reviewed.actions.filter(x=>x.action==='DROP_UNOWNED_ROOT_EVIDENCE').map(x=>x.target),['E-P','E-A']);
+  assert.equal(reviewed.outcome,'reject');
+  assert.deepEqual(reviewed.decision.evidence,[]);
+  assert.deepEqual(reviewed.feedback.filter(x=>x.action==='REJECT_UNOWNED_ROOT_EVIDENCE').map(x=>x.target),['evidence:E-P','evidence:E-A']);
 });
 
 test('Root may cite Project Evidence only after it arrived through completed Subagent availableEvidence',()=>{
