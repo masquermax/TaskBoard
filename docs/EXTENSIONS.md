@@ -66,7 +66,7 @@ An Extension factory returns:
 - `apiVersion` is required and must equal the Host-supported `EXTENSION_API_VERSION`.
 - `executor` implements TaskBoard execution semantics.
 - `capabilityProvider` reports normalized Runtime/model capability facts. Capability creates no Authority.
-- `connectionSettings` is optional. When present it implements `ConnectionSettingsPort`: `describe()`, `getPublic()`, `update()`.
+- `connectionSettings` is optional. When present it implements `ConnectionSettingsPort`: `describe()`, `getPublic()`, `update()`, plus optional read-only `discover()`.
 - `continuation` is optional. When present it implements `ContinuationPort`: `health()`, `read()`, `write()`.
 - `presentation` carries safe display metadata only.
 - `surfaceHosts[]` are optional interaction surfaces and may coexist as facets of the owning Extension.
@@ -159,7 +159,7 @@ The current Runtime path supports only this mode.
 
 There is no implicit hybrid mode. An execution is admitted under one orchestration owner; native collaboration cannot be smuggled through `runSubagent()`.
 
-## Connection presentation
+## Connection presentation and discovery
 
 TaskBoard does not encode one Executor's settings form. A configurable Extension returns a safe declarative descriptor from `connectionSettings.describe()`.
 
@@ -169,6 +169,7 @@ Current renderer supports the minimum field types required by real Extensions:
 - `url`
 - `secret`
 - `model`
+- `reasoning`
 - `select`
 
 A profile-based descriptor can declare labels, fields and operation names. Public profile state may expose non-secret values plus flags such as `editable`, `deletable` and `apiKeyConfigured`; the secret itself never returns through the API/UI state.
@@ -184,17 +185,22 @@ Example:
     {key:'name',type:'text',label:'连接名称'},
     {key:'baseUrl',type:'url',label:'API 地址'},
     {key:'apiKey',type:'secret',label:'API Key',configuredKey:'apiKeyConfigured'},
-    {key:'defaultModel',type:'model',label:'默认模型'}
+    {key:'defaultModel',type:'model',label:'默认模型'},
+    {key:'reasoningEffort',type:'reasoning',label:'推理等级',modelField:'defaultModel'}
   ],
+  discovery:{auto:true,debounceMs:500,label:'获取模型'},
   actions:{
     select:'selectProfile',
     save:'saveProfile',
-    delete:'deleteProfile'
+    delete:'deleteProfile',
+    discover:'discover'
   }
 }
 ```
 
-TaskBoard renders this descriptor and transports the chosen operation; the Extension still owns validation, persistence, Runtime restart/rollback and provider-specific interpretation.
+When `discovery` is declared, TaskBoard may POST the current unsaved field values to the same Extension's optional `connectionSettings.discover()` method. This is a transient, Extension-owned read-only lookup used to populate values such as model/reasoning choices before save. TaskBoard does not interpret provider semantics and must not persist a discovery request or secret merely because it transported it. The Extension returns only safe discovery output for UI use. If `discover()` is unavailable or fails, the operation fails closed and does not change saved connection state.
+
+TaskBoard renders the descriptor and transports the chosen operation; the Extension still owns validation, persistence, Runtime restart/rollback and provider-specific interpretation.
 
 ## Cardinality
 
@@ -227,8 +233,9 @@ At minimum verify:
 2. the external registry can bootstrap the Extension without Core changes;
 3. required TaskBoard Work/Authority/Context semantics can be realized without weakening them;
 4. model/capability and connection presentation remain normalized at the boundary;
-5. a real Runtime turn completes on the intended value path;
-6. disabling/removing the Extension leaves stock TaskBoard semantics and tests valid.
+5. optional discovery, when advertised, is read-only/fail-closed and does not persist secrets by transport side effect;
+6. a real Runtime turn completes on the intended value path;
+7. disabling/removing the Extension leaves stock TaskBoard semantics and tests valid.
 
 For a Continuation Extension, compatibility additionally requires that removing it leaves stock execution semantics unchanged and that continuation content is never treated as product/runtime truth without fresh verification.
 
