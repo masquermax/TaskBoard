@@ -9,6 +9,7 @@ import { CodexAppServerClient } from './app-server-client.js';
 import { analysisFieldsSchema, evidenceSchema, gapResolutionSchema } from '../../../governance/analysis-contract.js';
 
 const rootEvidenceSchema={...evidenceSchema,properties:{...evidenceSchema.properties,sourceType:{type:'string',enum:['human','reference']}}};
+const effectClosureSchema={type:'object',properties:{effectAttemptId:{type:'string'},claimId:{type:'string'}},required:['effectAttemptId','claimId'],additionalProperties:false};
 const rootSchema={
   type:'object',
   properties:{
@@ -18,6 +19,7 @@ const rootSchema={
     gateway:{anyOf:[{type:'null'},{type:'object',properties:{gapId:{type:'string'},question:{type:'string'},context:{type:'string'},options:{type:'array',items:{type:'string'},maxItems:6}},required:['gapId','question','context','options'],additionalProperties:false}]},
     gapResolutions:{type:'array',items:gapResolutionSchema,maxItems:30},
     delegations:{type:'array',items:{type:'object',properties:{id:{type:'string'},title:{type:'string'},goal:{type:'string'},expectedOutput:{type:'string'},stopCondition:{type:'string'},projectAccess:{type:'string',enum:['none','read','write']},networkAccess:{type:'boolean'},skillId:{type:['string','null']},dependsOn:{type:'array',items:{type:'string'}},inputRefs:{type:'array',items:{type:'string'},maxItems:40}},required:['id','title','goal','expectedOutput','stopCondition','projectAccess','networkAccess','skillId','dependsOn','inputRefs'],additionalProperties:false}},
+    effectClosures:{type:'array',items:effectClosureSchema,maxItems:4},
   },
   required:['kind','summary','finalResult','resultMode','evidence','claims','gaps','recommendations','steps','gateway','gapResolutions','delegations'],additionalProperties:false,
 };
@@ -28,8 +30,8 @@ function safeParse(value){const parsed=JSON.parse(value);if(!parsed||typeof pars
 function policyPrompt(policyContext){return policyContext?.prompt?.trim()||'TASKBOARD ROLE CONTEXT\nUse the structured runtime protocol supplied for this call.';}
 function recoveryPrompt(task){
   const attempts=unresolvedEffectAttempts(task?.executionState);if(!attempts.length)return'';
-  const summary=attempts.map(item=>({id:item.id,workUnitId:item.workUnitId||null,projectAccess:item.projectAccess??'unknown',networkAccess:item.networkAccess??null,inputRefs:Array.isArray(item.inputRefs)?item.inputRefs:[],admittedAt:item.admittedAt||null,reason:item.reason||null}));
-  return `\nRECOVERY OBSERVATION BOUNDARY — TaskBoard has an unresolved prior effect.\n- Transport/process loss does NOT prove the old effect failed, stopped, or left Reality unchanged. Effect outcome is UNKNOWN and old-mutator liveness is UNKNOWN unless independently proven otherwise.\n- Do not replay the old Work. Use only the minimum side-effect-free Work needed to reacquire current Reality / closure evidence. Runtime rejects new effect-capable admission while recovery remains unresolved.\n- A source-traced observation proves only what was observed at that boundary. Do not promote it into stable recovery truth, prior-effect attribution, or safe fresh actuation unless Evidence establishes the required stability/liveness relation.\n- Do not route this technical unknown to Human unless the remaining missing information or choice is genuinely human-owned.\nUnresolved effect attempts:\n${JSON.stringify(summary,null,2)}\n`;
+  const summary=attempts.map(item=>({id:item.id,workUnitId:item.workUnitId||null,projectAccess:item.projectAccess??'unknown',networkAccess:item.networkAccess??null,inputRefs:Array.isArray(item.inputRefs)?item.inputRefs:[],admittedAt:item.admittedAt||null,reason:item.reason||null,actuationClosed:item.actuationClosed===true}));
+  return `\nRECOVERY OBSERVATION BOUNDARY — TaskBoard has an unresolved prior effect.\n- Transport/process loss does NOT prove the old effect failed, stopped, or left Reality unchanged. Effect outcome is UNKNOWN and old-mutator liveness is UNKNOWN unless independently proven otherwise.\n- Do not replay the old Work. Use only the minimum side-effect-free Work needed to reacquire current Reality / closure evidence. Runtime rejects new effect-capable admission while an old mutator can still compete.\n- A source-traced observation proves only what was observed at that boundary. Do not promote it into stable recovery truth, prior-effect attribution, or safe fresh actuation unless Evidence establishes the required stability/liveness relation.\n- Root alone may declare a mutator non-competing. When a CONFIRMED Claim establishes that the exact old mutator is terminal and cannot continue changing Reality, emit effectClosures=[{effectAttemptId,claimId}]. This closes only future actuation competition; it does NOT invent the historical effect outcome.\n- If that liveness closure is not established, emit no effectClosure and do not request fresh effect-capable Work.\n- Do not route this technical unknown to Human unless the remaining missing information or choice is genuinely human-owned.\nUnresolved effect attempts:\n${JSON.stringify(summary,null,2)}\n`;
 }
 function commandProbe(command,args=['--version']){try{const result=spawnSync(command,args,{encoding:'utf8',timeout:3_000,windowsHide:true,shell:process.platform==='win32'});return result.status===0;}catch{return false;}}
 function fileExistsAny(paths=[]){return paths.filter(Boolean).some(path=>existsSync(path));}
@@ -86,6 +88,7 @@ Root protocol:
 - kind=delegate emits NEW bounded Work Units with goal, expectedOutput, stopCondition, projectAccess, networkAccess, dependsOn, inputRefs and optional skillId. Use the minimum capabilities and inputs actually required. Runtime rejects invalid/duplicate plans instead of asking for a repair turn.
 - kind=human_gateway is only for a current blocking Gap genuinely owned by the human. gateway.gapId and question must exactly bind that Gap. Otherwise keep UNKNOWN as a Gap or issue a Reality-acquisition Work Unit.
 - kind=complete means Root judges no residual governed obligation remains unsatisfied. Runtime deterministically checks the explicit obligation mappings.
+- effectClosures is a Root-only control mapping. Use it only to bind an exact unresolved effectAttemptId to a CONFIRMED claimId that establishes old-mutator liveness closure; it never means the historical effect outcome is known.
 - Do not restate the Task, source material, search process, old Work receipts, or already-certified conclusions.
 
 Analysis serialization:
@@ -113,7 +116,7 @@ Return only the structured response required by the output schema.`;
 Work Unit protocol:
 - Execute exactly delegation.goal. delegation.expectedOutput + delegation.stopCondition are the complete semantic boundary. Stop immediately when that bounded output is established; unused time/tool budget is not work.
 - Use only the selected Task inputs and AuthorizedGrant capabilities. Do not expand the Task or select a new goal.
-- Return only result + traceable source-near Evidence + optional execution blocker. Do not classify Task truth, confidence, Gap, recommendation, completion, next work, or what the result means.
+- Return only result + traceable source-near Evidence + optional execution blocker. Do not classify Task truth, confidence, Gap, recommendation, completion, next work, effect closure, or what the result means.
 - Search output is only a locator. For a source-code fact, read the actual file and emit PROJECT_FILE Evidence with its concrete locator + observation.
 - If expectedOutput cannot be reached inside this boundary, return the blocker and stop. Root decides what happens next.
 - Executor Environment Snapshot is a runtime fact; do not re-probe capabilities already marked unavailable.
