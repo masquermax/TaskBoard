@@ -6,7 +6,7 @@ function read(path) { return readFileSync(path,'utf8'); }
 
 test('release identity is consistent across executable/package/current release docs',()=>{
   const pkg=JSON.parse(read('package.json'));
-  const version=String(pkg.version);
+  const version=String(pkg.version),escapedVersion=version.replaceAll('.','\\.');
   const app=read('src/version.js');
   const readme=read('README.md');
   const current=read('docs/CURRENT_STATE.md');
@@ -15,13 +15,13 @@ test('release identity is consistent across executable/package/current release d
   const codex=read('docs/CODEX_INTEGRATION.md');
   const verification=read('docs/VERIFICATION.md');
 
-  assert.match(app,new RegExp(`APP_VERSION = ['\"]${version.replaceAll('.','\\.')}['\"]`));
-  assert.match(readme,new RegExp(`^# TaskBoard Codex v${version.replaceAll('.','\\.')}`,'m'));
-  assert.match(current,new RegExp(`^Release lane: \\`v${version.replaceAll('.','\\.')}\\`$`,'m'));
-  assert.match(spec,new RegExp(`^# TaskBoard Specification v${version.replaceAll('.','\\.')}`,'m'));
-  assert.match(architecture,new RegExp(`^# TaskBoard Architecture v${version.replaceAll('.','\\.')}`,'m'));
-  assert.match(codex,new RegExp(`^# Codex Integration v${version.replaceAll('.','\\.')}`,'m'));
-  assert.match(verification,new RegExp(`^# Verification v${version.replaceAll('.','\\.')}$`,'m'));
+  assert.match(app,new RegExp(`APP_VERSION = ['\"]${escapedVersion}['\"]`));
+  assert.match(readme,new RegExp(`^# TaskBoard Codex v${escapedVersion}`,'m'));
+  assert.match(current,new RegExp('^Release lane: `v'+escapedVersion+'`$','m'));
+  assert.match(spec,new RegExp(`^# TaskBoard Specification v${escapedVersion}`,'m'));
+  assert.match(architecture,new RegExp(`^# TaskBoard Architecture v${escapedVersion}`,'m'));
+  assert.match(codex,new RegExp(`^# Codex Integration v${escapedVersion}`,'m'));
+  assert.match(verification,new RegExp(`^# Verification v${escapedVersion}$`,'m'));
   assert.match(verification,/^Status: HISTORICAL SHA VERIFIED$/m);
   assert.match(verification,/Evidence scope: the exact named Git trees below only\./);
   assert.doesNotMatch(verification,/^Status: VERIFIED$/m);
