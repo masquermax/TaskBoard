@@ -3,29 +3,27 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { GovernanceCompiler } from '../src/governance/governance-compiler.js';
-import { AnalysisResultValidator } from '../src/governance/analysis-validator.js';
 import { ValidatorRuntime } from '../src/governance/validator-runtime.js';
 import { SourceTraceVerifier } from '../src/governance/source-trace-verifier.js';
 
-function analysis(evidence,claim){return{kind:'complete',summary:'x',stageResult:null,finalResult:null,resultMode:'analysis',evidence:evidence?[evidence]:[],claims:claim?[claim]:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[]};}
+function analysis(evidence,claim){return{kind:'complete',summary:'x',finalResult:null,resultMode:'analysis',evidence:evidence?[evidence]:[],claims:claim?[claim]:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[]};}
 
 test('Validator rejects project-file DIRECT Evidence when the cited observation is not in the source',()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-source-trace-'));mkdirSync(join(dir,'src'));
   writeFileSync(join(dir,'src','Example.java'),'void f(){\n  ATTRIBUTE1 = person.getFdNo();\n}\n','utf8');
   const task={id:'T',title:'OA需求分析',instruction:'根据项目核对',projectScopes:[{path:dir}],attachments:[],references:[]};
-  const policy=new GovernanceCompiler({rootDir:process.cwd()}).compileForTask(task);
-  const validator=new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()});
+  const validator=new ValidatorRuntime();
   try{
     const source={id:'E-1',strength:'direct',kind:'fact',sourceType:'project_file',coverage:'component',statement:'申请人工号写入 ATTRIBUTE1',basis:'Example.java',locator:'src/Example.java#L1-L3',observation:'申请人工号写入 ATTRIBUTE1'};
-    const reviewed=validator.reviewRoot({task,policyContext:policy,availableEvidence:[source],decision:analysis(
+    const reviewed=validator.reviewRoot({task,availableEvidence:[source],decision:analysis(
       null,
       {id:'C-1',statement:'申请人工号写入 ATTRIBUTE1。',level:'confirmed',evidenceIds:['E-1'],scope:'single_system',coverage:'component',hops:[]}
     )});
-    assert.equal(reviewed.outcome,'pass');
+    assert.equal(reviewed.outcome,'reject');
     assert.deepEqual(reviewed.decision.evidence,[],'a fake/mismatched invoice does not survive as weak Evidence');
     assert.ok(reviewed.actions.some(a=>a.action==='REJECT_UNTRACEABLE_SOURCE'));
-    assert.ok(reviewed.decision.gaps.length>0,'unsupported Root conclusion is narrowed into an explicit Gap');
+    assert.ok(reviewed.feedback.some(item=>item.action==='REJECT_UNTRACEABLE_SOURCE'));
+    assert.deepEqual(reviewed.decision.gaps,[],'Validator must not manufacture a semantic repair Gap');
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -33,11 +31,10 @@ test('Validator keeps project-file DIRECT Evidence when its raw observation exis
   const dir=mkdtempSync(join(tmpdir(),'taskboard-source-trace-ok-'));mkdirSync(join(dir,'src'));
   writeFileSync(join(dir,'src','Example.java'),'ATTRIBUTE1 = person.getFdNo();\n','utf8');
   const task={id:'T',title:'OA需求分析',instruction:'根据项目核对',projectScopes:[{path:dir}],attachments:[],references:[]};
-  const policy=new GovernanceCompiler({rootDir:process.cwd()}).compileForTask(task);
-  const validator=new ValidatorRuntime({analysisValidator:new AnalysisResultValidator()});
+  const validator=new ValidatorRuntime();
   try{
     const source={id:'E-1',strength:'direct',kind:'fact',sourceType:'project_file',coverage:'component',statement:'ATTRIBUTE1 = person.getFdNo();',basis:'Example.java',locator:'src/Example.java:1',observation:'ATTRIBUTE1 = person.getFdNo();'};
-    const reviewed=validator.reviewRoot({task,policyContext:policy,availableEvidence:[source],decision:analysis(
+    const reviewed=validator.reviewRoot({task,availableEvidence:[source],decision:analysis(
       null,
       {id:'C-1',statement:'当前组件把所选 person 的 fdNo 写入 ATTRIBUTE1。',level:'confirmed',evidenceIds:['E-1'],scope:'single_system',coverage:'component',hops:[]}
     )});
