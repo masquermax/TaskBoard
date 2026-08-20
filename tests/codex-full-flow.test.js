@@ -4,6 +4,7 @@ import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:f
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { bootstrap } from '../src/server/bootstrap.js';
+import { createBuiltinExtensionRegistry } from '../src/extensions/builtins/index.js';
 
 function createFakeCodex(dir){
   const file=join(dir,'codex-fake.mjs');
@@ -49,7 +50,7 @@ test('Codex-backed flow uses Root -> Stage/Subagent -> Root -> Human -> Root wit
   if(process.platform==='win32')return;
   const dir=mkdtempSync(join(tmpdir(),'taskboard-codex-flow-')),fake=createFakeCodex(dir),old=process.env.CODEX_COMMAND,projectDir=join(dir,'oa-project');process.env.CODEX_COMMAND=fake;mkdirSync(projectDir);let runtime=null;
   try{
-    runtime=bootstrap({rootDir:dir,executorName:'codex',startScheduler:false});
+    runtime=bootstrap({rootDir:dir,executorName:'codex',extensionRegistry:createBuiltinExtensionRegistry(),startScheduler:false});
     const health=await runtime.executor.health();assert.equal(health.connected,true);assert.equal(health.authenticated,true);
     const project=runtime.taskService.createProject({name:'OA',path:projectDir}),task=runtime.scheduler.createTask({title:'OA 需求分析',instruction:'根据项目分析本次 OA 需要覆盖的业务范围',projectId:project.id});
     await runtime.scheduler.tick();const waiting=runtime.taskService.getTask(task.id);assert.equal(waiting.status,'WAITING_HUMAN');assert.equal(waiting.pendingGateway?.question,'OA 核心范围？');
