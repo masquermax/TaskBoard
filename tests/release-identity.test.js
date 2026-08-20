@@ -17,7 +17,7 @@ test('release identity is consistent across executable/package/current release d
 
   assert.match(app,new RegExp(`APP_VERSION = ['\"]${version.replaceAll('.','\\.')}['\"]`));
   assert.match(readme,new RegExp(`^# TaskBoard Codex v${version.replaceAll('.','\\.')}`,'m'));
-  assert.match(current,new RegExp(`^Release: v${version.replaceAll('.','\\.')}$`,'m'));
+  assert.match(current,new RegExp(`^Release lane: \\`v${version.replaceAll('.','\\.')}\\`$`,'m'));
   assert.match(spec,new RegExp(`^# TaskBoard Specification v${version.replaceAll('.','\\.')}`,'m'));
   assert.match(architecture,new RegExp(`^# TaskBoard Architecture v${version.replaceAll('.','\\.')}`,'m'));
   assert.match(codex,new RegExp(`^# Codex Integration v${version.replaceAll('.','\\.')}`,'m'));
