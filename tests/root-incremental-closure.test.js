@@ -10,7 +10,7 @@ function task(){
 
 test('Root receives fresh delta plus compact semantic grid instead of replaying old raw process/evidence',async()=>{
   let request=null;
-  const executor={async runRoot(value){request=value;value.onExecutionStarted?.();return{kind:'delegate',summary:'next',stageResult:null,finalResult:null,resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[{id:'WU-NEXT',title:'next',goal:'resolve G-1',expectedOutput:'one discriminator',stopCondition:'discriminator found',projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[]}]};}};
+  const executor={async runRoot(value){request=value;value.onExecutionStarted?.();return{kind:'delegate',summary:'next',finalResult:null,resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[{id:'WU-NEXT',title:'next',goal:'resolve G-1',expectedOutput:'one discriminator',stopCondition:'discriminator found',projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[]}]};}};
   const runtime=new RootRuntime({executor,modelRouter:new ModelRouter(),subagentRuntime:{}}),current=task(),session=runtime.createSession(current);
   const fresh=[{delegationId:'WU-FRESH',result:'new fact',evidence:[{id:'E-NEW'}]}];
   await runtime.runRootTurn(current,session,{}, {rootInputs:fresh,activityKind:'synthesis'});
