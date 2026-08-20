@@ -7,6 +7,7 @@ import { taskInputRefs } from './task-input-scope.js';
 import { applyAuthorityFidelity, authoritySemanticCandidatesForWork } from '../governance/task-contract-fidelity.js';
 import { recordTaskDiagnostic } from './runtime-diagnostic.js';
 import { capabilitiesSatisfy, requiredWorkCapabilities, workMayMutate } from './work-capability.js';
+import { competingEffectAttempts } from './effect-recovery.js';
 
 function nowIso(){return new Date().toISOString();}
 function clone(value){return value==null?value:JSON.parse(JSON.stringify(value));}
@@ -49,6 +50,7 @@ function normalizeDecision(decision){
     delegations:list(decision?.delegations),
     gateway:decision?.gateway||null,
     gapResolutions:list(decision?.gapResolutions),
+    effectClosures:list(decision?.effectClosures),
   };
 }
 function composeExecutionResult(decision){return text(decision?.finalResult)||text(decision?.summary)||'任务已完成。';}
@@ -67,6 +69,7 @@ function consumeHumanTriggerRefs(session,triggerRefs=[]){for(const ref of list(t
 function validationError(violations=[]){const summary=list(violations).slice(0,6).map(v=>`${v.ruleId}:${v.target}:${v.reason}`).join(' | '),error=new Error(`GOVERNANCE_VALIDATION_FAILED${summary?`: ${summary}`:''}`);error.nonRetryable=true;error.governanceViolations=violations;return error;}
 function invalidDelegationPlan(issues=[]){const error=new Error(`ROOT_INVALID_DELEGATION_PLAN${issues.length?`: ${issues.join(' | ')}`:''}`);error.nonRetryable=true;return error;}
 function invalidControlDecision(issues=[]){const error=new Error(`ROOT_INVALID_CONTROL_DECISION${issues.length?`: ${issues.map(item=>item.reason||item).join(' | ')}`:''}`);error.nonRetryable=true;error.governanceViolations=issues;return error;}
+function invalidEffectClosure(issues=[]){const error=new Error(`ROOT_INVALID_EFFECT_CLOSURE${issues.length?`: ${issues.join(' | ')}`:''}`);error.nonRetryable=true;return error;}
 function obligationId(item){return text(item?.id);}
 function claimObligationRefs(claim){return new Set(list(claim?.obligationRefs).map(text).filter(Boolean));}
 
@@ -137,6 +140,32 @@ export class RootRuntime{
     const candidates=authoritySemanticCandidatesForWork(task,workUnits);if(!candidates.length)return task;
     const result=this.taskContractFidelityVerifier?await this.taskContractFidelityVerifier.review({task,candidates}):{reviews:[]};
     const nextContract=applyAuthorityFidelity(task.taskContract,candidates,list(result?.reviews));callbacks.onTaskContractAuthority?.(nextContract.authority);return{...task,taskContract:nextContract};
+  }
+
+  applyEffectClosures(task,session,decision,callbacks){
+    const closures=list(decision?.effectClosures);if(!closures.length)return task;
+    const attempts=new Map(competingEffectAttempts(task?.executionState).map(item=>[text(item?.id),item]).filter(([id])=>id)),claims=new Map(list(session?.certifiedContext?.claims).map(item=>[text(item?.id),item]).filter(([id])=>id)),seen=new Set(),prepared=[],issues=[];
+    for(const raw of closures){
+      const effectAttemptId=text(raw?.effectAttemptId),claimId=text(raw?.claimId),claim=claims.get(claimId);
+      if(!effectAttemptId)issues.push('effectClosure 缺少 effectAttemptId。');
+      else if(seen.has(effectAttemptId))issues.push(`effectClosure 重复指向 ${effectAttemptId}。`);
+      else seen.add(effectAttemptId);
+      if(effectAttemptId&&!attempts.has(effectAttemptId))issues.push(`effectClosure 指向的旧 mutator 不存在或已经闭合：${effectAttemptId}。`);
+      if(!claimId)issues.push(`effectClosure ${effectAttemptId||'?'} 缺少 claimId。`);
+      else if(!claim)issues.push(`effectClosure ${effectAttemptId||'?'} 引用了不存在的 Claim：${claimId}。`);
+      else if(claim?.level!=='confirmed')issues.push(`effectClosure ${effectAttemptId||'?'} 必须引用 CONFIRMED Claim：${claimId}。`);
+      else if(!list(claim?.evidenceIds).map(text).filter(Boolean).length)issues.push(`effectClosure ${effectAttemptId||'?'} 的 Claim 没有来源凭证：${claimId}。`);
+      if(effectAttemptId&&claimId&&claim?.level==='confirmed'&&list(claim?.evidenceIds).length)prepared.push({effectAttemptId,claimId,evidenceIds:[...new Set(list(claim.evidenceIds).map(text).filter(Boolean))]});
+    }
+    if(issues.length)throw invalidEffectClosure(issues);
+    if(typeof callbacks.onEffectActuationClosure!=='function')throw invalidEffectClosure(['Runtime 没有可持久化 effect closure 的 Scheduler 边界。']);
+    let nextTask=task;
+    for(const closure of prepared){
+      const nextState=callbacks.onEffectActuationClosure({...closure,terminal:true,canMutate:false});
+      if(!nextState||typeof nextState!=='object')throw invalidEffectClosure([`effectClosure ${closure.effectAttemptId} 未返回持久化后的 Runtime state。`]);
+      nextTask={...nextTask,executionState:clone(nextState)};
+    }
+    return nextTask;
   }
 
   createSession(task){
@@ -249,8 +278,8 @@ export class RootRuntime{
     }
   }
 
-  async execute(task,{humanGatewayHistory=[],onProgress=null,onStageCompleted=null,onCertifiedTurn=null,onTaskContractAuthority=null,onWorkReceipt=null,onWorkReceiptsConsumed=null,onEffectAttempt=null,onEffectAttemptCleared=null,onExecutionStarted=null}={}){
-    const session=this.sessions.get(task.id)||this.createSession(task);session.cancelRequested=false;const callbacks={onProgress,onStageCompleted,onCertifiedTurn,onTaskContractAuthority,onWorkReceipt,onWorkReceiptsConsumed,onEffectAttempt,onEffectAttemptCleared,onExecutionStarted};
+  async execute(task,{humanGatewayHistory=[],onProgress=null,onStageCompleted=null,onCertifiedTurn=null,onTaskContractAuthority=null,onWorkReceipt=null,onWorkReceiptsConsumed=null,onEffectAttempt=null,onEffectAttemptCleared=null,onEffectActuationClosure=null,onExecutionStarted=null}={}){
+    const session=this.sessions.get(task.id)||this.createSession(task);session.cancelRequested=false;const callbacks={onProgress,onStageCompleted,onCertifiedTurn,onTaskContractAuthority,onWorkReceipt,onWorkReceiptsConsumed,onEffectAttempt,onEffectAttemptCleared,onEffectActuationClosure,onExecutionStarted};
     const newlyResolvedHuman=list(humanGatewayHistory).filter(g=>g?.status==='RESOLVED'&&text(g?.id)&&!session.consumedHumanGatewayIds.has(text(g.id)));let invocationTriggerRefs=newlyResolvedHuman.map(g=>`human:${text(g.id)}`);
     if(!invocationTriggerRefs.length){const reason=text(task?.ready_reason);if(session.rootTurnCount===0&&(!reason||reason==='NEW'))invocationTriggerRefs=[`task:${task.id}`];else if(reason==='RETRY_WAIT')invocationTriggerRefs=[`technical:retry:${task.id}`];else if(reason==='WAITING_RESOURCE')invocationTriggerRefs=[`technical:resource-resume:${task.id}`];else if(reason==='SUSPENDED')invocationTriggerRefs=[`technical:manual-resume:${task.id}`];else if(session.rootTurnCount===0)invocationTriggerRefs=[`task:${task.id}`];}
     let invocationTriggerConsumed=false;
@@ -267,7 +296,7 @@ export class RootRuntime{
       catch(error){if(isCapacityUnavailable(error)&&rootInputs.length)return capacityWait({title:'Root 综合结果',detail:'Work Unit 批次结果已保留；等待 Root 资源。',reason:'等待 Root 综合资源恢复'});throw error;}
       if(decision.kind==='cancelled')return{kind:'cancelled',quiescent:this.isQuiescent(task.id)};
 
-      const reviewed=await this.reviewRootDecision(task,session,decision,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),rootInputs,triggerRefs:rootTriggerRefs});decision=reviewed.decision;consumeHumanTriggerRefs(session,rootTriggerRefs);this.consumeRootInputs(session,rootInputs);
+      const reviewed=await this.reviewRootDecision(task,session,decision,callbacks,{humanGatewayHistory:humanHistoryForTriggerRefs(humanGatewayHistory,rootTriggerRefs),rootInputs,triggerRefs:rootTriggerRefs});decision=reviewed.decision;task=this.applyEffectClosures(task,session,decision,callbacks);consumeHumanTriggerRefs(session,rootTriggerRefs);this.consumeRootInputs(session,rootInputs);
 
       if(decision.kind==='delegate'){
         if(!decision.delegations.length)throw invalidDelegationPlan(['delegate 决策必须至少包含一个 Work Unit。']);
