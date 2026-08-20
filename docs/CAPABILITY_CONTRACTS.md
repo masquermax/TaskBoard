@@ -107,6 +107,7 @@ Owns:
 Capabilities:
 - 来源真实且 DIRECT observation 与 locator 对应 → 保留 DIRECT。
 - 来源真实但不能机械核对 → 只能 INDIRECT。
+- Referenced completed Result 只能证明“这个历史 Result 的确这样写过”；原始来源链不会随引用自动继承，因此始终只作为 INDIRECT。
 - 来源不存在、伪造、locator/observation 不匹配 → 拒绝。
 - Claim/Gap/Step 引用不存在的凭证 → 拒绝。
 - CONFIRMED 依赖 INDIRECT → 拒绝可信度升级。
