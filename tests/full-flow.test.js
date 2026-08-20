@@ -24,7 +24,7 @@ test('full task flow: project -> attachment task -> Human Gateway -> completion 
     assert.equal(created.status,'READY');assert.equal(created.ready_reason,'NEW');assert.equal(created.executor_key,'mock');assert.equal(created.attachments.length,1);assert.equal(created.projectScopes[0].projectId,project.id);
 
     await runtime.scheduler.tick();const waiting=runtime.taskService.getTask(created.id);assert.equal(waiting.status,'WAITING_HUMAN');assert.equal(waiting.pendingGateway?.question,'这个系统本次最核心需要覆盖哪些业务范围？');
-    await requestJson(`${base}/api/tasks/${created.id}/answer`,{method:'POST',headers:{'content-type':'application/json','x-taskboard-action':'ui'},body:JSON.stringify({answer:'基础办公：组织、审批、公告、文档'})});
+    await requestJson(`${base}/api/tasks/${created.id}/human-gateway`,{method:'POST',headers:{'content-type':'application/json','x-taskboard-action':'ui'},body:JSON.stringify({answer:'基础办公：组织、审批、公告、文档'})});
     await runtime.scheduler.tick();const completed=runtime.taskService.getTask(created.id);assert.equal(completed.status,'COMPLETED');assert.equal(completed.final_result,'Mock 已完成执行链：做一个 OA 系统');
 
     const search=await requestJson(`${base}/api/tasks?status=COMPLETED&title=${encodeURIComponent('OA')}&project=${project.id}`);assert.equal(search.tasks.length,1);assert.equal(search.tasks[0].id,created.id);
