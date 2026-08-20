@@ -45,5 +45,6 @@ test('Gate B: ACTIVE architecture docs retain one owner model only',()=>{
   assert.doesNotMatch(active,/write[^\n]{0,120}(?:accepted|granted|grants?)?[^\n]{0,40}only[^\n]{0,120}execution[- ]mode/i);
   assert.doesNotMatch(active,/blocking Gap[^\n]{0,260}(不得|不能)[^\n]{0,120}(调查|Work Unit|delegate|delegation)/i);
   assert.doesNotMatch(active,/(taskMode|Task Mode)[^\n]{0,180}(write authority|写权限|Project write)/i);
-  assert.doesNotMatch(active,/Analysis History value decision|Root Candidate certification \/ Gap narrowing|semantic proof/i);
+  assert.doesNotMatch(active,/Analysis History value decision|Root Candidate certification \/ Gap narrowing/i);
+  assert.doesNotMatch(active,/Validator[^\n]{0,120}(?:owns|负责|执行)[^\n]{0,120}semantic proof/i,'semantic proof may be named only as an explicit absence, never as Validator authority');
 });
