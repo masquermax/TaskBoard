@@ -12,7 +12,7 @@ function baseRuntime(subagentRuntime){
   });
 }
 
-function task(){return{id:'T-EFFECT',title:'effect',instruction:'effect',projectScopes:[],attachments:[],references:[],analysisState:null,workReceipts:[],last_stage_result:null};}
+function task(){return{id:'T-EFFECT',title:'effect',instruction:'effect',projectScopes:[],attachments:[],references:[],analysisState:null,workReceipts:[]};}
 function effectUnit({projectAccess='write',networkAccess=false,inputRefs=['project:0']}={}){return{
   id:'WU-EFFECT',title:'effect',goal:'change reality',expectedOutput:'done',stopCondition:'changed',
   projectAccess,networkAccess,inputRefs,skillId:null,dependsOn:[],status:WorkUnitStatus.WAITING_RESOURCE,
@@ -78,7 +78,7 @@ test('D-023: pre-start capacity shortage clears admission and retains normal res
 test('D-023: a successful WorkReceipt can atomically close the matching effect attempt',async()=>{
   const attempts=new Map();
   let receipt=null;
-  const runtime=baseRuntime({async run(_task,_work,{onExecutionStarted}){onExecutionStarted?.();return{delegationId:'WU-EFFECT',result:'done',evidence:[],findings:[],discoveries:[],blocker:null,uncertainty:null};}});
+  const runtime=baseRuntime({async run(_task,_work,{onExecutionStarted}){onExecutionStarted?.();return{delegationId:'WU-EFFECT',result:'done',evidence:[],blocker:null};}});
   const t=task();const session=runtime.createSession(t);session.currentStage={id:'stage-1',title:'current',startedAt:new Date().toISOString(),workUnits:[effectUnit()]};
   const unit=session.currentStage.workUnits[0];
   await runtime.startSubagent(t,session,unit,{
