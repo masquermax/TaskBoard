@@ -38,6 +38,20 @@ function work(id,title=id,overrides={}) {
   };
 }
 
+function humanGatewayExecutor(){
+  const gap={id:'G-HUMAN',question:'请选择本次范围',reason:'该范围由用户拥有',kind:'business_decision',blocking:true,evidenceIds:[]};
+  return{
+    async runRoot({humanGatewayHistory=[],onExecutionStarted}){
+      onExecutionStarted?.();
+      const resolved=humanGatewayHistory.find(item=>item?.status==='RESOLVED');
+      if(!resolved)return{kind:'human_gateway',summary:'等待用户范围',finalResult:null,resultMode:'execution',evidence:[],claims:[],gaps:[gap],recommendations:[],steps:[],gapResolutions:[],gateway:{gapId:gap.id,question:gap.question,context:gap.reason,options:['基础办公']},delegations:[]};
+      const evidenceId=`E-HUMAN-${resolved.id}`;
+      return{kind:'complete',summary:'用户范围已确认',finalResult:'done',resultMode:'execution',evidence:[{id:evidenceId,strength:'direct',kind:'requirement',sourceType:'human',coverage:'source',statement:resolved.answer,basis:`Human Gateway ${resolved.id}`,locator:`human:${resolved.id}`,observation:resolved.answer}],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[{gapId:gap.id,reason:'用户已明确该范围',evidenceIds:[evidenceId]}],gateway:null,delegations:[]};
+    },
+    async runSubagent(){throw new Error('unused');},
+  };
+}
+
 function rig(executor=new MockExecutor(),{maxConcurrentSubagents=3,retryDelaysMs=[0,0,0,0]}={}) {
   const dir=mkdtempSync(join(tmpdir(),'taskboard-scheduler-'));
   const db=new JsonTaskDatabase(join(dir,'db.json'));
@@ -60,9 +74,9 @@ async function waitUntil(predicate,{tries=120,delay=3}={}) {
 }
 
 test('Scheduler owns Human Gateway lifecycle and resumes only after the answer',async()=>{
-  const x=rig();
+  const x=rig(humanGatewayExecutor());
   try{
-    const task=x.scheduler.createTask({title:'做一个 OA 系统',instruction:'你帮我做了吧'});
+    const task=x.scheduler.createTask({title:'需要用户范围',instruction:'执行'});
     await x.scheduler.tick();
     assert.equal(x.service.getTask(task.id).status,TaskStatus.WAITING_HUMAN);
     x.scheduler.answerHumanGateway(task.id,'基础办公');
@@ -175,14 +189,12 @@ test('manual Root retry starts a new Root attempt instead of retrying a fake Wor
     const suspended=x.repo.getTask(task.id);
     assert.equal(suspended.ready_reason,ReadyReason.SUSPENDED);
     assert.equal(suspended.executionState.snapshot.stage,null);
-    x.scheduler.retryTask(task.id,'root');
-    const reset=x.repo.getTask(task.id);
+    const reset=x.scheduler.retryTask(task.id,'root');
     assert.equal(reset.ready_reason,ReadyReason.WAITING_RESOURCE);
     assert.equal(reset.executionState.retry.scope,'root');
     assert.equal(reset.executionState.retry.failureCount,0);
-    await x.scheduler.tick();
+    assert.equal(await waitUntil(()=>x.service.getTask(task.id).status===TaskStatus.COMPLETED),true);
     assert.equal(rootCalls,2);
-    assert.equal(x.service.getTask(task.id).status,TaskStatus.COMPLETED);
   }finally{x.close();}
 });
 
@@ -264,16 +276,15 @@ test('manual retry changes the suspended Work Unit only and continues the existi
     assert.equal(before.status,WorkUnitStatus.SUSPENDED);
     const taskReadyEnteredAt=suspended.status_entered_at;
 
-    x.scheduler.retryTask(task.id,'w');
-    const reset=x.rootRuntime.snapshot(task.id).stage.workUnits[0];
+    const ready=x.scheduler.retryTask(task.id,'w');
+    const reset=ready.executionState.snapshot.stage.workUnits[0];
     assert.equal(reset.status,WorkUnitStatus.WAITING_RESOURCE);
     assert.equal(reset.failureCount,0);
-    assert.equal(x.repo.getTask(task.id).status_entered_at,taskReadyEnteredAt,'retrying the Work Unit must not rewrite Task READY entry time');
+    assert.equal(ready.status_entered_at,taskReadyEnteredAt,'retrying the Work Unit must not rewrite Task READY entry time');
 
-    await x.scheduler.tick();
+    assert.equal(await waitUntil(()=>x.service.getTask(task.id).status===TaskStatus.COMPLETED),true);
     assert.equal(subagentCalls,2);
     assert.equal(rootCalls,2,'the original Root plan is not replayed; Root resumes only after the retried Stage completes');
-    assert.equal(x.service.getTask(task.id).status,TaskStatus.COMPLETED);
   }finally{x.close();}
 });
 
@@ -324,9 +335,9 @@ test('cancel waits for an active Subagent promise to settle before completing th
 });
 
 test('WAITING_HUMAN is quiescent and Scheduler may cancel it directly',async()=>{
-  const x=rig();
+  const x=rig(humanGatewayExecutor());
   try{
-    const task=x.scheduler.createTask({title:'做一个 OA 系统',instruction:'你帮我做了吧'});
+    const task=x.scheduler.createTask({title:'等待用户范围',instruction:'执行'});
     await x.scheduler.tick();
     assert.equal(x.service.getTask(task.id).status,TaskStatus.WAITING_HUMAN);
     const result=x.scheduler.requestCancel(task.id);
