@@ -80,14 +80,15 @@ export class Scheduler {
       const recoveryBlocked=hasCompetingEffectActuation(task.executionState);
       const gate=(suspended||retrying)?null:this.executorReadiness();
       const blocked=gate&&gate.ready===false;
-      const retryDetail=snapshot?.stage?.workUnits?.find?.(unit=>unit?.status===WorkUnitStatus.RETRY_WAIT)?.detail || task.executionState?.retry?.reason || '上一轮执行未成功；系统会在错峰等待后自动重试。';
+      const rootRetryDetail=snapshot?.actor?.owner==='root'&&[WorkUnitStatus.RETRY_WAIT,WorkUnitStatus.SUSPENDED].includes(snapshot.actor.status)?snapshot.actor.detail:null;
+      const retryDetail=rootRetryDetail||snapshot?.stage?.workUnits?.find?.(unit=>unit?.status===WorkUnitStatus.RETRY_WAIT)?.detail || task.executionState?.retry?.reason || '上一轮执行未成功；系统会在错峰等待后自动重试。';
       return {
         taskId,
         state:suspended?'suspended':'queued',
         summary:recoveryBlocked?'现实操作结果待核对':(suspended?'任务存在挂起项':(retrying?'等待自动重试':(blocked?'等待执行资源':'等待执行'))),
         detail:recoveryBlocked
           ? (isEffectRecoveryObservation(task)?'系统正在准备一次只读恢复核对；旧现实操作不会被自动重放。':'上次现实操作的结果仍不确定；系统已停止自动重放，也不会把未知当成失败。')
-          : (suspended?'自动恢复已停止，请在挂起项右上角点击 ↻ 重新尝试。':(retrying?retryDetail:(blocked?(gate.message||'当前执行资源尚未就绪。'):'Scheduler 会在满足条件后自动开始。'))),
+          : (suspended?(rootRetryDetail||'自动恢复已停止，请在挂起项右上角点击 ↻ 重新尝试。'):(retrying?retryDetail:(blocked?(gate.message||'当前执行资源尚未就绪。'):'Scheduler 会在满足条件后自动开始。'))),
         updatedAt:task.status_entered_at,
         current:snapshot,
         history:this.currentHistory(taskId),
@@ -138,20 +139,21 @@ export class Scheduler {
     const previousCount=previous?.scope==='root'&&!previous?.reset ? Number(previous.failureCount||0) : 0;
     const failureCount=previousCount+1;
     const policy=classifyRetry(error);
-    const rootUnit={id:'root',title:'综合分析',status:WorkUnitStatus.RETRY_WAIT,detail:'',updatedAt:nowIso(),failureCount,nextRetryAt:null,canRetry:false,owner:'root'};
+    const updatedAt=nowIso();
+    const actor={id:'root',title:'Root 判断',status:WorkUnitStatus.RETRY_WAIT,detail:'',issuedAt:null,startedAt:null,completedAt:null,updatedAt,failureCount,nextRetryAt:null,canRetry:false,owner:'root'};
     let retry;
     let readyReason;
     if(!policy.retryable||failureCount>=MAX_TOTAL_ATTEMPTS){
-      rootUnit.status=WorkUnitStatus.SUSPENDED;rootUnit.canRetry=true;rootUnit.detail=suspendedInstruction(policy.reason,policy.message,failureCount);
+      actor.status=WorkUnitStatus.SUSPENDED;actor.canRetry=true;actor.detail=suspendedInstruction(policy.reason,policy.message,failureCount);
       retry={scope:'root',failureCount,paused:true,nextAt:null,reason:policy.reason,error:policy.message};
       readyReason=ReadyReason.SUSPENDED;
     }else{
       const delay=retryDelayMs(failureCount,this.retryDelaysMs);const nextAt=new Date(Date.now()+delay).toISOString();
-      rootUnit.nextRetryAt=nextAt;rootUnit.detail=waitingRetryInstruction(policy.reason,policy.message,failureCount,delay);
+      actor.nextRetryAt=nextAt;actor.detail=waitingRetryInstruction(policy.reason,policy.message,failureCount,delay);
       retry={scope:'root',failureCount,paused:false,nextAt,reason:policy.reason,error:policy.message};
       readyReason=ReadyReason.RETRY_WAIT;
     }
-    return {retry,readyReason,snapshot:{taskId:task.id,actor:null,stage:{id:'root-retry',title:'当前阶段',startedAt:task.status_entered_at,workUnits:[rootUnit]},updatedAt:rootUnit.updatedAt}};
+    return {retry,readyReason,snapshot:{taskId:task.id,actor,stage:null,completedWorkUnits:[],updatedAt}};
   }
 
   persistEffectAttempt(taskId,attempt){
@@ -329,10 +331,10 @@ export class Scheduler {
         if(current.status===TaskStatus.RUNNING)this.repository.transitionTask(taskId,TaskStatus.READY,{readyReason,executionState:state});
         else this.repository.touchTask(taskId,{readyReason,executionState:state});
         if(recoveryBlocked||failure.retry.paused){
-          this.setActivity(taskId,{state:'suspended',summary:recoveryBlocked?'现实操作结果待核对':'执行已挂起',detail:recoveryBlocked?'系统不会把未知结果当成失败重试；只有独立 closure Evidence 能解除旧 mutator 的竞争屏障。':failure.snapshot.stage.workUnits[0].detail,current:failure.snapshot});
+          this.setActivity(taskId,{state:'suspended',summary:recoveryBlocked?'现实操作结果待核对':'执行已挂起',detail:recoveryBlocked?'系统不会把未知结果当成失败重试；只有独立 closure Evidence 能解除旧 mutator 的竞争屏障。':failure.snapshot.actor.detail,current:failure.snapshot});
           console.error(`[task ${taskId}] execution suspended after ${failure.retry.failureCount} failure(s)`,error);
         }else{
-          this.setActivity(taskId,{state:'queued',summary:'等待自动重试',detail:failure.snapshot.stage.workUnits[0].detail,current:failure.snapshot});
+          this.setActivity(taskId,{state:'queued',summary:'等待自动重试',detail:failure.snapshot.actor.detail,current:failure.snapshot});
           console.error(`[task ${taskId}] execution failed ${failure.retry.failureCount}/${MAX_TOTAL_ATTEMPTS}`,error);
         }
       }
