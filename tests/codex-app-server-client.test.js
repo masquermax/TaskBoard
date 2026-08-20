@@ -19,6 +19,12 @@ test('Codex client consumes item/completed as the final agent message and releas
   try{const text=await client.runTurn({cwd:dir,prompt:'test',inputItems:[],outputSchema:{type:'object'},networkAccess:false,...grant(dir)});assert.match(text,/"kind":"complete"/);assert.equal(client.activeTurnCount,0);const events=diagnostics.map(line=>JSON.parse(line.replace(/^\[codex-runtime\] /,'')));assert.ok(events.some(x=>x.event==='turn-started'));assert.ok(events.some(x=>x.event==='turn-released'&&x.activeTurnCount===0));}finally{client.close();rmSync(dir,{recursive:true,force:true});}
 });
 
+test('one app-server notification is delivered or queued, never both',async()=>{
+  const client=new CodexAppServerClient({command:'unused'}),matches=msg=>msg.method==='unit/event';
+  const waiting=client.waitFor(matches,60_000);client.emitNotification({method:'unit/event',params:{n:1}});assert.equal((await waiting).params.n,1);assert.equal(client.recentNotifications.length,0,'an event delivered to a live waiter must not be replayed from the queue');
+  client.emitNotification({method:'unit/event',params:{n:2}});assert.equal(client.recentNotifications.length,1);assert.equal((await client.waitFor(matches,60_000)).params.n,2);assert.equal(client.recentNotifications.length,0);client.close();
+});
+
 test('Codex client fails closed when app-server does not confirm the requested permission profile',async()=>{
   if(process.platform==='win32')return;const dir=mkdtempSync(join(tmpdir(),'taskboard-codex-permission-')),command=writeExecutable(join(dir,'codex-ignore.mjs'),`
 import readline from 'node:readline';if(process.argv.includes('--version')){console.log('codex-fake');process.exit(0);}const rl=readline.createInterface({input:process.stdin});const send=v=>process.stdout.write(JSON.stringify(v)+'\\n');rl.on('line',line=>{const m=JSON.parse(line);if(m.method==='initialize')return send({id:m.id,result:{}});if(m.method==='thread/start')return send({id:m.id,result:{thread:{id:'thr',ephemeral:true},runtimeWorkspaceRoots:m.params.runtimeWorkspaceRoots||[]}});});
