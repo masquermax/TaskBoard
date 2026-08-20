@@ -44,7 +44,7 @@ test('ModelRouter releases per-task capability cache when execution session is d
 
 test('invalid Root delegation graph fails at the deterministic contract boundary without a repair turn',async()=>{
   let turns=0,subagentCalls=0;
-  const executor={async runRoot(){turns+=1;return{kind:'delegate',summary:'bad plan',stageResult:null,finalResult:null,resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[{id:'a',title:'A',goal:'A',expectedOutput:'A',stopCondition:'done',projectAccess:'none',networkAccess:false,inputRefs:[],skillId:null,dependsOn:['b']},{id:'b',title:'B',goal:'B',expectedOutput:'B',stopCondition:'done',projectAccess:'none',networkAccess:false,inputRefs:[],skillId:null,dependsOn:['a']}]};},async runSubagent(){subagentCalls+=1;}};
+  const executor={async runRoot(){turns+=1;return{kind:'delegate',summary:'bad plan',finalResult:null,resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[{id:'a',title:'A',goal:'A',expectedOutput:'A',stopCondition:'done',projectAccess:'none',networkAccess:false,inputRefs:[],skillId:null,dependsOn:['b']},{id:'b',title:'B',goal:'B',expectedOutput:'B',stopCondition:'done',projectAccess:'none',networkAccess:false,inputRefs:[],skillId:null,dependsOn:['a']}]};},async runSubagent(){subagentCalls+=1;}};
   await assert.rejects(runtime(executor).execute({id:'T-plan',title:'执行',instruction:'执行任务',projectScopes:[],attachments:[],references:[]}),/ROOT_INVALID_DELEGATION_PLAN/);
   assert.equal(turns,1);assert.equal(subagentCalls,0);
 });
