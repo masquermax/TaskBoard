@@ -8,13 +8,14 @@ import { TaskService } from '../src/core/task-service.js';
 import { Scheduler } from '../src/core/scheduler.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
 import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
+import { asRuntimeExecutor } from './helpers/runtime-executor.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { ModelRouter } from '../src/core/model-router.js';
 import { MockExecutor } from '../src/extensions/executors/mock/mock-executor.js';
 import { TaskStatus, ReadyReason } from '../src/core/types.js';
 
 function setupScheduler(executor=new MockExecutor(),options={}){
-  const dir=mkdtempSync(join(tmpdir(),'taskboard-queue-')),db=new JsonTaskDatabase(join(dir,'db.json')),repo=new JsonTaskRepository(db),service=new TaskService(repo),router=new ModelRouter(),subagentRuntime=new SubagentRuntime({executor,modelRouter:router}),rootRuntime=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:router,subagentRuntime,retryDelaysMs:options.retryDelaysMs||[0,0,0,0],maxConcurrentSubagents:options.maxConcurrentSubagents||4}),scheduler=new Scheduler({repository:repo,taskService:service,rootRuntime,intervalMs:999999,maxConcurrentTasks:options.maxConcurrentTasks||2,retryDelaysMs:options.retryDelaysMs||[0,0,0,0]});return{dir,db,repo,service,scheduler,rootRuntime,close(){scheduler.stop();db.close();rmSync(dir,{recursive:true,force:true});}};
+  const dir=mkdtempSync(join(tmpdir(),'taskboard-queue-')),db=new JsonTaskDatabase(join(dir,'db.json')),repo=new JsonTaskRepository(db),service=new TaskService(repo),router=new ModelRouter(),runtimeExecutor=asRuntimeExecutor(executor),subagentRuntime=new SubagentRuntime({executor:runtimeExecutor,modelRouter:router}),rootRuntime=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor:runtimeExecutor,modelRouter:router,subagentRuntime,retryDelaysMs:options.retryDelaysMs||[0,0,0,0],maxConcurrentSubagents:options.maxConcurrentSubagents||4}),scheduler=new Scheduler({repository:repo,taskService:service,rootRuntime,intervalMs:999999,maxConcurrentTasks:options.maxConcurrentTasks||2,retryDelaysMs:options.retryDelaysMs||[0,0,0,0]});return{dir,db,repo,service,scheduler,rootRuntime,close(){scheduler.stop();db.close();rmSync(dir,{recursive:true,force:true});}};
 }
 const complete=finalResult=>({kind:'complete',summary:'done',finalResult:finalResult||'done',resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[],gateway:null,delegations:[]});
 
