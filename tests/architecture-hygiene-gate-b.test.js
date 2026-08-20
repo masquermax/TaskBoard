@@ -12,10 +12,11 @@ test('Gate B: AppServerClient does not derive action policy from role identity',
 });
 
 test('Gate B: Runtime has no parallel stage-result, semantic History, Validator-model or repair channel',()=>{
-  const root=source('src/core/root-runtime.js'),validator=source('src/governance/validator-runtime.js'),scheduler=source('src/core/scheduler.js'),repository=source('src/core/json-repository.js'),executor=source('src/extensions/executors/codex/codex-executor.js');
-  for(const text of [root,validator,scheduler,executor])assert.doesNotMatch(text,/planningFeedback|validationFeedback|authorityHandoff|completionFeedback|semanticReviewRoot|runValidator/);
+  const root=source('src/core/root-runtime.js'),validator=source('src/governance/validator-runtime.js'),completion=source('src/governance/completion-evaluator.js'),scheduler=source('src/core/scheduler.js'),repository=source('src/core/json-repository.js'),executor=source('src/extensions/executors/codex/codex-executor.js');
+  for(const text of [root,validator,completion,scheduler,executor])assert.doesNotMatch(text,/planningFeedback|validationFeedback|authorityHandoff|completionFeedback|semanticReviewRoot|runValidator/);
   assert.doesNotMatch(root,/stageResult|lastCommittedStageResult|onProgressCommit|historyCommit/);
   assert.doesNotMatch(validator,/stageResult|deriveNewRootProgress|historyCommit|semanticVerifier|analysisValidator/);
+  assert.doesNotMatch(completion,/stageResult|semanticVerifier|analysisValidator|modelVerifier/);
   assert.doesNotMatch(executor,/stageResult|validatorPrompt|validatorSchema|runValidator/);
   assert.doesNotMatch(scheduler,/onProgressCommit|commitProgressHistory|lastStageResult|owner\s*===\s*['"]validator['"]/);
   assert.doesNotMatch(repository,/updateStageResult|commitProgressHistory|lastStageResult|historyCommit/);
