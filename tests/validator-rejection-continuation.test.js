@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ExecutorPort } from '../src/core/executor-port.js';
+import { ExecutorRuntimeAdapter } from '../src/core/executor-runtime.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
 
 function complete(summary){return{kind:'complete',summary,finalResult:'done',resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[]};}
@@ -23,7 +24,7 @@ function task(){
 }
 
 test('Validator rejection is a Root delta, not a Scheduler suspension or receipt loss',async()=>{
-  const executor=new CaptureExecutor();let reviews=0;
+  const extensionExecutor=new CaptureExecutor(),executor=new ExecutorRuntimeAdapter(extensionExecutor);let reviews=0;
   const validatorRuntime={
     reviewRoot({decision}){
       reviews+=1;
@@ -43,11 +44,11 @@ test('Validator rejection is a Root delta, not a Scheduler suspension or receipt
 
   assert.equal(outcome.kind,'goal_satisfied');
   assert.equal(reviews,2);
-  assert.equal(executor.calls.length,2,'Root should immediately re-enter once with the deterministic rejection delta');
-  assert.equal(executor.calls[0].context.validatorRejection,null);
-  assert.equal(executor.calls[1].context.validatorRejection.feedback[0].target,'evidence:E1');
-  assert.match(executor.calls[1].context.validatorRejection.feedback[0].reason,/来源凭证与原文不一致/);
-  assert.deepEqual(executor.calls.map(call=>call.context.freshWorkResults.map(item=>item.delegationId)),[['WU-1'],['WU-1']],'rejected Candidate must not consume the Work receipt before Root corrects its judgment');
+  assert.equal(extensionExecutor.calls.length,2,'Root should immediately re-enter once with the deterministic rejection delta');
+  assert.equal(extensionExecutor.calls[0].context.validatorRejection,null);
+  assert.equal(extensionExecutor.calls[1].context.validatorRejection.feedback[0].target,'evidence:E1');
+  assert.match(extensionExecutor.calls[1].context.validatorRejection.feedback[0].reason,/来源凭证与原文不一致/);
+  assert.deepEqual(extensionExecutor.calls.map(call=>call.context.freshWorkResults.map(item=>item.delegationId)),[['WU-1'],['WU-1']],'rejected Candidate must not consume the Work receipt before Root corrects its judgment');
   assert.deepEqual(consumed,[['WU-1']],'receipt is consumed only after a passing Root decision');
   assert.equal(certifiedTurns,0,'rejected Candidate never enters Certified State');
 });
