@@ -11,6 +11,7 @@ import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { Scheduler } from '../src/core/scheduler.js';
 import { MockExecutor } from '../src/extensions/executors/mock/mock-executor.js';
 import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
+import { asRuntimeExecutor } from './helpers/runtime-executor.js';
 import { TaskStatus, ReadyReason, CompletionReason, WorkUnitStatus } from '../src/core/types.js';
 
 function executionComplete(result='done') {
@@ -43,10 +44,11 @@ function rig(executor=new MockExecutor(),{maxConcurrentSubagents=3,retryDelaysMs
   const repo=new JsonTaskRepository(db);
   const service=new TaskService(repo);
   const router=new ModelRouter();
-  const subagentRuntime=new SubagentRuntime({executor,modelRouter:router});
+  const runtimeExecutor=asRuntimeExecutor(executor);
+  const subagentRuntime=new SubagentRuntime({executor:runtimeExecutor,modelRouter:router});
   const rootRuntime=new RootRuntime({
     ...successfulCompletionDependenciesForControlFlowTest(),
-    executor, modelRouter:router, subagentRuntime, maxConcurrentSubagents, retryDelaysMs,
+    executor:runtimeExecutor, modelRouter:router, subagentRuntime, maxConcurrentSubagents, retryDelaysMs,
   });
   const scheduler=new Scheduler({repository:repo,taskService:service,rootRuntime,intervalMs:999999,retryDelaysMs});
   return {dir,db,repo,service,rootRuntime,scheduler,close(){scheduler.stop();db.close();rmSync(dir,{recursive:true,force:true});}};
