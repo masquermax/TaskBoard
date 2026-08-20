@@ -9,49 +9,17 @@ import { ModelRouter } from '../src/core/model-router.js';
 
 function blockingGap(id='G-SCOPE',question='请选择当前任务范围'){return{id,question,reason:'该信息属于尚未解决的必要边界',kind:'business_decision',blocking:true,evidenceIds:[]};}
 function analysisStateWithBlockingGap(){return{version:1,current:{resultMode:'analysis',evidence:[],claims:[],gaps:[blockingGap()],recommendations:[],steps:[]},turns:[]};}
-function baseDecision(overrides={}){return{kind:'complete',summary:'candidate',stageResult:null,finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[],gateway:null,delegations:[],...overrides};}
+function baseDecision(overrides={}){return{kind:'complete',summary:'candidate',finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[],gateway:null,delegations:[],...overrides};}
 function runtimeWith(executor){return new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter:new ModelRouter(),subagentRuntime:{async run(){throw new Error('SUBAGENT_MUST_NOT_RUN');}},validatorRuntime:new ValidatorRuntime({sourceTraceVerifier:{enforce:({evidence=[]})=>({evidence,actions:[],verifications:[]})}})});}
 
-test('Gap resolution cannot delete certified uncertainty with only INDIRECT evidence',()=>{
-  const state=analysisStateWithBlockingGap();
-  const decision={resultMode:'analysis',evidence:[{id:'E-INDIRECT',strength:'indirect',kind:'fact',sourceType:'human',coverage:'system',statement:'按当前信息继续',basis:'Human Gateway',locator:'Human Gateway HG-1',observation:'按当前信息继续'}],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[{gapId:'G-SCOPE',reason:'继续推动',evidenceIds:['E-INDIRECT']}]};
-  const applied=applyCertifiedDelta(state,decision,{triggerRefs:['human:HG-1']});
-  assert.ok(applied.current.gaps.some(g=>g.id==='G-SCOPE'));
-  assert.ok(applied.issues.some(issue=>issue.code==='GAP_RESOLUTION_REQUIRES_DIRECT_EVIDENCE'));
-});
+test('Gap resolution cannot delete certified uncertainty with only INDIRECT evidence',()=>{const state=analysisStateWithBlockingGap(),decision={resultMode:'analysis',evidence:[{id:'E-INDIRECT',strength:'indirect',kind:'fact',sourceType:'human',coverage:'system',statement:'按当前信息继续',basis:'Human Gateway',locator:'Human Gateway HG-1',observation:'按当前信息继续'}],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[{gapId:'G-SCOPE',reason:'继续推动',evidenceIds:['E-INDIRECT']}]},applied=applyCertifiedDelta(state,decision,{triggerRefs:['human:HG-1']});assert.ok(applied.current.gaps.some(g=>g.id==='G-SCOPE'));assert.ok(applied.issues.some(issue=>issue.code==='GAP_RESOLUTION_REQUIRES_DIRECT_EVIDENCE'));});
 
-test('Human Evidence carries the exact resolved Gateway and target Gap provenance',()=>{
-  const verdict=new SourceTraceVerifier().verifyEvidence({task:{id:'T-1',instruction:'分析当前需求'},humanGatewayHistory:[{id:'HG-7',status:'RESOLVED',question:'请选择当前任务范围',answer:'按当前信息继续推断',targetGapId:'G-SCOPE'}],evidence:{id:'E-H',strength:'direct',kind:'requirement',sourceType:'human',coverage:'system',statement:'按当前信息继续推断',basis:'Human Gateway HG-7',locator:'Human Gateway HG-7',observation:'按当前信息继续推断'}});
-  assert.equal(verdict.verified,true);assert.equal(verdict.gatewayId,'HG-7');assert.equal(verdict.targetGapId,'G-SCOPE');
-});
+test('Human Evidence carries the exact resolved Gateway and target Gap provenance',()=>{const verdict=new SourceTraceVerifier().verifyEvidence({task:{id:'T-1',instruction:'分析当前需求'},humanGatewayHistory:[{id:'HG-7',status:'RESOLVED',question:'请选择当前任务范围',answer:'按当前信息继续推断',targetGapId:'G-SCOPE'}],evidence:{id:'E-H',strength:'direct',kind:'requirement',sourceType:'human',coverage:'system',statement:'按当前信息继续推断',basis:'Human Gateway HG-7',locator:'Human Gateway HG-7',observation:'按当前信息继续推断'}});assert.equal(verdict.verified,true);assert.equal(verdict.gatewayId,'HG-7');assert.equal(verdict.targetGapId,'G-SCOPE');});
 
-test('Root complete with a blocking Gap is rejected once; Runtime does not manufacture a control handoff turn',async()=>{
-  let rootCalls=0;
-  const executor={async runRoot({onExecutionStarted}){rootCalls+=1;onExecutionStarted?.();return baseDecision({gaps:[blockingGap()]});}};
-  const runtime=runtimeWith(executor);
-  await assert.rejects(runtime.execute({id:'T-BLOCK',title:'block',instruction:'test',projectScopes:[],attachments:[],references:[],analysisState:null}),/ROOT_INVALID_CONTROL_DECISION/);
-  assert.equal(rootCalls,1);
-});
+test('Root complete with a blocking Gap is rejected once; Runtime does not manufacture a control handoff turn',async()=>{let rootCalls=0;const executor={async runRoot({onExecutionStarted}){rootCalls+=1;onExecutionStarted?.();return baseDecision({gaps:[blockingGap()]});}},runtime=runtimeWith(executor);await assert.rejects(runtime.execute({id:'T-BLOCK',title:'block',instruction:'test',projectScopes:[],attachments:[],references:[],analysisState:null}),/ROOT_INVALID_CONTROL_DECISION/);assert.equal(rootCalls,1);});
 
-test('Root can choose the matching Human Gateway in the same judgment turn',async()=>{
-  let rootCalls=0;const gap=blockingGap('G-H','请选择 A 或 B');
-  const executor={async runRoot({onExecutionStarted}){rootCalls+=1;onExecutionStarted?.();return baseDecision({kind:'human_gateway',gaps:[gap],gateway:{gapId:'G-H',question:gap.question,context:'需要用户决定',options:['A','B']}});}};
-  const runtime=runtimeWith(executor);
-  const outcome=await runtime.execute({id:'T-HUMAN',title:'human',instruction:'test',projectScopes:[],attachments:[],references:[],analysisState:null});
-  assert.equal(outcome.kind,'needs_human');assert.equal(outcome.gateway.targetGapId,'G-H');assert.equal(rootCalls,1);
-});
+test('Root can choose the matching Human Gateway in the same judgment turn',async()=>{let rootCalls=0;const gap=blockingGap('G-H','请选择 A 或 B'),executor={async runRoot({onExecutionStarted}){rootCalls+=1;onExecutionStarted?.();return baseDecision({kind:'human_gateway',gaps:[gap],gateway:{gapId:'G-H',question:gap.question,context:'需要用户决定',options:['A','B']}});}},runtime=runtimeWith(executor),outcome=await runtime.execute({id:'T-HUMAN',title:'human',instruction:'test',projectScopes:[],attachments:[],references:[],analysisState:null});assert.equal(outcome.kind,'needs_human');assert.equal(outcome.gateway.targetGapId,'G-H');assert.equal(rootCalls,1);});
 
-test('invalid investigation Work is rejected once even when Root also reports a blocking Gap',async()=>{
-  let rootCalls=0;
-  const executor={async runRoot({onExecutionStarted}){rootCalls+=1;onExecutionStarted?.();return baseDecision({kind:'delegate',gaps:[blockingGap('G-MISSING','缺什么字段？')],delegations:[{id:'WU-BAD',title:'扩大调查',goal:'继续碰碰运气',expectedOutput:'字段值',stopCondition:'找到即停止',projectAccess:'read',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[]}]});}};
-  const runtime=runtimeWith(executor);
-  await assert.rejects(runtime.execute({id:'T-BAD-WORK',title:'bad',instruction:'test',projectScopes:[],attachments:[],references:[],analysisState:null}),/ROOT_INVALID_DELEGATION_PLAN/);
-  assert.equal(rootCalls,1);
-});
+test('invalid investigation Work is rejected once even when Root also reports a blocking Gap',async()=>{let rootCalls=0;const executor={async runRoot({onExecutionStarted}){rootCalls+=1;onExecutionStarted?.();return baseDecision({kind:'delegate',gaps:[blockingGap('G-MISSING','缺什么字段？')],delegations:[{id:'WU-BAD',title:'扩大调查',goal:'继续碰碰运气',expectedOutput:'字段值',stopCondition:'找到即停止',projectAccess:'read',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[]}]});}},runtime=runtimeWith(executor);await assert.rejects(runtime.execute({id:'T-BAD-WORK',title:'bad',instruction:'test',projectScopes:[],attachments:[],references:[],analysisState:null}),/ROOT_INVALID_DELEGATION_PLAN/);assert.equal(rootCalls,1);});
 
-test('Current Certified State cannot be used as a synthetic trigger for a new durable Turn',async()=>{
-  const runtime=runtimeWith({});
-  const task={id:'T-NO-TRIGGER',title:'x',instruction:'x',projectScopes:[],attachments:[],references:[],analysisState:analysisStateWithBlockingGap()};
-  const session=runtime.createSession(task);
-  await assert.rejects(runtime.reviewRootDecision(task,session,baseDecision({kind:'delegate'}),{}, {humanGatewayHistory:[],rootInputs:[],triggerRefs:[]}),/ROOT_TURN_WITHOUT_TRIGGER/);
-});
+test('Current Certified State cannot be used as a synthetic trigger for a new durable Turn',async()=>{const runtime=runtimeWith({}),task={id:'T-NO-TRIGGER',title:'x',instruction:'x',projectScopes:[],attachments:[],references:[],analysisState:analysisStateWithBlockingGap()},session=runtime.createSession(task);await assert.rejects(runtime.reviewRootDecision(task,session,baseDecision({kind:'delegate'}),{}, {humanGatewayHistory:[],rootInputs:[],triggerRefs:[]}),/ROOT_TURN_WITHOUT_TRIGGER/);});
