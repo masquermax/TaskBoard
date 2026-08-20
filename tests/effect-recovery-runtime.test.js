@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RootRuntime } from '../src/core/root-runtime.js';
 import { WorkUnitStatus } from '../src/core/types.js';
+import { addUnresolvedEffectAttempt, hasCompetingEffectActuation, hasUnresolvedEffectRecovery, markEffectActuationClosed } from '../src/core/effect-recovery.js';
 
 function baseRuntime(subagentRuntime){
   return new RootRuntime({
@@ -91,4 +92,27 @@ test('D-023: a successful WorkReceipt can atomically close the matching effect a
   assert.ok(receipt?.effectAttemptId);
   assert.equal(attempts.size,0);
   assert.equal(unit.status,WorkUnitStatus.COMPLETED);
+});
+
+test('D-023: Root may close only an exact competing mutator through a CONFIRMED Claim',()=>{
+  const runtime=baseRuntime({async run(){throw new Error('unused');}}),base=task();
+  const executionState=addUnresolvedEffectAttempt(null,{id:'effect:old',workUnitId:'WU-OLD',projectAccess:'write',networkAccess:false,inputRefs:[],resolved:false});
+  const current={...base,executionState},session=runtime.createSession(current);
+  session.certifiedContext={...session.certifiedContext,claims:[{id:'C-CLOSE',statement:'old mutator is terminal',level:'confirmed',evidenceIds:['E-CLOSE'],scope:'general',coverage:'component',hops:[]}]};
+  let persisted=null,closure=null;
+  const next=runtime.applyEffectClosures(current,session,{effectClosures:[{effectAttemptId:'effect:old',claimId:'C-CLOSE'}]},{onEffectActuationClosure:value=>{closure=value;persisted=markEffectActuationClosed(current.executionState,value);return persisted;}});
+  assert.equal(closure.claimId,'C-CLOSE');
+  assert.deepEqual(closure.evidenceIds,['E-CLOSE']);
+  assert.equal(closure.terminal,true);assert.equal(closure.canMutate,false);
+  assert.equal(hasUnresolvedEffectRecovery(next.executionState),true,'historical outcome remains UNKNOWN');
+  assert.equal(hasCompetingEffectActuation(next.executionState),false,'only mutator liveness competition is closed');
+});
+
+test('D-023: effect closure rejects missing attempt or non-CONFIRMED Root judgment without persistence',()=>{
+  const runtime=baseRuntime({async run(){throw new Error('unused');}}),base=task(),executionState=addUnresolvedEffectAttempt(null,{id:'effect:old',resolved:false}),current={...base,executionState},session=runtime.createSession(current);let writes=0;
+  session.certifiedContext={...session.certifiedContext,claims:[{id:'C-WEAK',statement:'maybe stopped',level:'supported',evidenceIds:['E-1'],scope:'general',coverage:'component',hops:[]}]};
+  const callbacks={onEffectActuationClosure(){writes+=1;return executionState;}};
+  assert.throws(()=>runtime.applyEffectClosures(current,session,{effectClosures:[{effectAttemptId:'effect:old',claimId:'C-WEAK'}]},callbacks),/ROOT_INVALID_EFFECT_CLOSURE/);
+  assert.throws(()=>runtime.applyEffectClosures(current,session,{effectClosures:[{effectAttemptId:'effect:missing',claimId:'C-WEAK'}]},callbacks),/ROOT_INVALID_EFFECT_CLOSURE/);
+  assert.equal(writes,0);
 });
