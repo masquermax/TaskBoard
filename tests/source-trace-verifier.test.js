@@ -84,3 +84,14 @@ test('visual attachment keeps only real provenance and is downgraded because Val
     assert.match(out.verifications[0].reason,/不解释像素语义/);
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
+
+test('a referenced Task result is traceable history but can never become DIRECT Evidence by quotation alone',()=>{
+  const task={id:'T',projectScopes:[],attachments:[],instruction:'x',references:[{source_task_id:'T-OLD',title:'旧任务',final_result:'旧结果声称接口已经上线。'}]};
+  const verifier=new SourceTraceVerifier();
+  const out=verifier.enforce({task,evidence:[{id:'E-R',strength:'direct',kind:'fact',sourceType:'reference',coverage:'source',statement:'接口已经上线',basis:'T-OLD',locator:'reference:T-OLD',observation:'接口已经上线'}]});
+  assert.equal(out.evidence.length,1);
+  assert.equal(out.evidence[0].strength,'indirect');
+  assert.equal(out.verifications[0].traceable,true);
+  assert.equal(out.verifications[0].verified,false);
+  assert.ok(out.actions.some(action=>action.action==='DOWNGRADE_UNVERIFIED_SOURCE_TRACE'));
+});
