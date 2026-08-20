@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { RootRuntime } from '../src/core/root-runtime.js';
 import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
 
-const base={stageResult:null,finalResult:null,resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[]};
+const base={finalResult:null,resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[]};
 function work(id,overrides={}){return{id,title:id,goal:'one bounded operation',expectedOutput:'one bounded result',stopCondition:'bounded result returned',projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[],...overrides};}
 function createRoot(delegations){
   let rootCalls=0;
