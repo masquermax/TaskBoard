@@ -49,3 +49,11 @@ test('Gap resolution requires an admitted DIRECT invoice even when an Executor b
   const direct={...indirect,id:'E-D',strength:'direct',sourceType:'human'},strong=runtime.reviewRoot({task:{id:'T'},currentState,humanGatewayHistory:[],decision:decision({evidence:[direct],gapResolutions:[{gapId:'G-1',reason:'直接证据关闭',evidenceIds:['E-D']}]})});
   assert.equal(strong.outcome,'pass');
 });
+
+test('confirmed presentation Step cannot cite a merely SUPPORTED Claim',()=>{
+  const runtime=new ValidatorRuntime({sourceTraceVerifier:{enforce:({evidence})=>({evidence,actions:[],verifications:[]})}}),direct={id:'E-D',strength:'direct',kind:'fact',sourceType:'human',coverage:'source',statement:'已观察',basis:'human',locator:'human',observation:'已观察'};
+  const supported=runtime.reviewRoot({task:{id:'T'},decision:decision({evidence:[direct],claims:[claim('C-S',['E-D'],'supported')],steps:[{order:1,text:'作为已确认步骤展示',kind:'confirmed',sourceIds:['C-S']}]})});
+  assert.equal(supported.outcome,'reject');assert.ok(supported.feedback.some(item=>item.target==='step:1'&&item.action==='REJECT_TRUST_ESCALATION'));
+  const confirmed=runtime.reviewRoot({task:{id:'T'},decision:decision({evidence:[direct],claims:[claim('C-C',['E-D'],'confirmed')],steps:[{order:1,text:'确认步骤',kind:'confirmed',sourceIds:['C-C']}]})});
+  assert.equal(confirmed.outcome,'pass');
+});
