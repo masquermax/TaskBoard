@@ -8,7 +8,7 @@ import { ValidatorRuntime } from '../src/governance/validator-runtime.js';
 
 const gap={id:'G-SOURCE',question:'当前 TaskBoard 中 Human Gateway 从用户回答到恢复执行的真实源码调用链是什么？',reason:'缺少 Project source evidence。',kind:'missing_fact',blocking:true,evidenceIds:[]};
 function state(){return{version:1,current:{resultMode:'analysis',evidence:[],claims:[],gaps:[gap],recommendations:[],steps:[]},turns:[]};}
-function decision(kind,overrides={}){return{kind,summary:'bounded control',stageResult:null,finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[],gateway:null,delegations:[],...overrides};}
+function decision(kind,overrides={}){return{kind,summary:'bounded control',finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gapResolutions:[],gateway:null,delegations:[],...overrides};}
 
 test('a certified blocking Gap does not revoke an otherwise-governed evidence-acquisition Work Unit',async()=>{
   const work={id:'WU-SOURCE',title:'读取源码补齐证据',goal:'确认 Human Gateway 恢复执行调用链',expectedOutput:'返回源码定位',stopCondition:'定位链路或形成项目内 blocker',projectAccess:'read',networkAccess:false,skillId:null,dependsOn:[],inputRefs:['project:0']};
