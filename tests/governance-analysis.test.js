@@ -4,7 +4,7 @@ import { GovernanceCompiler } from '../src/governance/governance-compiler.js';
 import { ValidatorRuntime } from '../src/governance/validator-runtime.js';
 import { humanGatewayEvidenceId } from '../src/governance/human-gateway-evidence.js';
 import { applyCertifiedDelta, decisionFromCertifiedState, emptyCertifiedState } from '../src/governance/certified-state.js';
-import { renderAnalysisResult } from '../src/governance/analysis-validator.js';
+import { canonicalAnalysisSummary, renderAnalysisResult } from '../src/governance/analysis-presentation.js';
 
 function evidence(id='E-1',overrides={}){return{id,strength:'direct',kind:'fact',sourceType:'project_file',coverage:'component',statement:'事实成立',basis:'src/A.java#L1',locator:'src/A.java#L1',observation:'事实成立',...overrides};}
 function claim(id='C-1',evidenceIds=['E-1'],overrides={}){return{id,statement:'事实成立',level:'confirmed',evidenceIds,scope:'single_system',coverage:'component',hops:[],obligationRefs:[],...overrides};}
@@ -59,4 +59,26 @@ test('final analysis rendering is derived from certified structured content',()=
   const finalView=decisionFromCertifiedState(state,{recommendations:[],steps:[{order:1,text:'事实成立',kind:'confirmed',sourceIds:['C-1']}]});
   assert.match(renderAnalysisResult(finalView),/事实成立/);
   assert.doesNotMatch(renderAnalysisResult(finalView),/free Root summary/);
+});
+
+test('analysis presentation keeps confirmed, inference, reference-only and unknown visibly distinct',()=>{
+  const view=decision({
+    evidence:[
+      evidence('E-DIRECT',{basis:'src/direct.js#L1'}),
+      evidence('E-INDIRECT',{strength:'indirect',sourceType:'reference',basis:'reference:T-OLD',locator:'reference:T-OLD',observation:'历史结果'}),
+    ],
+    claims:[
+      claim('C-CONF',['E-DIRECT'],{statement:'已确认事实'}),
+      claim('C-INFER',['E-DIRECT'],{statement:'基于事实的推断',level:'supported'}),
+      claim('C-REF',['E-INDIRECT'],{statement:'历史结果提示的可能性',level:'supported'}),
+    ],
+    gaps:[{id:'G-UNKNOWN',question:'外部系统当前状态是什么？',reason:'尚未取得 Reality',kind:'missing_fact',blocking:false,evidenceIds:[]}],
+  });
+  const rendered=renderAnalysisResult(view),summary=canonicalAnalysisSummary(view);
+  assert.match(rendered,/【其他已确认】[\s\S]*已确认事实/);
+  assert.match(rendered,/【有依据的推断】[\s\S]*基于事实的推断/);
+  assert.match(rendered,/【仅供参考】[\s\S]*历史结果提示的可能性/);
+  assert.match(rendered,/【仍未知】[\s\S]*外部系统当前状态是什么/);
+  assert.doesNotMatch(rendered,/【待确认】/);
+  assert.match(summary,/1 项已确认/);assert.match(summary,/1 项有依据推断/);assert.match(summary,/1 项仅供参考/);assert.match(summary,/1 项仍未知/);
 });
