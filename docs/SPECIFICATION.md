@@ -150,7 +150,7 @@ Only Root and Subagent are executable model roles. Validator, Scheduler, Task Co
 
 Retryable execution faults have at most five attempts per retry cycle. Capacity shortage is `WAITING_RESOURCE`, not a failed attempt. Manual retry starts a new cycle.
 
-Timing follows ownership: Work Unit retry changes Work Unit/attempt state, not the Task's semantic start. Runtime snapshots distinguish issuance, first execution start, last activity and completion.
+Timing follows ownership: Work Unit retry changes Work Unit/attempt state, not the Task's semantic start. Work Unit issuance remains stable, while `startedAt / completedAt` describe the current or successful attempt. A retry wait clears stale failed-attempt timing before the next execution begins; Task lifecycle identity is not rewritten by that child retry.
 
 Side-effect recovery is a safety boundary, not another reasoning role. If transport/process loss occurs after a mutation may have started, Runtime preserves the unresolved effect fact, prevents competing fresh mutation and permits only minimum safe observation until independent evidence closes the old mutator. Unknown is never converted into failure just to enable replay.
 
