@@ -19,6 +19,7 @@ function statusFor(message) {
   if (CLIENT_ERRORS.has(message) || String(message).startsWith('EXTENSION_API_VERSION_UNSUPPORTED:') || String(message).startsWith('EXTENSION_IMPORT_ID_EXISTS:')) return 400;
   if (message === 'EXTENSION_NOT_IMPORTED' || message === 'EXTENSION_NOT_FOUND') return 404;
   if (message === 'EXTENSION_RESTART_REQUIRED' || message === 'EXTENSION_LOAD_FAILED') return 409;
+  if (message === 'EXTENSION_CONNECTION_UNAVAILABLE' || message === 'EXTENSION_CONNECTION_DISCOVERY_UNAVAILABLE') return 503;
   if (String(message).startsWith('EXECUTOR_CONNECTION_')) return 400;
   return 500;
 }
@@ -91,6 +92,38 @@ export function createExtensionManagementHandler({
         json(res, statusFor(message), { error: message });
       }
       return true;
+    }
+
+    const discoverMatch = url.pathname.match(/^\/api\/extensions\/([^/]+)\/connection\/discover$/);
+    if (discoverMatch) {
+      const id = decodeURIComponent(discoverMatch[1]);
+      try {
+        const extension = extensionFor(id);
+        const settings = extension?.connectionSettings || null;
+        if (!settings?.describe || !settings?.getPublic || !settings?.update) {
+          json(res, 503, { error: 'EXTENSION_CONNECTION_UNAVAILABLE' });
+          return true;
+        }
+        if (req.method !== 'POST') {
+          json(res, 405, { error: 'METHOD_NOT_ALLOWED' });
+          return true;
+        }
+        if (req.headers['x-taskboard-action'] !== 'ui') {
+          json(res, 403, { error: 'FORBIDDEN' });
+          return true;
+        }
+        if (typeof settings.discover !== 'function') {
+          json(res, 503, { error: 'EXTENSION_CONNECTION_DISCOVERY_UNAVAILABLE' });
+          return true;
+        }
+        const discovery = await settings.discover(await readJson(req));
+        json(res, 200, { ...connectionPayload(extension), discovery: discovery || null });
+        return true;
+      } catch (error) {
+        const message = error?.message || 'EXTENSION_CONNECTION_DISCOVERY_FAILED';
+        json(res, statusFor(message), { error: message });
+        return true;
+      }
     }
 
     const match = url.pathname.match(/^\/api\/extensions\/([^/]+)\/connection$/);
