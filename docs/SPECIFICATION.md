@@ -4,32 +4,32 @@ Status: ACTIVE
 
 ## Product intent
 
-TaskBoard manages **work**, not a collection of long AI chats. It keeps Task facts and lifecycle outside Executor sessions, gives each system position an explicit Capability Contract, lets Root create bounded Work Units, reuses methods through Skills, and certifies durable knowledge before publication/persistence.
+TaskBoard manages work rather than long AI chats. Task facts/lifecycle stay outside model sessions; Root decides, Subagent executes, Validator checks provenance, Scheduler owns lifecycle, and Task Core persists the minimum durable state.
 
-## Governance / knowledge placement
+## Runtime contract
 
-The active runtime semantics flow from:
+```text
+Task/Human/technical trigger
+          ↓
+         Root
+   judge / delegate
+          ↓
+      Work Unit(s)
+          ↓
+      Subagent(s)
+          ↓
+ result + Evidence + blocker
+          ↓
+         Root
+  judge meaning / next action
+          ↓
+      Validator
+   provenance ledger
+          ↓
+ Certified State / complete / next Work / Human Gateway
+```
 
-1. Product Constitution — five system principles.
-2. Capability Map / Capability Contracts — active ownership and positive capability model.
-3. Runtime / API / Executor surfaces — mechanical realization of those capabilities.
-4. Current Task / Work Unit — concrete goal, inputs and capability request.
-5. Selected external Skill method — reusable work experience applied only when relevant.
-
-ADR is sidecar engineering decision memory, not a runtime authority layer. Agent heuristics live only inside the authority/evidence boundary above. There is no active `Analysis Rules` runtime layer.
-
-## Capability Contract shape
-
-Every current role/component contract defines at least:
-
-- Identity
-- Purpose
-- Owns
-- Capabilities
-- Produces
-- Handoff
-
-An action not represented by `Owns` / `Capabilities` is not silently granted. Out-of-scope work follows `Handoff`.
+Runtime does not create another semantic owner around this chain.
 
 ## Task lifecycle
 
@@ -40,124 +40,167 @@ Visible states:
 - `WAITING_HUMAN / 等待你`
 - `COMPLETED / 已完成`
 
-Scheduler uniquely owns lifecycle transitions. A Task enters RUNNING only after a real Root execution start is reported. If unfinished work only waits for resource and no actual execution remains, the Task returns to READY with resource-wait context.
-
-Completed Tasks are immutable as historical results; later Tasks may reference them without mutating them.
+Scheduler uniquely owns lifecycle transitions. READY→RUNNING requires a real Executor admission event. Resource waiting is not execution and does not consume retry failure budget.
 
 ## Root
 
-Root owns:
+Root is the sole Task-level judgment owner. It owns:
 
-- Task understanding and plan;
-- Work Unit creation, dependency and priority;
-- whether an independent objective becomes a delegated Work Unit;
-- Skill selection and Project Scope access request for delegated Work Units;
-- synthesis of certified local results;
-- Gap convergence and final candidate;
-- whether a true user-owned information blocker exists as an intent candidate.
+- Task interpretation and current goal;
+- whether/how to split work;
+- Work Unit dependency/parallel structure;
+- what Subagent output means and whether it is sufficient;
+- Claims, Gaps, Recommendations and presentation Steps;
+- whether Human input is genuinely required;
+- completion judgment and explicit `Claim.obligationRefs[]` mapping.
 
-Root does not own Task lifecycle, certification or History persistence. An ordinary Root Turn also cannot self-start from Current Certified State: Task start, a new Subagent result, a resolved Human Gateway, or a technical resume supplies the trigger. Validator/planning/control repair may continue only as a bounded subloop under that same trigger.
+Root has no Project filesystem/network execution capability. It receives the Task input catalog, current Claims/Gaps/unresolved obligations, fresh Work Unit results and the current Human trigger only.
 
-Root may perform only the minimal local inspection needed for Task-level planning/synthesis. Once the need becomes an independent evidence-acquisition objective, Root expresses it as a delegated Work Unit. The current runtime does not claim first-class Root-owned Work Unit or Root-local Skill execution.
+Current Certified State is context, not a self-trigger. A new Root turn requires Task start, a completed Work batch, a resolved Human Gateway or a technical resume.
 
 ## Work Unit
 
-Each newly authored delegated Work Unit requires `id`, `title`, `goal`, `expectedOutput`, `stopCondition`, `projectAccess` (`none` / `read` / `write`), `networkAccess`, `inputRefs`, `dependsOn`, and optional `skillId`. `inputRefs` selects only the Task inputs needed by that Work Unit from stable refs such as `task:instruction`, `project:<index>`, `attachment:<id>` and `reference:<task-id>`. `projectAccess=write` is an explicit request for bounded Project Scope mutation, not an authorization fact. Effective write access exists only when `GovernanceCompiler` derives an `AuthorizedGrant` that preserves it after intersecting the machine Role capability, certified `TaskContract` Project authority, selected Project scope and the Work Unit request; `taskMode` does not grant write access.
+Every Work Unit requires:
 
-Runtime derives a missing Task Authority candidate only after Root has authored a concrete Work Unit and all authority-independent plan checks have passed. Project presence does not imply write demand, and omitted network authority does not imply a request for network access. Validator certifies only the missing capabilities demanded by that accepted plan; Task Core persists supported semantics, `GovernanceCompiler` recompiles the grant, and only then may the same Work Unit reach a Subagent.
+- `id`, `title`
+- `goal`
+- `expectedOutput`
+- `stopCondition`
+- `projectAccess` (`none/read/write`)
+- `networkAccess`
+- `inputRefs`
+- `dependsOn`
+- optional `skillId`
 
-Runtime rejects missing boundaries rather than inventing them. Semantic duplicate work under a fresh id is rejected so a Root cannot accidentally turn repeated prompts into fake progress. A certified Gap marked `blocking` prevents unsafe completion or convergence while its required fact/decision remains unresolved, but the marker itself does not revoke an otherwise-governed evidence-acquisition Work Unit. Root may create bounded acquisition work that independently satisfies the Work Unit Contract and `AuthorizedGrant`; that Work Unit returns evidence/local findings and does not close the Gap. Gap resolution still requires certified supporting evidence, while Human Gateway is reserved for information or decisions genuinely owned by the user or unavailable to the system. For Codex Subagents, `stopCondition` is additionally backed by a technical execution lease: Runtime steers the same Turn toward convergence before a final interrupt boundary. The lease bounds execution; it does not certify business completion.
+The Work Unit is a bounded order, not a mini Task. Missing boundaries are rejected, not invented. Semantically duplicate work is rejected.
+
+`projectAccess`/`networkAccess` are requests. `GovernanceCompiler` intersects the request with the Root-authored Work Unit, selected Task inputs, machine role ceiling and certified Task authority to produce the executable `AuthorizedGrant`.
 
 ## Subagent
 
-A Subagent receives one Work Unit, only the Task inputs selected by that Work Unit, its dependency results, current role Contract and, when supplied by an external Skill library, the selected method. Runtime exposes only the operation surface granted to that Work Unit. It returns source-near Evidence, local Findings, blocker information and Discoveries. Task-level Claims, Gaps, Recommendations, completion and next-work decisions are produced only by Root. `projectAccess=none` requests no Project input, `read` requests a selected Project read surface, and `write` requests bounded mutation; the effective Project surface is always the `AuthorizedGrant` derived by GovernanceCompiler and may narrow any request. Network is independently explicit and defaults off; TaskBoard-managed scratch remains the only default writable area.
+Subagent executes exactly one Work Unit and stops at its bounded output/stop condition.
 
-A completed Work Unit result passes only deterministic source-trace normalization before being delivered to Root as local execution input. It does not launch a second semantic Validator agent and does not become Task knowledge by itself. Independent siblings continue running. If Root later reaches a certified completion/Human-Gateway decision while only unnecessary read-only Work Units remain, Runtime may stop those no-side-effect investigations instead of forcing a tail wait; write-capable Work Units must first reach a safe boundary.
+It returns only:
+
+- `result`
+- source-near `evidence[]`
+- optional `blocker`
+- narrow effect-recovery closure metadata only when Runtime safety requires it.
+
+It does not own Findings as Task semantics, Claims, Gaps, Recommendations, confidence/uncertainty classification, Discoveries, next work, completion or Human Gateway.
+
+Dependencies are resolved inside the current Stage. Independent siblings may execute concurrently. Root consumes the Stage batch after all issued siblings reach the Stage boundary; it is not awakened once per sibling.
 
 ## Validator
 
-Validator owns certification of Root Candidate Deltas and decides whether certified Root knowledge forms a new valuable History boundary. Subagent Evidence/Findings may be source-trace normalized mechanically, but Validator does not take over a Work Unit or independently re-investigate it.
+Validator is deterministic Runtime enforcement, not an Executor/model role.
 
-Deterministic source/structure checks run first. Model semantic proof is used only for a narrow Root proof obligation that deterministic tracing cannot establish: explicitly semantic raw material (for example exact visual/pixel evidence) or a Gateway-derived Human Claim/Gap resolution whose meaning must be checked against the exact certified question and answer. The semantic turn receives only that proof obligation and exact resolvable source input; ordinary text/code synthesis does not trigger a second-model review merely because wording differs, multiple sources are cited or the relation crosses systems.
+It may:
 
-First unresolved Root certification may request one targeted correction from Root. A still-unresolved Root candidate is narrowed to certifiable content plus explicit Gap. Validator does not create work or decide lifecycle.
+- verify that a source/locator exists inside the governed boundary;
+- verify DIRECT text/code observation at the cited anchor;
+- downgrade a real but mechanically unverifiable source to INDIRECT;
+- reject missing/fabricated/mismatched sources;
+- reject references to missing Evidence/Claims;
+- reject CONFIRMED claims that depend on INDIRECT evidence;
+- require admitted DIRECT evidence for an explicit Gap resolution.
 
-## Analysis publication
+It may not:
 
-Analysis output is structured as:
+- re-investigate the Task;
+- interpret business meaning;
+- decide whether Root's reasoning is reasonable;
+- create/repair Root conclusions or Gaps;
+- decide the next Work Unit;
+- use a model turn.
+
+Validator PASS means the source ledger is valid, not that Validator independently agrees with the conclusion.
+
+## Certified State and publication
+
+Durable cognition is only:
 
 - Evidence
-- Claims (`confirmed` / `supported` as appropriate)
-- Gaps
-- Recommendations
-- ordered Steps
+- Claim
+- Gap
 
-Only Evidence, Claims and Gaps are durable cognition. A Claim is the structured Fact proposition; Recommendations and Steps are current presentation/decision projection and do not accumulate as learned truth. Final user-visible analysis is rendered from the final Current Certified State plus the current projection. Free `finalResult` text cannot bypass certification.
+A Root delta enters Certified State only after provenance/ledger checks. Certified State is monotonic by omission: later turns cannot erase old knowledge by forgetting to repeat it. Evidence ids are immutable; revising an existing Claim/Gap requires new Evidence.
 
-DIRECT requirement Evidence proves what the requirement says. It does not prove implementation exists. Cross-system implementation Claims still require explicit implementation/hop support. Search output is a locator; a DIRECT project fact must land on the real project file/source anchor.
+Recommendations and Steps are current presentation, not learned state. Final analysis is rendered from Current Certified State plus the current Root presentation projection; free analysis `finalResult` cannot bypass this boundary.
 
-A malformed or untraceable DIRECT source does not become a fact. If a candidate has no publishable fact/gap/recommendation after repair, it remains invalid rather than fabricating content.
+A `CONFIRMED` Claim may satisfy a governed obligation only through Root's explicit `obligationRefs[]`. CompletionEvaluator checks that relation deterministically and does not perform a second proof/reasoning turn.
 
-## History
-
-History records future-useful Task-level knowledge, not Agent process. Root-authored `progressCommits` are ignored. Validator derives a concise commit candidate from new certified Root-level Claims/Gaps; Task Core persists it atomically. In-memory/UI History advances only after persistence succeeds.
-
-Subagent-only certification is not History. A Root turn can produce History while unrelated sibling Work Units remain active.
-
-## Skill
-
-TaskBoard core defines the Skill role and accepts an injected method library; it does not ship concrete Skill assets. A method declares Purpose, Applicable Work, Method, Contract, Capability Requirements and Stop Condition. Root may select an optional `skillId` for a delegated Work Unit; only the resolved selected method is added to that Work Unit executor context.
-
-Experience mining, Skill distillation, Skill package ownership/versioning and personal Skill-library management belong to a separate extension branch/package. They are intentionally outside this core runtime.
-
-## Execution certification boundary
-
-Subagent Work Unit output is local execution material: deterministic source-trace normalization may constrain its Evidence/Findings, then Root decides the Task-level Candidate Delta. Root Candidate Deltas pass through Validator before they can change Current Certified State or final publication. TaskBoard does **not** claim a generic proof system that independently verifies arbitrary external side effects. Strong source-grounded certification is first-class for analysis knowledge; execution side effects rely on a governed `AuthorizedGrant` for any Project mutation, bounded Work Units, task-specific tests/tool results and side-effect safety. A future generic execution-proof contract must be added explicitly rather than treating pass-through as semantic certification.
-
-## Project inputs and truth
-
-Task inputs can include Project Scope, attachments, immutable referenced completed Results and resolved Human Gateway answers. These are not a formal Project Knowledge subsystem.
-
-Root control/synthesis Turns receive TaskBoard-managed scratch and logical Task-input references, but no Project Scope filesystem path, attachment local path or network capability. Project read/write and network access exist only inside a delegated Work Unit that explicitly requests them and are limited by its `AuthorizedGrant`; Project write requires certified `TaskContract` authority plus the selected Project scope and Work Unit request, not an execution-mode label.
-
-## Retry and capacity
-
-Retryable faults have at most five total attempts per cycle; there is no sixth automatic attempt. Deterministic/nonretryable faults may suspend immediately. Manual retry starts a new cycle. Automatic retry delay is jittered to prevent synchronized re-entry after a shared transport failure.
-
-Normal execution-capacity shortage is not a failure attempt and is represented as `WAITING_RESOURCE`. A real execution that failed and is waiting for its next automatic attempt is `RETRY_WAIT`; it must not be presented as resource shortage. Root-candidate Validator capacity shortage never causes already-completed Root/Subagent investigation to rerun. Requirement Authority Validator capacity shortage retains the accepted Root plan and exact semantic candidates without persisting a capacity shortage as an Authority verdict.
-
-## Resource configuration
-
-Exactly two user-facing fields, each 1–5:
-
-- Task concurrency
-- Per-Task Subagent limit (per Root Subagent ceiling; Root/Validator not counted)
-
-No global Subagent pool, pre-reservation or preemption is introduced. Explicit compatible Executor limits may reduce the effective ceiling; unknown limits are not guessed.
-
-## Model routing
-
-Capability discovery and model routing are separate. Catalog refresh is cached/background capability work; an individual Root/Subagent/Validator route consumes the snapshot and does not own refresh. When provider metadata supplies meaningful model descriptions, TaskBoard chooses the minimum-sufficient capability tier for the actual work rather than assigning a model by role name or model id. Finite read-only Work Units prefer efficient capability, ordinary analysis/Validator work balanced capability, and complex/open-ended Root work frontier capability. Unknown or insufficient metadata falls back to the configured model. Automatic reasoning remains limited to `low/medium/high`.
-
-Passing an explicit model does not give TaskBoard control over Codex's own internal model-manager refresh. Remaining `thread/start` stalls caused inside Codex are therefore observed rather than falsely reported as fixed.
-
-## Current Progress
-
-Current Progress exposes semantic work topics with execution owner labels (`Root`, `Subagent`, `Validator`, `未分配`) and states such as running/completed/dependency wait/resource wait/retry wait/suspended. While a Task remains open, completed Work Units stay visible even after their Stage is cleared. Current Root/Validator activity is rendered alongside Work Units rather than being hidden by them. A WAITING_HUMAN Task preserves its last runtime snapshot until the user replies.
-
-This runtime view is not durable History and never becomes certified knowledge merely because work completed. User-facing durable knowledge is labeled `已确认结论`; it is still backed by Validator-certified History boundaries.
+There is no active `stageResult`, semantic History writer, Validator repair state or parallel cognition channel. Legacy progress rows may remain readable for old data/UI compatibility but are not written or replayed by current Runtime.
 
 ## Human Gateway
 
-Human Gateway carries only information the system cannot obtain and that genuinely requires the user. Root may propose the need; Scheduler owns WAITING_HUMAN. Each Gateway must bind to exactly one currently certified blocking Gap and repeat that Gap's certified question; context/options may explain the choice but cannot silently change its meaning. When that Gateway is resolved, Runtime—not Root—creates the system-owned DIRECT Human Evidence and automatically proposes proof of the transition for that exact bound Gap. Root therefore cannot lose a valid user decision merely by omitting `evidence[]` or `gapResolutions[]`. Gateway→targetGapId ownership is deterministic; one Gateway cannot close another Gap. Validator still owns semantic sufficiency: the exact question/answer must actually support closure. Subagent and Validator cannot directly enter Human Gateway.
+Human Gateway is thin transport for information/choices genuinely owned by the user.
 
-## Cleanup, time and UI
+A Root `human_gateway` decision must bind the current blocking Gap and exact certified question. Scheduler persists and exposes the question. When answered, the resolved answer becomes the next Human trigger supplied to Root.
 
-- Eligible completed data is physically cleaned on local day 91, with locked/referenced completed Results protected.
-- Daily cleanup targets local 01:00, max five attempts/day, with success persisted only after a full no-error run.
-- Today timestamps show `HH:mm:ss`; same-year non-today `MM-DD HH:mm:ss`; other-year full date.
-- Completed cards show creation time plus completed-phase time.
+Runtime does not automatically generate Evidence or Gap resolution from the answer. Root decides what the answer establishes; Validator only checks any source relation Root later cites.
 
-## Integration
+## Authority and TaskContract
 
-Codex remains the first Executor. Task Core does not manage login, provider or API keys. On first connection, current model identity is read through lightweight config; full model catalog discovery is enhancement work and may run in the background or via the AI-info refresh action. Refresh failure never replaces the previous model snapshot. Without any known model record, execution explicitly uses Executor Default fallback. The optional Windows Codex Desktop surface uses loopback CDP and does not change Task authority.
+Human requirements may establish Task-level capability authority only through the deterministic TaskContract fidelity boundary. Project presence or Task wording alone does not grant write/network access. Unknown/ambiguous capability demand fails closed.
+
+Only Root and Subagent are executable model roles. Validator, Scheduler, Task Core and Human Gateway do not receive Executor model grants.
+
+## Retry, timing and recovery
+
+Retryable execution faults have at most five attempts per retry cycle. Capacity shortage is `WAITING_RESOURCE`, not a failed attempt. Manual retry starts a new cycle.
+
+Timing follows ownership: Work Unit retry changes Work Unit/attempt state, not the Task's semantic start. Runtime snapshots distinguish issuance, first execution start, last activity and completion.
+
+Side-effect recovery is a safety boundary, not another reasoning role. If transport/process loss occurs after a mutation may have started, Runtime preserves the unresolved effect fact, prevents competing fresh mutation and permits only minimum safe observation until independent evidence closes the old mutator. Unknown is never converted into failure just to enable replay.
+
+## Resource configuration
+
+User-facing execution ceilings remain:
+
+- Task concurrency;
+- per-Task Subagent concurrency.
+
+They are maxima, not targets. Work Unit count is not a concurrency count. Root and Validator are not Subagents; Validator has no model resource lifecycle.
+
+## Diagnostics
+
+Diagnostics may record operational facts such as route, model, timestamps, tool type, duration, result bytes and Work Unit identity. Diagnostics cannot create business Evidence/Claims/Gaps, decide convergence or wrap RootRuntime with a second semantic execution layer.
+
+## Skill
+
+TaskBoard Core defines only an injected Skill-method boundary. Concrete Skill assets live outside Core. Root may select a Skill for a Work Unit; Subagent receives only that selected method. Skill never grants Authority.
+
+## Extension boundary
+
+An Extension may provide Executor, Capability Provider, connection settings, presentation metadata, Surface Host and continuation integration. TaskBoard currently admits TaskBoard-owned orchestration only:
+
+```text
+Root → Work Unit → TaskBoard Subagent
+```
+
+A runtime-native internal agent tree requires a distinct future contract. It is not implicitly counted as TaskBoard Subagents or converted into WorkReceipts/Claims.
+
+Codex is the stock Executor implementation, not a Task Core dependency. Provider/auth/settings semantics stay extension-local.
+
+## Cleanup and UI
+
+- Completed-data retention cleanup remains deterministic and protects locked/referenced completed results.
+- UI projects Scheduler/Task Core/Runtime state; it does not infer business truth from visual state.
+- Current Work activity is Runtime state, not durable cognition.
+- User-facing durable analysis is labeled `已确认结论` and comes from Certified State.
+
+## Explicitly absent
+
+Current Runtime intentionally contains no:
+
+- Validator model/semantic proof/rework loop;
+- planning-repair/completion-repair model loop;
+- semantic History decision owner;
+- `stageResult` replay channel;
+- runtime telemetry wrapper/convergence heuristic;
+- Root Project/network execution;
+- automatic Human-answer interpretation;
+- formal Project Knowledge subsystem;
+- replayable generic Project Search/Runtime evidence store;
+- runtime-native Agent-tree orchestration.
