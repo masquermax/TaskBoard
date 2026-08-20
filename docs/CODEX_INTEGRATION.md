@@ -6,18 +6,16 @@ Codex is TaskBoard's first extension implementation. It does not define Task Cor
 
 The Codex Extension has two truthful transports behind the same `CodexExecutor` contract:
 
-- `account` uses the richer long-lived `codex app-server --listen stdio://` integration;
+- `account` uses the long-lived `codex app-server --listen stdio://` integration;
 - `custom` uses the official non-interactive `codex exec` CLI for each Turn.
 
-The split is transport compatibility, not a second TaskBoard orchestration mode. Some compatible upstream providers intentionally accept only official Codex clients; routing a custom profile through the official CLI preserves that upstream requirement without pretending TaskBoard itself is an official Codex app-server client.
+The split is transport compatibility, not a second TaskBoard orchestration mode. Both transports realize only the Root/Subagent operations requested by TaskBoard. Durable Task state remains in TaskBoard.
 
-Both transports use ephemeral execution state; durable Task state remains in TaskBoard. `codex exec` runs with JSONL events and TaskBoard's structured output schema so `thread.started`, `turn.started`, `turn.completed` / `turn.failed` and the final normalized result still cross the Executor boundary as Runtime facts.
+`codex exec` runs with JSONL events and TaskBoard's structured output schema so transport start/completion/failure and the final normalized result cross the Executor boundary as Runtime facts. App-server exposes equivalent operational facts through its long-lived RPC connection.
 
-The Executor records the execution fact `activeTurnCount`; Scheduler alone interprets execution facts for Task admission/resource policy. If real runtime evidence later justifies a global admission ceiling, that ceiling belongs to Scheduler and consumes Executor facts. It must not be invented from Task/Subagent configuration or moved into a second resource-manager Owner.
+The Executor records facts such as active turn count and transport status. Scheduler alone interprets execution facts for Task admission/resource policy. Executor facts do not create Task lifecycle, Completion, Requirement or Project authority.
 
-The Codex Executor owns concrete model/tool operations and connection-generation/runtime facts. Those facts do not create Task lifecycle, Completion, Requirement or Project authority.
-
-On Windows, the extension resolves an existing usable Codex CLI first and may prepare the supported standalone runtime when no usable runtime exists. This repair concerns the executable only and can be disabled with `TASKBOARD_CODEX_AUTO_INSTALL=0`.
+On Windows, the extension resolves an existing usable Codex CLI first and may prepare the supported standalone runtime when no usable runtime exists. This concerns the executable only and can be disabled with `TASKBOARD_CODEX_AUTO_INSTALL=0`.
 
 ## Extension-owned connection configuration
 
@@ -45,27 +43,46 @@ Connection identity, model-selection capability and model-catalog discovery are 
 
 In `account` mode, app-server can provide lightweight account/config/provider discovery and a full model catalog when `model/list` is available. Full catalog refresh is cached/background enhancement work; refresh failure preserves the last valid snapshot and never invents model identity.
 
-In `custom` mode, TaskBoard deliberately does **not** start app-server merely to discover models. Base capability comes from the selected custom Profile and the configured default model. `model/list` is treated as unavailable on the exec transport until a provider-independent, Runtime-confirmed discovery mechanism exists. This avoids both the upstream client-identity rejection and the long-lived app-server model-manager refresh loop seen with restricted compatible providers.
+In `custom` mode, TaskBoard does not start app-server merely to discover models. Base capability comes from the selected custom Profile and configured default model. `model/list` remains unavailable on the exec transport until a provider-independent Runtime-confirmed discovery mechanism exists.
 
-Model routing consumes provider-described capability metadata when available. It chooses minimum-sufficient capability for the actual work and limits automatic reasoning to `low`, `medium` or `high`. If metadata cannot prove an alternate model is sufficient — including custom exec mode with no verified catalog — routing falls back to the configured/default Executor model. Model ids themselves are not capability evidence.
+Model routing consumes provider-described capability metadata when available. It chooses minimum-sufficient capability for the actual Root/Subagent work and limits automatic reasoning to `low`, `medium` or `high`. If metadata cannot prove an alternate model is sufficient, routing falls back to the configured/default Executor model. Model ids themselves are not capability evidence.
+
+Root model-capability discovery is control-plane work and does not receive Project cwd merely because the Task has Project Scope. A scoped Subagent may supply its selected project cwd to capability discovery when that context is actually part of its Work Unit boundary.
 
 Explicit provider concurrency limits may narrow user-configured ceilings. Temporary overload/rate-limit errors and unknown numeric fields are not promoted into permanent capacity semantics.
+
+## Root and Subagent projection
+
+Codex has exactly two TaskBoard model roles:
+
+```text
+Root      = Task-level reasoning / decomposition / synthesis
+Subagent  = one bounded Work Unit execution
+```
+
+Root runs in TaskBoard-managed scratch with `projectAccess=none` and `networkAccess=false`. Its prompt receives logical Task input catalog entries, current Claims/Gaps/unresolved obligations, the fresh Stage/Human delta and selected Skill catalog metadata. It does not receive Project filesystem paths as an execution surface.
+
+Subagent receives only the inputs selected by the Work Unit plus its effective `AuthorizedGrant`. Its structured result is limited to `delegationId + result + evidence[] + blocker`, plus narrow effect-recovery closure metadata when safety requires it. Task Claims/Gaps, recommendations, confidence, next work, Human Gateway and completion remain Root-owned.
+
+A Root-issued Stage is a strict batch boundary: independent Subagents may run concurrently, but partial sibling completion does not start another Root turn. Root receives the completed batch once.
+
+## Validator boundary
+
+Validator is not a Codex/model role. There is no Codex Validator prompt, model route, semantic proof turn or Validator resource lifecycle.
+
+After Root proposes a Candidate Delta, TaskBoard's deterministic `ValidatorRuntime` checks only the source/provenance ledger: locator existence, mechanically checkable source-near observation, referenced Evidence/Claim ids and trust-boundary rules. Business meaning and semantic sufficiency remain Root-owned.
+
+A visual or otherwise mechanically unverifiable real source may be retained only at the trust level the deterministic ledger can support; TaskBoard does not start another model merely to promote it to stronger truth.
 
 ## Admission, failure and recovery
 
 A Task/Work Unit is considered started only after the active Codex transport reports a real execution start. Capacity shortage before execution is `WAITING_RESOURCE`; a started attempt waiting after retryable failure is `RETRY_WAIT`. Capacity shortage does not consume the execution-failure retry budget.
 
-Communication loss proves loss of observation, not that a remote operation failed, stopped or produced no side effect. Side-effecting retry/recovery must reconcile current reality/idempotency and avoid competing actuation before fresh mutation is admitted.
+Communication loss proves loss of observation, not that a remote operation failed, stopped or produced no side effect. Side-effecting retry/recovery must reconcile current Reality/idempotency and avoid competing actuation before fresh mutation is admitted.
 
-Cancellation interrupts an active app-server Turn when possible. In custom exec mode TaskBoard terminates the owned `codex exec` process tree. In either mode, loss of the Runtime process does not alter durable Task facts, which remain the recovery source.
+Cancellation interrupts an active app-server Turn when possible. In custom exec mode TaskBoard terminates the owned `codex exec` process tree. Loss of the Runtime process does not alter durable Task facts, which remain the recovery source.
 
-Runtime/provider failures are normalized at the Codex Extension boundary before Core retry classification. HTTP 4xx upstream rejection, authentication failure, rate limiting, timeout and transport/network failure are distinct facts; wording such as `stream disconnected` does not by itself decide retryability.
-
-## Validator semantic turns
-
-Codex exposes a narrow model-backed Validator path only for proof relations deterministic source/structure checks cannot certify, such as exact resolved visual material or semantic sufficiency of a Human Gateway answer for its exact bound Gap.
-
-This path is not a second Root and does not reopen project investigation. Ordinary text/code paraphrase, multi-source synthesis and Work Unit results do not automatically launch another Validator model turn.
+Runtime/provider failures are normalized at the Codex Extension boundary before Core retry classification. HTTP rejection, authentication failure, rate limiting, timeout and transport/network failure are distinct facts; wording such as `stream disconnected` does not by itself decide retryability.
 
 ## Surface Host
 
@@ -77,10 +94,10 @@ The embedded surface uses the host's permitted browser policy. Local TaskBoard A
 
 TaskBoard grants Project/network capability only through governed Work Units and the resulting `AuthorizedGrant`. Executor sandbox/protocol availability may further narrow an operation but cannot enlarge Task authority.
 
-For `codex exec`, TaskBoard projects the governed runtime workspace roots and network allowance into a named Codex permission profile for that invocation. The CLI is run non-interactively with approval disabled because TaskBoard already owns Human Gateway / Authority admission; this does not enlarge the supplied `AuthorizedGrant`.
+For `codex exec`, TaskBoard projects the governed runtime workspace roots and network allowance into a named Codex permission profile for that invocation. The CLI is run non-interactively because TaskBoard owns Task-level Human Gateway / Authority admission; this does not enlarge the supplied `AuthorizedGrant`.
 
-Root control/synthesis and Validator proof turns do not inherit Project Scope paths or network access merely because the Codex runtime could technically expose them.
+Root does not inherit Project Scope filesystem/network access merely because Codex could technically expose them. Validator has no Executor scope at all.
 
 ## Human interaction
 
-Codex approval/elicitation is not an ad-hoc Human Gateway. A Task enters WAITING_HUMAN only through the TaskBoard lifecycle contract for genuinely human-owned or otherwise unavailable certified information/choice. Runtime preserves Gateway/Gap provenance; Validator owns semantic sufficiency of the answer.
+Codex approval/elicitation is not an ad-hoc Human Gateway. A Task enters WAITING_HUMAN only through the TaskBoard lifecycle contract for a genuinely human-owned blocking question. The resolved answer becomes a fresh Root trigger. Runtime does not automatically convert it into Evidence or a Gap resolution, and Validator does not reinterpret its meaning.
