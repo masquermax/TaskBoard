@@ -25,11 +25,11 @@ function inlineTimeImport(source,timeSource){
   const replacement=`${timeSource}\n${aliases.length?`${aliases.join('\n')}\n`:''}`;
   return `${source.slice(0,match.index)}${replacement}${source.slice(match.index+match[0].length)}`;
 }
-function inlineSideEffectImport(source,specifier,moduleSource){
+function removeSideEffectImport(source,specifier){
   const escaped=specifier.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
   const pattern=new RegExp(`^\\s*import\\s+["']${escaped}["'];?\\s*`,'m');
   const match=pattern.exec(source);if(!match)throw new Error(`TaskBoard local side-effect import could not be bundled: ${specifier}`);
-  return `${source.slice(0,match.index)}${moduleSource}\n${source.slice(match.index+match[0].length)}`;
+  return `${source.slice(0,match.index)}${source.slice(match.index+match[0].length)}`;
 }
 function moduleExpression(source,{timeSource=null,name='module'}={}){
   let value=timeSource?inlineTimeImport(source,timeSource):source;
@@ -42,12 +42,12 @@ export function loadEmbeddedTaskboardUi(uiRoot){
   const css=readFileSync(join(uiRoot,'app.css'),'utf8');
   const app=readFileSync(join(uiRoot,'app.js'),'utf8');
   const extensionManagement=readFileSync(join(uiRoot,'extension-management.js'),'utf8');
-  const connection=inlineSideEffectImport(readFileSync(join(uiRoot,'connection-settings.js'),'utf8'),'./extension-management.js',extensionManagement);
+  const connection=removeSideEffectImport(readFileSync(join(uiRoot,'connection-settings.js'),'utf8'),'./extension-management.js');
   const time=readFileSync(join(uiRoot,'time.js'),'utf8');
   return{
     bodyHtml:extractBody(html),
     css,
-    appExpression:`${moduleExpression(app,{timeSource:formatTimeSource(time),name:'app'})}\n${moduleExpression(connection,{name:'connection-settings'})}`,
+    appExpression:`${moduleExpression(app,{timeSource:formatTimeSource(time),name:'app'})}\n${moduleExpression(extensionManagement,{name:'extension-management'})}\n${moduleExpression(connection,{name:'connection-settings'})}`,
   };
 }
 
