@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { RootRuntime, validateDelegationPlan } from '../src/core/root-runtime.js';
+import { ExecutorRuntimeAdapter } from '../src/core/executor-runtime.js';
 import { ModelRouter } from '../src/core/model-router.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { AttachmentStore } from '../src/core/attachment-store.js';
@@ -54,7 +55,9 @@ test('business progress never exposes raw shell command bodies',()=>{
 });
 
 test('Mock Executor validates control flow without manufacturing business Evidence',async()=>{
-  const executor=new MockExecutor(),root=await executor.runRoot({task:{id:'T-MOCK',title:'明确任务',instruction:'执行',attachments:[]},humanGatewayHistory:[]}),sub=await executor.runSubagent({delegation:{id:'WU-1',title:'测试工作'}});
+  const runtimeExecutor=new ExecutorRuntimeAdapter(new MockExecutor());
+  const root=await runtimeExecutor.runRoot({task:{id:'T-MOCK',title:'明确任务',instruction:'执行',projectScopes:[],attachments:[],references:[]},humanGatewayHistory:[],policyContext:{authorizedGrant:{role:'root',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'none',environmentAccess:'none'}}});
+  const sub=await runtimeExecutor.runSubagent({task:{id:'T-MOCK',title:'明确任务',instruction:'',projectScopes:[],attachments:[],references:[]},delegation:{id:'WU-1',title:'测试工作',goal:'测试',expectedOutput:'结果',stopCondition:'完成',projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[]},policyContext:{authorizedGrant:{role:'subagent',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'none',environmentAccess:'default'}}});
   assert.deepEqual(root.evidence,[]);assert.deepEqual(root.claims,[]);assert.deepEqual(sub.evidence,[]);for(const key of ['claims','gaps','recommendations'])assert.equal(key in sub,false);
 });
 
