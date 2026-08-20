@@ -77,7 +77,7 @@ test('active profile cannot be deleted implicitly; selecting account makes delet
   const dir=mkdtempSync(join(tmpdir(),'taskboard-profiles-'));const file=join(dir,'codex.json');const rt=runtime();
   try{
     const settings=new CodexConnectionSettings({file}).bindRuntime(rt);
-    await settings.update({action:'saveProfile',profile:{id:'custom-a',name:'Custom A',baseUrl:'https://a.example/v1',apiKey:'secret'},select:true});
+    await settings.update({action:'saveProfile',profile:{id:'custom-a',name:'Custom A',baseUrl:'https://a.example/v1',apiKey:'secret',defaultModel:'custom-model'},select:true});
     await assert.rejects(settings.update({action:'deleteProfile',profileId:'custom-a'}),/EXECUTOR_CONNECTION_ACTIVE_PROFILE_DELETE/);
     await settings.update({action:'selectProfile',profileId:'account'});
     const beforeDelete=rt.counts();
