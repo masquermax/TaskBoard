@@ -13,7 +13,7 @@ import { TaskStatus } from '../src/core/types.js';
 import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
 
 const rootDir=resolve('.');
-const base={stageResult:null,finalResult:null,resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,delegations:[]};
+const base={finalResult:null,resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[]};
 function work(id,projectAccess){return{id,title:id,goal:'perform one bounded project operation',expectedOutput:'return bounded result',stopCondition:'bounded result returned',projectAccess,networkAccess:false,skillId:null,dependsOn:[],inputRefs:['project:0']};}
 
 function createRig({projectAccess='read'}={}){
@@ -22,7 +22,7 @@ function createRig({projectAccess='read'}={}){
   const repository=new JsonTaskRepository(db);
   const taskService=new TaskService(repository);
   const project=taskService.createProject({name:'Project',path:dir});
-  const events=[];let rootCalls=0,validatorModelCalls=0;
+  const events=[];let rootCalls=0;
   const executor={
     async runRoot({subagentResults,onExecutionStarted}){
       rootCalls+=1;events.push(subagentResults.length?'root:complete':'root:plan');onExecutionStarted?.();
@@ -30,7 +30,6 @@ function createRig({projectAccess='read'}={}){
       return{...base,kind:'delegate',summary:'work',delegations:[work(projectAccess==='write'?'WU-WRITE':'WU-READ',projectAccess)]};
     },
     async runSubagent({delegation,onExecutionStarted}){events.push(`subagent:${delegation.id}`);onExecutionStarted?.();return{delegationId:delegation.id,result:'done',evidence:[],blocker:null};},
-    async runValidator(){validatorModelCalls+=1;throw new Error('AUTHORITY_MODEL_MUST_NOT_RUN');},
   };
   const modelRouter={async prepare(){},route(){return{};},release(){}};
   const rootRuntime=new RootRuntime({
@@ -41,7 +40,7 @@ function createRig({projectAccess='read'}={}){
   });
   const scheduler=new Scheduler({repository,taskService,rootRuntime,intervalMs:999999});
   const task=scheduler.createTask({title:projectAccess==='write'?'Write project':'Read project',instruction:projectAccess==='write'?'请修改项目中的目标文件，但不得联网。':'只读检查项目，不得修改文件，不得联网。',projectId:project.id});
-  return{dir,db,repository,scheduler,task,events,counts:()=>({rootCalls,validatorModelCalls}),close(){scheduler.stop();db.close();rmSync(dir,{recursive:true,force:true});}};
+  return{dir,db,repository,scheduler,task,events,counts:()=>({rootCalls}),close(){scheduler.stop();db.close();rmSync(dir,{recursive:true,force:true});}};
 }
 
 for(const scenario of [
@@ -53,11 +52,9 @@ for(const scenario of [
     await rig.scheduler.tick();
     assert.equal(rig.repository.getTask(rig.task.id).status,TaskStatus.COMPLETED);
     assert.equal(rig.counts().rootCalls,2,'one plan turn + one stage synthesis turn');
-    assert.equal(rig.counts().validatorModelCalls,0,'authority is never granted by a model');
     assert.deepEqual(rig.events,[`root:plan`,`subagent:${scenario.projectAccess==='write'?'WU-WRITE':'WU-READ'}`,'root:complete']);
     const authority=rig.repository.getTask(rig.task.id).taskContract.authority;
     assert.deepEqual(Object.keys(authority),scenario.authorityKeys);
     if(scenario.projectAccess==='write')assert.equal(authority.projectWrite.certification,'supported');
-    assert.notEqual(rig.rootRuntime.getSession(rig.task.id)?.pendingValidation?.phase,'authority');
   }finally{rig.close();}
 });
