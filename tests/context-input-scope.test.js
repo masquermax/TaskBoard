@@ -4,9 +4,10 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { taskInputCatalog, scopeTaskInputs } from '../src/core/task-input-scope.js';
+import { ROOT_RESPONSE_CONTRACT, compileSubagentExecutorRequest } from '../src/core/executor-contract.js';
 import { validateDelegationPlan } from '../src/core/root-runtime.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
-import { CodexExecutor, rootSchema } from '../src/extensions/executors/codex/codex-executor.js';
+import { CodexExecutor } from '../src/extensions/executors/codex/codex-executor.js';
 import { ValidatorRuntime } from '../src/governance/validator-runtime.js';
 
 function taskFixture(root){
@@ -53,7 +54,7 @@ test('new Work Units validate inputRefs and Project capability must select a Pro
   assert.equal(validateDelegationPlan([base],{availableInputRefs:allowed}).valid,true);
   const missingProject=validateDelegationPlan([{...base,inputRefs:['attachment:A-1']}],{availableInputRefs:allowed});assert.equal(missingProject.valid,false);assert.match(missingProject.issues.join(' '),/申请 Project 访问时必须通过 inputRefs 显式选择至少一个项目/);
   const unknown=validateDelegationPlan([{...base,inputRefs:['project:9']}],{availableInputRefs:allowed});assert.equal(unknown.valid,false);assert.match(unknown.issues.join(' '),/不存在的 Task Input：project:9/);
-  assert.ok(rootSchema.properties.delegations.items.required.includes('inputRefs'));assert.ok(rootSchema.properties.delegations.items.required.includes('networkAccess'));assert.deepEqual(rootSchema.properties.delegations.items.properties.projectAccess.enum,['none','read','write']);
+  assert.ok(ROOT_RESPONSE_CONTRACT.properties.delegations.items.required.includes('inputRefs'));assert.ok(ROOT_RESPONSE_CONTRACT.properties.delegations.items.required.includes('networkAccess'));assert.deepEqual(ROOT_RESPONSE_CONTRACT.properties.delegations.items.properties.projectAccess.enum,['none','read','write']);
 });
 
 test('SubagentRuntime passes only selected inputs and does not run the Validator source ledger itself',async()=>{
@@ -71,14 +72,15 @@ test('SubagentRuntime passes only selected inputs and does not run the Validator
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
-test('Codex Subagent prompt and write surface do not expose unselected inputs',()=>{
+test('Core-compiled Subagent request and Codex write surface expose only selected inputs',()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-codex-input-scope-'));
   try{
     mkdirSync(join(dir,'project-a'));mkdirSync(join(dir,'project-b'));
     const full=taskFixture(dir),selected=scopeTaskInputs(full,['project:1','attachment:A-2','reference:T-old-2']),executor=new CodexExecutor({runtimeRoot:join(dir,'runtime'),client:{}}),delegation={id:'w',title:'局部',goal:'只处理选择输入',expectedOutput:'结果',stopCondition:'完成',projectAccess:'write',networkAccess:false,skillId:null,dependsOn:[],inputRefs:['project:1','attachment:A-2','reference:T-old-2']};
-    const prompt=executor.subagentPrompt({task:selected,delegation,policyContext:{prompt:'ROLE'}});
-    assert.doesNotMatch(prompt,/project-a|one\.png|T-old-1|R1/);assert.match(prompt,/project-b/);assert.match(prompt,/two\.png/);assert.match(prompt,/T-old-2/);
-    const scope=executor.executionScope(selected,{authorizedGrant:{role:'subagent',projectAccess:'write',networkAccess:false,inputRefs:['project:1','attachment:A-2','reference:T-old-2'],sourceAccess:'selected',environmentAccess:'default'}},{workUnitId:'w'});
+    const request=compileSubagentExecutorRequest({task:selected,delegation,policyContext:{prompt:'ROLE',authorizedGrant:{role:'subagent',projectAccess:'write',networkAccess:false,inputRefs:['project:1','attachment:A-2','reference:T-old-2'],sourceAccess:'selected',environmentAccess:'default'}}});
+    const serialized=JSON.stringify({instructions:request.instructions,context:request.context});
+    assert.doesNotMatch(serialized,/project-a|one\.png|T-old-1|R1/);assert.match(serialized,/project-b/);assert.match(serialized,/two\.png/);assert.match(serialized,/T-old-2/);
+    const scope=executor.executionScope(request);
     assert.equal(scope.writableRoots.includes(join(dir,'project-a')),false);assert.equal(scope.writableRoots.includes(join(dir,'project-b')),true);
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
