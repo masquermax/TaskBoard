@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { ExtensionRegistry } from '../src/extensions/runtime/extension-registry.js';
+import { EXTENSION_API_VERSION, ExtensionRegistry } from '../src/extensions/runtime/extension-registry.js';
 import { bootstrap } from '../src/server/bootstrap.js';
 
 test('explicit empty product registry starts in management mode instead of inventing a concrete Executor', async () => {
@@ -35,8 +35,8 @@ test('invalid active Executor degrades only the product runtime to management mo
   const rootDir=mkdtempSync(resolve(tmpdir(),'taskboard-management-mode-invalid-'));
   let unrelatedFactoryCalls=0;
   const registry=new ExtensionRegistry()
-    .register('broken',()=>({apiVersion:1,executor:{async runRoot(){}}}))
-    .register('unrelated',()=>{unrelatedFactoryCalls+=1;return{apiVersion:1,executor:{async execute(){return{};}}};});
+    .register('broken',()=>({apiVersion:EXTENSION_API_VERSION,executor:{async runRoot(){}}}))
+    .register('unrelated',()=>{unrelatedFactoryCalls+=1;return{apiVersion:EXTENSION_API_VERSION,executor:{async execute(){return{};}}};});
   const runtime=bootstrap({
     rootDir,
     executorName:'broken',
@@ -60,7 +60,7 @@ test('invalid active Executor degrades only the product runtime to management mo
 
 test('invalid active Executor still fails closed when management fallback is not allowed', () => {
   const rootDir=mkdtempSync(resolve(tmpdir(),'taskboard-management-mode-strict-'));
-  const registry=new ExtensionRegistry().register('broken',()=>({apiVersion:1,executor:{async runRoot(){}}}));
+  const registry=new ExtensionRegistry().register('broken',()=>({apiVersion:EXTENSION_API_VERSION,executor:{async runRoot(){}}}));
   assert.throws(()=>bootstrap({
     rootDir,
     executorName:'broken',
