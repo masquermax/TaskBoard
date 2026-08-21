@@ -1,6 +1,7 @@
 # Verification v0.9.2
 
-Status: CI_VERIFIED_REAL_RUNTIME_PENDING
+Status: HISTORICAL SHA VERIFIED
+Release gate: CI_VERIFIED_REAL_RUNTIME_PENDING
 
 This record separates three different proof classes:
 
@@ -87,4 +88,4 @@ PR #24 may leave draft/release-gate status only after the same current head has:
 - no acceptance-discovered blocker requiring further code change;
 - this verification record updated to that accepted exact head.
 
-Until then the correct status is CI verified, real Runtime pending.
+Until then the correct release gate is CI verified where applicable, real Runtime pending.
