@@ -8,7 +8,7 @@ import { ExecutorPort } from '../src/core/executor-port.js';
 import { CapabilityProviderPort } from '../src/extensions/ports/capability-provider.js';
 import { SurfaceHostPort } from '../src/extensions/ports/surface-host.js';
 
-class DemoExecutor extends ExecutorPort {}
+class DemoExecutor extends ExecutorPort { async execute(request){ return request; } }
 class DemoCapability extends CapabilityProviderPort { async discover(){ return { discoveryLevel:'basic' }; } }
 class DemoConnectionSettings extends ConnectionSettingsPort {
   describe(){return{schemaVersion:1,kind:'form',title:'Demo',fields:[]};}
@@ -46,6 +46,12 @@ test('generic extension registry carries independent execution, capability, sett
   assert.ok(extension.connectionSettings instanceof ConnectionSettingsPort);
   assert.ok(extension.surfaceHosts[0] instanceof SurfaceHostPort);
   assert.throws(()=>registry.register('demo',()=>({})),/EXTENSION_DUPLICATE/);
+});
+
+test('executor must override the base execute placeholder before it can bind',()=>{
+  class IncompleteExecutor extends ExecutorPort {}
+  const registry=new ExtensionRegistry().register('incomplete',()=>({apiVersion:EXTENSION_API_VERSION,executor:new IncompleteExecutor()}));
+  assert.throws(()=>registry.create('incomplete'),/EXTENSION_EXECUTOR_NOT_IMPLEMENTED:incomplete:execute/);
 });
 
 test('connection discovery is an optional fail-closed author capability',async()=>{
