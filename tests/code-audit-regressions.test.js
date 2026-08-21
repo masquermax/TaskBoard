@@ -11,7 +11,7 @@ import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { AttachmentStore } from '../src/core/attachment-store.js';
 import { JsonTaskDatabase, JsonTaskRepository } from '../src/core/json-repository.js';
 import { TaskService } from '../src/core/task-service.js';
-import { MockExecutor } from '../src/extensions/executors/mock/mock-executor.js';
+import { TestExecutor as MockExecutor } from './helpers/test-executor.js';
 import { createApp } from '../src/server/app.js';
 
 function runtime(executor={}){const router=new ModelRouter();return new RootRuntime({executor,modelRouter:router,subagentRuntime:new SubagentRuntime({executor,modelRouter:router})});}
@@ -48,10 +48,6 @@ test('invalid Root delegation graph fails at the deterministic contract boundary
   const executor={async runRoot(){turns+=1;return{kind:'delegate',summary:'bad plan',finalResult:null,resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[{id:'a',title:'A',goal:'A',expectedOutput:'A',stopCondition:'done',projectAccess:'none',networkAccess:false,inputRefs:[],skillId:null,dependsOn:['b']},{id:'b',title:'B',goal:'B',expectedOutput:'B',stopCondition:'done',projectAccess:'none',networkAccess:false,inputRefs:[],skillId:null,dependsOn:['a']}]};},async runSubagent(){subagentCalls+=1;}};
   await assert.rejects(runtime(executor).execute({id:'T-plan',title:'执行',instruction:'执行任务',projectScopes:[],attachments:[],references:[]}),/ROOT_INVALID_DELEGATION_PLAN/);
   assert.equal(turns,1);assert.equal(subagentCalls,0);
-});
-
-test('business progress never exposes raw shell command bodies',()=>{
-  const source=readFileSync(resolve('src/extensions/executors/codex/app-server-client.js'),'utf8');assert.doesNotMatch(source,/detail\s*:\s*item\.command/);assert.doesNotMatch(source,/summary\s*:\s*item\.command/);
 });
 
 test('Mock Executor validates control flow without manufacturing business Evidence',async()=>{

@@ -12,7 +12,7 @@ import { successfulCompletionDependenciesForControlFlowTest } from './helpers/co
 import { asRuntimeExecutor } from './helpers/runtime-executor.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { ModelRouter } from '../src/core/model-router.js';
-import { MockExecutor } from '../src/extensions/executors/mock/mock-executor.js';
+import { TestExecutor as MockExecutor } from './helpers/test-executor.js';
 import { AttachmentStore } from '../src/core/attachment-store.js';
 
 function setup(extensionExecutor=new MockExecutor()) {

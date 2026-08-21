@@ -38,7 +38,7 @@ Root ── judgment / plan / next action
 | Task / Project / Gateway / Certified State / Result persistence | Task Core | `src/core/task-service.js` + `src/core/json-repository.js` | atomic repository transactions |
 | Human question/answer transport | Human Gateway | Scheduler + Repository + UI/API | answer is a Root trigger; transport does not interpret it |
 | Skill method | Skill | injected Skill library | selected method only; no Authority |
-| Model/file/command/network operation | Executor | `src/extensions/executors/*` | realizes AuthorizedGrant; no Task judgment |
+| Model/file/command/network operation | Executor Extension | `src/extensions/public-api.js` contract + external `TaskBoard-Ecosystem` implementation | realizes AuthorizedGrant; no Task judgment |
 | UI presentation / user intent | UI / Surface | `src/ui/*`, `src/server/*` | projection only; durable truth remains Core/Scheduler |
 | Task concurrency | Scheduler | `src/core/runtime-settings.js` | configured ceiling, no preemption |
 | Per-Task Subagent concurrency | Root Runtime | `src/core/runtime-settings.js` | limits active Work Units, not Work Unit count |

@@ -12,15 +12,13 @@ test('release identity is consistent across executable/package/current release d
   const current=read('docs/CURRENT_STATE.md');
   const spec=read('docs/SPECIFICATION.md');
   const architecture=read('docs/ARCHITECTURE.md');
-  const codex=read('docs/CODEX_INTEGRATION.md');
   const verification=read('docs/VERIFICATION.md');
 
   assert.match(app,new RegExp(`APP_VERSION = ['\"]${escapedVersion}['\"]`));
-  assert.match(readme,new RegExp(`^# TaskBoard Codex v${escapedVersion}`,'m'));
+  assert.match(readme,new RegExp(`^# TaskBoard v${escapedVersion}`,'m'));
   assert.match(current,new RegExp('^Release lane: `v'+escapedVersion+'`$','m'));
   assert.match(spec,new RegExp(`^# TaskBoard Specification v${escapedVersion}`,'m'));
   assert.match(architecture,new RegExp(`^# TaskBoard Architecture v${escapedVersion}`,'m'));
-  assert.match(codex,new RegExp(`^# Codex Integration v${escapedVersion}`,'m'));
   assert.match(verification,new RegExp(`^# Verification v${escapedVersion}$`,'m'));
   assert.match(verification,/^Status: HISTORICAL SHA VERIFIED$/m);
   assert.match(verification,/Evidence scope: the exact named Git trees below only\./);

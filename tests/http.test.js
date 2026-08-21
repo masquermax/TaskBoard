@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { JsonTaskDatabase, JsonTaskRepository } from '../src/core/json-repository.js';
 import { TaskService } from '../src/core/task-service.js';
-import { MockExecutor } from '../src/extensions/executors/mock/mock-executor.js';
+import { TestExecutor as MockExecutor } from './helpers/test-executor.js';
 import { createApp } from '../src/server/app.js';
 import { APP_VERSION } from '../src/version.js';
 

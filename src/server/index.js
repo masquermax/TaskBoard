@@ -9,7 +9,7 @@ import { createExtensionManagementHandler } from './extension-management-api.js'
 import { presentExtensionLoadState } from './extension-load-presentation.js';
 import { ExtensionRegistry } from '../extensions/runtime/extension-registry.js';
 import { ImportedExtensionStore } from '../extensions/runtime/imported-extension-store.js';
-import { loadRegisteredExtensions } from '../extensions/runtime/external-extension-loader.js';
+import { loadRegisteredExtensionsAsync } from '../extensions/runtime/external-extension-loader.js';
 import { APP_ID, APP_VERSION } from '../version.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -27,7 +27,7 @@ const importedExtensionStore = new ImportedExtensionStore({
 // Product Runtime starts from an empty generic registry. Every concrete Extension,
 // including Executors, enters only through the user's explicit imported registry.
 const extensionRegistry = new ExtensionRegistry();
-const extensionLoadState = loadRegisteredExtensions(extensionRegistry, {
+const extensionLoadState = await loadRegisteredExtensionsAsync(extensionRegistry, {
   rootDir,
   entries: importedExtensionStore.entries(),
 });

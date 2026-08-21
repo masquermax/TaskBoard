@@ -7,7 +7,6 @@ import { fileURLToPath } from 'node:url';
 import { RootRuntime } from '../src/core/root-runtime.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { ModelRouter } from '../src/core/model-router.js';
-import { loadEmbeddedTaskboardUi } from '../src/extensions/surfaces/cdp/embedded-ui-bundle.js';
 
 function delegation(id='audit'){return{id,title:'审计工作',goal:'取得可验证证据',expectedOutput:'返回执行结果和来源',stopCondition:'Root 指定的结果已经返回',projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[]};}
 function task(id='T-OBS'){return{id,title:'可观测性验证',instruction:'验证 Runtime 投影',projectScopes:[],attachments:[],references:[],workReceipts:[],analysisState:null};}
@@ -22,7 +21,3 @@ test('Root turn keeps its semantic activity title instead of masquerading as a W
 });
 
 test('UI and active specification use the same certified-conclusion terminology',()=>{const html=readFileSync(new URL('../src/ui/index.html',import.meta.url),'utf8'),spec=readFileSync(new URL('../docs/SPECIFICATION.md',import.meta.url),'utf8');assert.match(html,/已确认结论/);assert.match(html,/已通过认证并进入当前 Task 认知/);assert.match(spec,/User-facing durable analysis is labeled `已确认结论`/);assert.doesNotMatch(html,/已确认进展/);assert.doesNotMatch(spec,/已确认进展/);});
-
-test('the Codex embedded surface can bundle the shared Work timing projection',()=>{const uiRoot=fileURLToPath(new URL('../src/ui/',import.meta.url)),bundle=loadEmbeddedTaskboardUi(uiRoot);assert.match(bundle.appExpression,/function formatWorkTiming\s*\(/);assert.match(bundle.appExpression,/const formatPhaseTime=formatTaskTime/);assert.doesNotMatch(bundle.appExpression,/^\s*(?:import|export)\s/m);});
-
-test('embedded time bundling preserves named imports, aliases and local side-effect module order',()=>{const dir=mkdtempSync(join(tmpdir(),'taskboard-embedded-time-'));try{writeFileSync(join(dir,'index.html'),'<body><script src="/app.js"></script><script src="/connection-settings.js"></script></body>');writeFileSync(join(dir,'app.css'),'');writeFileSync(join(dir,'time.js'),["export function formatTaskTime(){return 'task';}","export function formatElapsedTime(){return 'elapsed';}","export function formatWorkTiming(){return 'work';}"].join('\n'));writeFileSync(join(dir,'app.js'),"import { formatElapsedTime as elapsed, formatWorkTiming } from './time.js';\nglobalThis.__timeBundle=[elapsed(),formatWorkTiming()];");writeFileSync(join(dir,'extension-management.js'),'globalThis.__extensionBundle=true;');writeFileSync(join(dir,'connection-settings.js'),"import './extension-management.js';\nglobalThis.__connectionBundle=true;");const bundle=loadEmbeddedTaskboardUi(dir);assert.match(bundle.appExpression,/const elapsed=formatElapsedTime;/);assert.match(bundle.appExpression,/function formatWorkTiming\s*\(/);assert.ok(bundle.appExpression.indexOf('__extensionBundle=true')<bundle.appExpression.indexOf('__connectionBundle=true'));assert.doesNotMatch(bundle.appExpression,/^\s*(?:import|export)\s/m);}finally{rmSync(dir,{recursive:true,force:true});}});
