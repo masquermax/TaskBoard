@@ -25,7 +25,7 @@ class EventClient extends CodexAppServerClient {
   }
 }
 
-function turnRequest(role,type,{fileAccess='read',networkAccess=false}={}){
+function turnRequest(type,{fileAccess='read',networkAccess=false,workUnitId=null}={}){
   const client=new EventClient(type);
   const request={
     cwd:'scratch',
@@ -36,20 +36,20 @@ function turnRequest(role,type,{fileAccess='read',networkAccess=false}={}){
     permissionProfile:'taskboard_runtime',
     runtimeWorkspaceRoots:['scratch'],
     runtimeConfig:{permissions:{taskboard_runtime:{filesystem:{':minimal':'read',':workspace_roots':{'.':fileAccess}},network:{enabled:networkAccess}}}},
-    diagnosticContext:{role},
+    diagnosticContext:{taskId:'T-surface',workUnitId},
   };
   return{client,request};
 }
 
-test('AppServerClient treats role as diagnostics, not command-execution authority',async()=>{
-  for(const role of ['root','validator','subagent']){
-    const {client,request}=turnRequest(role,'commandExecution');
-    assert.equal(await client.runTurn(request),'{"ok":true}',role);
+test('AppServerClient treats Work Unit identity as diagnostics, not command-execution authority',async()=>{
+  for(const workUnitId of [null,'WU-1']){
+    const {client,request}=turnRequest('commandExecution',{workUnitId});
+    assert.equal(await client.runTurn(request),'{"ok":true}',workUnitId||'task');
   }
 });
 
 test('AppServerClient fails closed when file-change events exceed the projected runtime profile',async()=>{
-  const {client,request}=turnRequest('subagent','fileChange',{fileAccess:'read'});
+  const {client,request}=turnRequest('fileChange',{fileAccess:'read',workUnitId:'WU-1'});
   await assert.rejects(client.runTurn(request),error=>{
     assert.match(error.message,/EXECUTION_SURFACE_VIOLATION/);
     assert.equal(error.authorityViolation,true);
@@ -58,7 +58,7 @@ test('AppServerClient fails closed when file-change events exceed the projected 
 });
 
 test('AppServerClient fails closed when web-search events exceed the projected runtime profile',async()=>{
-  const {client,request}=turnRequest('subagent','webSearch',{networkAccess:false});
+  const {client,request}=turnRequest('webSearch',{networkAccess:false,workUnitId:'WU-1'});
   await assert.rejects(client.runTurn(request),error=>{
     assert.match(error.message,/EXECUTION_SURFACE_VIOLATION/);
     assert.equal(error.authorityViolation,true);
@@ -68,7 +68,7 @@ test('AppServerClient fails closed when web-search events exceed the projected r
 
 test('AppServerClient keeps unsupported ambient action surfaces fail-closed',async()=>{
   for(const type of ['mcpToolCall','collabToolCall','dynamicToolCall']){
-    const {client,request}=turnRequest('subagent',type,{fileAccess:'write',networkAccess:true});
+    const {client,request}=turnRequest(type,{fileAccess:'write',networkAccess:true,workUnitId:'WU-1'});
     await assert.rejects(client.runTurn(request),/EXECUTION_SURFACE_VIOLATION/);
   }
 });
