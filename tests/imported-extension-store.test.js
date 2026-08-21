@@ -4,25 +4,28 @@ import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { ImportedExtensionStore } from '../src/extensions/runtime/imported-extension-store.js';
+import { EXTENSION_API_VERSION } from '../src/extensions/runtime/extension-registry.js';
 
-function extensionDirectory({ id='company-api', displayName='Company API', executor=true, source='module.exports={id:"company-api",createExtension(){return{apiVersion:1};}};' }={}) {
+function extensionDirectory({ id='company-api', displayName='Company API', executor=true, source=null }={}) {
   const directory=mkdtempSync(resolve(tmpdir(),'taskboard-import-extension-'));
+  const moduleSource=source||`module.exports={id:${JSON.stringify(id)},createExtension(){return{apiVersion:${EXTENSION_API_VERSION}};}};`;
   writeFileSync(resolve(directory,'package.json'),JSON.stringify({
     name:`taskboard-extension-${id}`,
     main:'index.cjs',
-    taskboard:{apiVersion:1,id,displayName,entry:'index.cjs',provides:{executor}},
+    taskboard:{apiVersion:EXTENSION_API_VERSION,id,displayName,entry:'index.cjs',provides:{executor}},
   },null,2));
-  writeFileSync(resolve(directory,'index.cjs'),source,'utf8');
+  writeFileSync(resolve(directory,'index.cjs'),moduleSource,'utf8');
   return directory;
 }
 
 test('import registers only the explicitly supplied directory without executing extension code', () => {
   const root=mkdtempSync(resolve(tmpdir(),'taskboard-extension-registry-'));
   const marker=resolve(root,'executed.txt');
-  const directory=extensionDirectory({source:`require('node:fs').writeFileSync(${JSON.stringify(marker)},'executed');module.exports={id:'company-api',createExtension(){return{apiVersion:1};}};`});
+  const directory=extensionDirectory({source:`require('node:fs').writeFileSync(${JSON.stringify(marker)},'executed');module.exports={id:'company-api',createExtension(){return{apiVersion:${EXTENSION_API_VERSION}};}};`});
   const store=new ImportedExtensionStore({file:resolve(root,'registry.json'),rootDir:root});
   const entry=store.importDirectory(directory);
   assert.equal(entry.id,'company-api');
+  assert.equal(entry.apiVersion,EXTENSION_API_VERSION);
   assert.equal(entry.directory,directory);
   assert.equal(existsSync(marker),false);
   assert.equal(store.entries().length,1);
@@ -31,7 +34,7 @@ test('import registers only the explicitly supplied directory without executing 
 test('first imported Executor becomes the persisted active Executor candidate', () => {
   const root=mkdtempSync(resolve(tmpdir(),'taskboard-extension-registry-'));
   const store=new ImportedExtensionStore({file:resolve(root,'registry.json'),rootDir:root});
-  store.importDirectory(extensionDirectory({id:'cap-only',displayName:'Capability Only',executor:false,source:"module.exports={id:'cap-only',createExtension(){return{apiVersion:1};}};"}));
+  store.importDirectory(extensionDirectory({id:'cap-only',displayName:'Capability Only',executor:false}));
   assert.equal(store.activeExecutorId(),null);
   store.importDirectory(extensionDirectory());
   assert.equal(store.activeExecutorId(),'company-api');
