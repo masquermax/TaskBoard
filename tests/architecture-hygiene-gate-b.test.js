@@ -5,10 +5,10 @@ import { resolve } from 'node:path';
 
 const source = path => readFileSync(resolve(path),'utf8');
 
-test('Gate B: AppServerClient does not derive action policy from role identity',()=>{
+test('Gate B: AppServerClient uses grants and factual Work identity, never role identity',()=>{
   const text=source('src/extensions/executors/codex/app-server-client.js');
   assert.doesNotMatch(text,/roleCanExecute|roleCanWrite|roleCanNetwork/);
-  assert.doesNotMatch(text,/role\s*===\s*['"]subagent['"][\s\S]{0,220}type\s*===\s*['"](?:commandExecution|fileChange|webSearch)['"]/);
+  assert.doesNotMatch(text,/diagnosticContext\?\.role|role\s*===\s*['"](?:root|subagent|validator)['"]/);
 });
 
 test('Gate B: Runtime has no parallel stage-result, semantic History, Validator-model or repair channel',()=>{
