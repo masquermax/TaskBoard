@@ -1,4 +1,6 @@
-export const EXTENSION_API_VERSION = 1;
+import { ExecutorPort } from '../../core/executor-port.js';
+
+export const EXTENSION_API_VERSION = 2;
 
 export const OrchestrationMode = Object.freeze({
   TASKBOARD: 'taskboard',
@@ -18,6 +20,7 @@ function normalizePresentation(value={}){
 function validateExecutor(id,executor){
   if(!executor)return null;
   if(typeof executor.execute!=='function')throw new Error(`EXTENSION_EXECUTOR_INVALID:${id}:execute`);
+  if(executor.execute===ExecutorPort.prototype.execute)throw new Error(`EXTENSION_EXECUTOR_NOT_IMPLEMENTED:${id}:execute`);
   return executor;
 }
 
