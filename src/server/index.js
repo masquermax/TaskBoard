@@ -6,6 +6,7 @@ import { bootstrap } from './bootstrap.js';
 import { createApp } from './app.js';
 import { createExtensionConnectionHandler } from './extension-connection-api.js';
 import { createExtensionManagementHandler } from './extension-management-api.js';
+import { presentExtensionLoadState } from './extension-load-presentation.js';
 import { ExtensionRegistry } from '../extensions/runtime/extension-registry.js';
 import { ImportedExtensionStore } from '../extensions/runtime/imported-extension-store.js';
 import { loadRegisteredExtensions } from '../extensions/runtime/external-extension-loader.js';
@@ -49,6 +50,7 @@ if (requestedExecutor && runtime.extensionLoadError) {
   extensionLoadState.loadErrors[requestedExecutor] = runtime.extensionLoadError;
   console.warn(`[extensions] active Executor ${requestedExecutor} failed activation; TaskBoard is starting in management mode: ${runtime.extensionLoadError}`);
 }
+const extensionManagementLoadState=presentExtensionLoadState(extensionLoadState);
 let server = null;
 let shuttingDown = false;
 let extensionManagementHandler = null;
@@ -97,7 +99,7 @@ const connectionHandler=createExtensionConnectionHandler({
 extensionManagementHandler=createExtensionManagementHandler({
   store: importedExtensionStore,
   registry: runtime.extensionRegistry,
-  loadState: extensionLoadState,
+  loadState: extensionManagementLoadState,
   activeExtension: runtime.extension,
   rootDir,
   taskboardUrl,
