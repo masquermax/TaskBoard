@@ -5,10 +5,12 @@ import { resolve } from 'node:path';
 
 const source = path => readFileSync(resolve(path),'utf8');
 
-test('Gate B: AppServerClient uses grants and factual Work identity, never role identity',()=>{
-  const text=source('src/extensions/executors/codex/app-server-client.js');
-  assert.doesNotMatch(text,/roleCanExecute|roleCanWrite|roleCanNetwork/);
-  assert.doesNotMatch(text,/diagnosticContext\?\.role|role\s*===\s*['"](?:root|subagent|validator)['"]/);
+test('Gate B: Codex transports use grants and factual Work identity, never role identity or a synthetic Work lease',()=>{
+  for(const path of ['src/extensions/executors/codex/app-server-client.js','src/extensions/executors/codex/exec-client.js']){
+    const text=source(path);
+    assert.doesNotMatch(text,/roleCanExecute|roleCanWrite|roleCanNetwork|diagnosticContext\?\.role|role\s*===\s*['"](?:root|subagent|validator)['"]/);
+    assert.doesNotMatch(text,/subagentExecutionWindowMs|WORK_UNIT_EXECUTION_BOUNDARY|executionBoundary/);
+  }
 });
 
 test('Gate B: Runtime has no parallel stage-result, semantic History, Validator-model or repair channel',()=>{
