@@ -6,6 +6,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildCodexExecInvocation, CodexExecClient } from '../src/extensions/executors/codex/exec-client.js';
+import { finalizeWorkUnitObservability } from '../src/core/work-unit-observability.js';
 
 const launchProfile={
   mode:'custom',
@@ -43,7 +44,7 @@ test('exec invocation keeps secret in child env and projects TaskBoard permissio
   assert.equal(invocation.args.includes('--sandbox'),false,'permission profiles must not be disabled by legacy --sandbox');
 });
 
-test('exec client returns structured output after the real turn.started event',async()=>{
+test('exec client returns structured output and records Work timing from factual workUnitId',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-exec-client-'));
   let capturedArgs=null;
   let capturedOptions=null;
@@ -60,6 +61,8 @@ test('exec client returns structured output after the real turn.started event',a
     queueMicrotask(()=>{
       child.stdout.write('{"type":"thread.started","thread_id":"thread-1"}\n');
       child.stdout.write('{"type":"turn.started","turn_id":"turn-1"}\n');
+      child.stdout.write('{"type":"item.started","item":{"id":"cmd-1","type":"command_execution","cwd":"C:/repo","status":"in_progress"}}\n');
+      child.stdout.write('{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","cwd":"C:/repo","status":"completed","exitCode":0,"output":"ok"}}\n');
       writeFileSync(outputPath,'{"kind":"complete"}\n','utf8');
       child.emit('exit',0);
     });
@@ -81,7 +84,7 @@ test('exec client returns structured output after the real turn.started event',a
       model:'gpt-5.6-sol',permissionProfile:'taskboard_runtime',runtimeWorkspaceRoots:[dir],
       runtimeConfig:{permissions:{taskboard_runtime:{filesystem:{':minimal':'read',':workspace_roots':{'.':'read'}},network:{enabled:false}}}},
       onExecutionStarted:value=>{started=value;},
-      diagnosticContext:{taskId:'T-1',workUnitId:null},
+      diagnosticContext:{taskId:'T-1',workUnitId:'WU-1'},
     });
     assert.equal(result,'{"kind":"complete"}');
     assert.equal(started.threadId,'thread-1');
@@ -89,5 +92,11 @@ test('exec client returns structured output after the real turn.started event',a
     assert.equal(capturedOptions.env.TASKBOARD_CODEX_API_KEY,'super-secret');
     assert.equal(capturedArgs.join(' ').includes('super-secret'),false);
     assert.equal(diagnostics.some(item=>'role' in item),false,'custom exec transport has no role channel');
+    assert.equal(diagnostics.find(item=>item.event==='tool-completed')?.toolType,'commandExecution');
+    finalizeWorkUnitObservability({taskId:'T-1',workUnitId:'WU-1',evidence:[{id:'E-1'}],status:'completed'});
+    const summary=diagnostics.find(item=>item.event==='work-unit-summary');
+    assert.equal(summary.toolCallCount,1);
+    assert.equal(summary.evidenceCount,1);
+    assert.equal(summary.transport,'codex-exec');
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
