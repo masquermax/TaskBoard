@@ -12,6 +12,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  boundary-inventory:
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inventory concrete-extension references
+        shell: bash
+        run: |
+          echo '=== concrete extension source/test references ==='
+          grep -RInE "createBuiltinExtensionRegistry|src/extensions/(builtins|capabilities|config|executors|surfaces)|windows-codex|windows-surface|CODEX_|OpenAI\\.Codex|provider-acceptance" tests src scripts docs package.json README.md || true
+
   connection-acceptance:
     timeout-minutes: 10
     strategy:
