@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import { isAbsolute, resolve } from 'node:path';
+import { EXTENSION_API_VERSION } from './extension-registry.js';
 
 const require = createRequire(import.meta.url);
 
@@ -72,6 +73,11 @@ export function loadRegisteredExtensions(registry, { rootDir = process.cwd(), en
     const expectedId = String(entry?.id || '').trim();
     const spec = String(entry?.entryPath || '').trim();
     if (!expectedId || !spec) continue;
+    const persistedApiVersion=Number(entry?.apiVersion);
+    if(Number.isInteger(persistedApiVersion)&&persistedApiVersion!==EXTENSION_API_VERSION){
+      loadErrors[expectedId]=`EXTENSION_API_VERSION_UNSUPPORTED:${expectedId}:${persistedApiVersion}`;
+      continue;
+    }
     try {
       const descriptor = loadDescriptor(spec, rootDir);
       if (typeof descriptor?.register === 'function') throw new Error(`EXTENSION_IMPORTED_REGISTRAR_UNSUPPORTED:${expectedId}`);
