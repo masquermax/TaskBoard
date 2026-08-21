@@ -1,9 +1,11 @@
 # Current State
 
-Status: RUNTIME_HARDENING
+Status: RELEASE_ACCEPTANCE
 Release lane: `v0.9.2`
 
 This file is a continuation checkpoint, not a second architecture definition. `docs/ARCHITECTURE.md`, `docs/SPECIFICATION.md`, the current code and newly verified Runtime evidence outrank stale wording here.
+
+The Runtime-slimming implementation is now in release acceptance. Do not add another Runtime mechanism merely to make acceptance easier; a failed real run must first identify the smallest existing owner/boundary that is wrong.
 
 ## Current Runtime truth
 
@@ -83,21 +85,28 @@ These remain because the owner chain cannot safely realize the requirement witho
 
 None of these mechanisms may become a second Task reasoning owner.
 
-## Remaining acceptance work
+## Release acceptance gate
 
-The architecture slimming is not itself Runtime acceptance. Representative real runs still need to prove that the current skeleton actually converges efficiently:
+The pre-closure head `bea4c0e4f787967a379a3da266cf703d69bd68c1` passed the generic cross-platform/fresh-unpack CI gate, including connection acceptance. This proves the named tree only; descendants require their own exact-head run.
 
-- Root wakes only on legal Task/Human/technical/full-stage triggers;
-- one completed sibling batch causes one Root synthesis turn;
-- Subagent stops at the Work Unit boundary without Task-level reasoning;
-- Validator performs no model turn and checks only the current source ledger;
-- Root input does not regrow through historical replay;
-- retry changes the smallest owned Work Unit/attempt state without redefining Task-level timing;
-- effect recovery never replays an uncertain mutation without independent Reality closure;
-- final completion follows explicit certified obligation mappings;
-- wall time, Root/Subagent turn counts, Work Unit duration, critical path and final tail can be measured from operational diagnostics.
+The remaining release blocker is representative real Runtime acceptance. The executable gate is defined in `docs/RUNTIME_ACCEPTANCE.md` and currently requires four representative scenarios:
 
-Exact token/billing usage is not an acceptance dependency when the provider does not expose it.
+- normal governed analysis / owner-chain behavior;
+- no-progress repeated-investigation convergence;
+- smallest-owner retry;
+- explicit obligation-mapped completion.
+
+Static/unit/CI proof must not be reported as real Runtime acceptance.
+
+## Legacy branch disposition
+
+The old branches are not alternative current truth:
+
+- `agent/capability-driven-extension-config` — no unique commits relative to current `v0.9.2`; absorbed, eligible for cleanup after release.
+- `agent/extension-registry-management` — no unique commits relative to current `v0.9.2`; absorbed, eligible for cleanup after release.
+- `agent/recovery-observation-boundary` — old implementation branch; its safety requirement is represented by current D-023 effect recovery. Do not merge the old branch into the current Runtime.
+- `agent/root-goal-contribution-witness` — preserves a useful defect class (repeated work that does not advance the governed problem) but its planning-repair implementation conflicts with the current owner skeleton. Preserve the defect class as Runtime acceptance scenario B; do not merge the old implementation.
+- `feature/automation-extension-point` — deferred product candidate, not a v0.9.2 release requirement. Re-evaluate against the released Extension contract on a fresh post-v0.9.2 branch rather than merging the stale implementation.
 
 ## Continuation rule
 
