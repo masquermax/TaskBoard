@@ -66,9 +66,11 @@ test('exec client returns structured output after the real turn.started event',a
     return child;
   };
   let started=null;
+  const diagnostics=[];
   const client=new CodexExecClient({
     runtimeResolver:{async requireReady(){return{available:true,command:'codex',version:'test'};}},
     launchProfileProvider:()=>launchProfile,
+    diagnosticLogger:(event,data)=>diagnostics.push({event,...data}),
     spawnProcess:fakeSpawn,
     terminateProcess:()=>{},
     turnEventTimeoutMs:5_000,
@@ -79,12 +81,13 @@ test('exec client returns structured output after the real turn.started event',a
       model:'gpt-5.6-sol',permissionProfile:'taskboard_runtime',runtimeWorkspaceRoots:[dir],
       runtimeConfig:{permissions:{taskboard_runtime:{filesystem:{':minimal':'read',':workspace_roots':{'.':'read'}},network:{enabled:false}}}},
       onExecutionStarted:value=>{started=value;},
-      diagnosticContext:{taskId:'T-1',role:'root'},
+      diagnosticContext:{taskId:'T-1',workUnitId:null},
     });
     assert.equal(result,'{"kind":"complete"}');
     assert.equal(started.threadId,'thread-1');
     assert.equal(started.turnId,'turn-1');
     assert.equal(capturedOptions.env.TASKBOARD_CODEX_API_KEY,'super-secret');
     assert.equal(capturedArgs.join(' ').includes('super-secret'),false);
+    assert.equal(diagnostics.some(item=>'role' in item),false,'custom exec transport has no role channel');
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
