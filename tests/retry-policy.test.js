@@ -3,15 +3,9 @@ import assert from 'node:assert/strict';
 import { classifyRetry, isInterrupted, retryReasonFromMessage } from '../src/core/retry-policy.js';
 import { RuntimeFailureCode, attachRuntimeFailure } from '../src/core/runtime-failure.js';
 
-test('Work Unit execution boundary is a distinct non-retryable runtime outcome',()=>{
-  const error=new Error('WORK_UNIT_EXECUTION_BOUNDARY: lease reached');
-  error.executionBoundary=true;
-  error.nonRetryable=true;
-  assert.deepEqual(classifyRetry(error),{
-    retryable:false,
-    reason:'Work Unit 已达到执行边界',
-    message:'WORK_UNIT_EXECUTION_BOUNDARY: lease reached',
-  });
+test('plain transport timeout remains retryable instead of becoming a semantic Work Unit boundary',()=>{
+  const message='Timed out waiting for Codex exec completion';
+  assert.deepEqual(classifyRetry(new Error(message)),{retryable:true,reason:'执行器响应超时',message});
 });
 
 test('explicit authentication failures remain auth-required',()=>{
