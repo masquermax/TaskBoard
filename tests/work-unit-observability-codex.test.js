@@ -17,11 +17,11 @@ rl.on('line',line=>{const msg=JSON.parse(line);if(msg.method==='initialize')retu
 }
 function parseDiagnostics(lines){return lines.map(line=>JSON.parse(line.replace(/^\[codex-runtime\] /,'')));}
 
-test('Codex streams factual tool timing, then SubagentRuntime may finalize one compact Work Unit summary',async()=>{
+test('Codex binds factual tool timing to workUnitId without a role channel',async()=>{
   if(process.platform==='win32')return;
   const dir=mkdtempSync(join(tmpdir(),'taskboard-work-observability-')),diagnostics=[],client=new CodexAppServerClient({command:createToolFakeCodex(dir),logLevel:'debug',diagnosticLogger:line=>diagnostics.push(line)});
   try{
-    const text=await client.runTurn({cwd:dir,prompt:'observe',inputItems:[],outputSchema:{type:'object'},permissionProfile:'taskboard_runtime',runtimeWorkspaceRoots:[dir],runtimeConfig:{permissions:{taskboard_runtime:{filesystem:{':minimal':'read',':workspace_roots':{'.':'read'}},network:{enabled:false}}}},diagnosticContext:{taskId:'T-0009',workUnitId:'authority-evidence',role:'subagent'}});
+    const text=await client.runTurn({cwd:dir,prompt:'observe',inputItems:[],outputSchema:{type:'object'},permissionProfile:'taskboard_runtime',runtimeWorkspaceRoots:[dir],runtimeConfig:{permissions:{taskboard_runtime:{filesystem:{':minimal':'read',':workspace_roots':{'.':'read'}},network:{enabled:false}}}},diagnosticContext:{taskId:'T-0009',workUnitId:'authority-evidence'}});
     assert.match(text,/authority-evidence/);
     let events=parseDiagnostics(diagnostics),tool=events.find(item=>item.event==='tool-completed');
     assert.ok(tool);assert.equal(tool.toolType,'commandExecution');assert.equal(tool.success,true);assert.ok(tool.resultBytes>0);assert.equal('operationClass' in tool,false);assert.equal(events.some(item=>item.event==='work-unit-summary'),false);
