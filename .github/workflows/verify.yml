@@ -23,7 +23,10 @@ jobs:
         with:
           node-version: 24
       - name: Apply migration
-        run: node scripts/migrate-host-only.mjs
+        shell: bash
+        run: |
+          node scripts/migrate-host-only.mjs
+          git restore --source=HEAD -- .github/workflows/verify.yml .github/workflows/migrate-extension-boundary.yml
       - name: Verify migrated Host
         run: |
           npm install --ignore-scripts --no-audit --no-fund
