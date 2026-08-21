@@ -52,9 +52,18 @@ export function bootstrap({
   if(!registry?.create||!registry?.has)throw new Error('EXTENSION_REGISTRY_INVALID');
   const extensionKey=String(executorName||'').trim();
   let extension=null;
-  if(extensionKey&&registry.has(extensionKey))extension=registry.create(extensionKey,{rootDir,taskboardUrl});
-  else if(extensionKey&&!allowMissingExecutor){try{database.close();}catch{/* fail-closed cleanup */}throw new Error(`EXTENSION_NOT_FOUND:${extensionKey}`);}
-  if(extension&&extension.orchestrationMode!==OrchestrationMode.TASKBOARD){try{database.close();}catch{/* fail-closed cleanup */}throw new Error(`EXTENSION_ORCHESTRATION_MODE_UNSUPPORTED:${extension.orchestrationMode}`);}
+  let extensionLoadError=null;
+  if(extensionKey&&registry.has(extensionKey)){
+    try{
+      extension=registry.create(extensionKey,{rootDir,taskboardUrl});
+      if(extension.orchestrationMode!==OrchestrationMode.TASKBOARD)throw new Error(`EXTENSION_ORCHESTRATION_MODE_UNSUPPORTED:${extension.orchestrationMode}`);
+      if(!extension.executor)throw new Error(`EXTENSION_HAS_NO_EXECUTOR:${extensionKey}`);
+    }catch(error){
+      if(!allowMissingExecutor){try{database.close();}catch{/* fail-closed cleanup */}throw error;}
+      extension=null;
+      extensionLoadError=error?.message||String(error);
+    }
+  }else if(extensionKey&&!allowMissingExecutor){try{database.close();}catch{/* fail-closed cleanup */}throw new Error(`EXTENSION_NOT_FOUND:${extensionKey}`);}
 
   const continuationKey=String(continuationName||'').trim()||null;
   const continuationExtension=continuationKey?(continuationKey===extension?.id?extension:registry.create(continuationKey,{rootDir,taskboardUrl})):null;
@@ -63,7 +72,6 @@ export function bootstrap({
 
   const attachmentStore=new AttachmentStore({rootDir:resolve(rootDir,'data/attachments')});
   const taskService=new TaskService(repository,{attachmentStore,defaultExecutorKey:extension?.id||'unconfigured'});
-  if(extension&&!extension.executor)throw new Error(`EXTENSION_HAS_NO_EXECUTOR:${extensionKey}`);
   const extensionExecutor=extension?.executor||createUnavailableExecutor();
   const executor=new ExecutorRuntimeAdapter(extensionExecutor);
   const capabilityProvider=extension?.capabilityProvider||null;
@@ -86,5 +94,5 @@ export function bootstrap({
   const recovered=scheduler.recoverStaleRunningTasks();if(recovered)console.log(`[recovery] reconciled ${recovered} stale RUNNING task(s)`);
   const cleanup=new DailyCleanupController({repository,attachmentStore});
   if(startScheduler)scheduler.start();
-  return{database,repository,taskService,executor,extensionExecutor,capabilityProvider,extension,extensionRegistry:registry,continuation,continuationExtension,surfaceManager,governanceCompiler,validatorRuntime,rootRuntime,scheduler,cleanup,settingsStore,runtimeSettingsState,applyRuntimeSettings,storage:persistence.storage,storageFile:persistence.filename};
+  return{database,repository,taskService,executor,extensionExecutor,capabilityProvider,extension,extensionLoadError,extensionRegistry:registry,continuation,continuationExtension,surfaceManager,governanceCompiler,validatorRuntime,rootRuntime,scheduler,cleanup,settingsStore,runtimeSettingsState,applyRuntimeSettings,storage:persistence.storage,storageFile:persistence.filename};
 }
