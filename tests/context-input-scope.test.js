@@ -7,7 +7,6 @@ import { taskInputCatalog, scopeTaskInputs } from '../src/core/task-input-scope.
 import { ROOT_RESPONSE_CONTRACT, compileSubagentExecutorRequest } from '../src/core/executor-contract.js';
 import { validateDelegationPlan } from '../src/core/root-runtime.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
-import { CodexExecutor } from '../src/extensions/executors/codex/codex-executor.js';
 import { ValidatorRuntime } from '../src/governance/validator-runtime.js';
 
 function taskFixture(root){
@@ -70,21 +69,6 @@ test('SubagentRuntime passes only selected inputs and does not run the Validator
     assert.deepEqual(seen.executor.projectScopes.map(x=>x.label),['B']);assert.deepEqual(seen.executor.attachments.map(x=>x.id),['A-2']);assert.deepEqual(seen.executor.references,[]);assert.equal(seen.executor.instruction,'');
     assert.equal(sourceChecks,0,'Subagent does not become its own provenance Validator');
     assert.equal(result.delegationId,'w','Work Unit identity is Runtime-owned');for(const forbidden of ['claims','gaps','recommendations','gateway','discoveries','uncertainty'])assert.equal(forbidden in result,false);
-  }finally{rmSync(dir,{recursive:true,force:true});}
-});
-
-test('Core-compiled Subagent request keeps logical refs in semantic context and paths only in runtime scope',()=>{
-  const dir=mkdtempSync(join(tmpdir(),'taskboard-codex-input-scope-'));
-  try{
-    mkdirSync(join(dir,'project-a'));mkdirSync(join(dir,'project-b'));
-    const full=taskFixture(dir),selected=scopeTaskInputs(full,['project:1','attachment:A-2','reference:T-old-2']),executor=new CodexExecutor({runtimeRoot:join(dir,'runtime'),client:{}}),delegation={id:'w',title:'局部',goal:'只处理选择输入',expectedOutput:'结果',stopCondition:'完成',projectAccess:'write',networkAccess:false,skillId:null,dependsOn:[],inputRefs:['project:1','attachment:A-2','reference:T-old-2']};
-    const request=compileSubagentExecutorRequest({task:selected,delegation,policyContext:{prompt:'ROLE',authorizedGrant:{role:'subagent',projectAccess:'write',networkAccess:false,inputRefs:['project:1','attachment:A-2','reference:T-old-2'],sourceAccess:'selected',environmentAccess:'default'}}});
-    const serialized=JSON.stringify({instructions:request.instructions,context:request.context});
-    assert.doesNotMatch(serialized,/project-a|project-b|one\.png|T-old-1|R1/);
-    assert.deepEqual(request.context.selectedProjects,[{ref:'project:1',label:'B'}]);assert.match(serialized,/two\.png/);assert.match(serialized,/T-old-2/);
-    assert.equal(request.runtime.projectPaths.includes(join(dir,'project-a')),false);assert.equal(request.runtime.projectPaths.includes(join(dir,'project-b')),true);
-    const scope=executor.executionScope(request);
-    assert.equal(scope.writableRoots.includes(join(dir,'project-a')),false);assert.equal(scope.writableRoots.includes(join(dir,'project-b')),true);
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
 

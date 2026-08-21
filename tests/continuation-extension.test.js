@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { bootstrap } from '../src/server/bootstrap.js';
-import { createBuiltinExtensionRegistry } from '../src/extensions/builtins/index.js';
+import { createTestExtensionRegistry as createBuiltinExtensionRegistry } from './helpers/test-extension-registry.js';
 import { EXTENSION_API_VERSION } from '../src/extensions/runtime/extension-registry.js';
 import { ContinuationPort } from '../src/extensions/ports/continuation.js';
 

@@ -210,3 +210,7 @@ A new Executor Extension is compatible only when all of these hold:
 8. disabling/removing the Extension leaves stock TaskBoard semantics valid.
 
 For a Continuation Extension, removing it must likewise leave stock execution semantics unchanged and its content must never become product/runtime truth without fresh verification.
+
+## Repository ownership — non-negotiable
+
+`masquermax/TaskBoard` owns the generic Extension Host only. Every concrete Extension implementation, including first-party defaults and test/demo Extensions, lives in `masquermax/TaskBoard-Ecosystem` and is versioned there. No TaskBoard branch may contain, vendor, generate or reintroduce a concrete Extension implementation. Release convenience and default-product composition do not create an exception; composition happens through explicit Extension import/binding.

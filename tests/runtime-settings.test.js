@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DEFAULT_RUNTIME_SETTINGS, RuntimeSettingsStore, executionLimitsFromCapability, migrateRuntimeSettings, normalizeRuntimeSettings, resolveEffectiveRuntimeSettings } from '../src/core/runtime-settings.js';
-import { createBuiltinExtensionRegistry } from '../src/extensions/builtins/index.js';
+import { createTestExtensionRegistry as createBuiltinExtensionRegistry } from './helpers/test-extension-registry.js';
 
 test('simple runtime settings expose only task concurrency and per-Root maximum Subagents, persist only after user changes them',()=>{
   const dir=mkdtempSync(join(tmpdir(),'taskboard-settings-'));

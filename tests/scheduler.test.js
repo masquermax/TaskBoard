@@ -9,7 +9,7 @@ import { ModelRouter } from '../src/core/model-router.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { Scheduler } from '../src/core/scheduler.js';
-import { MockExecutor } from '../src/extensions/executors/mock/mock-executor.js';
+import { TestExecutor as MockExecutor } from './helpers/test-executor.js';
 import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
 import { asRuntimeExecutor } from './helpers/runtime-executor.js';
 import { TaskStatus, ReadyReason, CompletionReason, WorkUnitStatus } from '../src/core/types.js';

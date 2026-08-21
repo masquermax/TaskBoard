@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { bootstrap } from '../src/server/bootstrap.js';
-import { createBuiltinExtensionRegistry } from '../src/extensions/builtins/index.js';
+import { createTestExtensionRegistry as createBuiltinExtensionRegistry } from './helpers/test-extension-registry.js';
 import { createApp } from '../src/server/app.js';
 
 async function requestJson(url,options={}){const response=await fetch(url,options),body=await response.json();assert.ok(response.ok,`${response.status} ${JSON.stringify(body)}`);return body;}

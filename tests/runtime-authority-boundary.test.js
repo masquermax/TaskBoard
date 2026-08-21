@@ -4,7 +4,6 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { GovernanceCompiler } from '../src/governance/governance-compiler.js';
-import { CodexExecutor } from '../src/extensions/executors/codex/codex-executor.js';
 import { ExecutorRuntimeAdapter } from '../src/core/executor-runtime.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
 import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
@@ -33,11 +32,6 @@ test('GovernanceCompiler emits executable AuthorizedGrant only for Root and Suba
   assert.deepEqual(root.authorizedGrant,{role:'root',projectAccess:'none',networkAccess:false,inputRefs:[],sourceAccess:'none',environmentAccess:'none'});
   assert.deepEqual(subagent.authorizedGrant,{role:'subagent',projectAccess:'read',networkAccess:false,inputRefs:['project:0'],sourceAccess:'selected',environmentAccess:'default'});
   assert.throws(()=>compiler.compileForRole(task,'validator'),/ROLE_NOT_EXECUTABLE:validator/,'Validator is deterministic Runtime enforcement, not an Executor/model role');
-});
-
-test('CodexExecutor realizes the Core-compiled Root grant with no Project/network access',async()=>{
-  const dir=mkdtempSync(join(tmpdir(),'taskboard-authority-grant-')),project=join(dir,'project');mkdirSync(project);const client=new CaptureClient(),runtimeExecutor=new ExecutorRuntimeAdapter(new CodexExecutor({runtimeRoot:join(dir,'runtime'),client}));
-  try{const task=taskWithProject(project),policyContext=new GovernanceCompiler().compileForRole(task,'root');await runtimeExecutor.runRoot({task,subagentResults:[],humanGatewayHistory:[],certifiedContext:{claims:[],gaps:[],unresolvedObligations:[]},modelPolicy:{},policyContext});const call=client.calls[0];assert.equal(call.permissionProfile,'taskboard_runtime');assert.equal(call.runtimeWorkspaceRoots.includes(project),false);assert.equal(call.networkAccess,false);}finally{rmSync(dir,{recursive:true,force:true});}
 });
 
 test('Root sees a Stage only after every issued sibling Work Unit has finished',async()=>{

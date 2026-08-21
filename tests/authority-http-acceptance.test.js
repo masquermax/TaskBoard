@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { bootstrap } from '../src/server/bootstrap.js';
 import { createApp } from '../src/server/app.js';
 import { ExtensionRegistry, EXTENSION_API_VERSION } from '../src/extensions/runtime/extension-registry.js';
-import { MockExecutor } from '../src/extensions/executors/mock/mock-executor.js';
+import { TestExecutor as MockExecutor } from './helpers/test-executor.js';
 import { installSuccessfulCompletionFixture } from './helpers/completion-fixture.js';
 
 async function requestJson(url,options={}){const response=await fetch(url,options),body=await response.json();assert.ok(response.ok,`${response.status} ${JSON.stringify(body)}`);return body;}
