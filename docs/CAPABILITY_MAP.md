@@ -36,10 +36,11 @@ Root ── judgment / plan / next action
 | Project/network capability request | Root | Work Unit request | GovernanceCompiler narrows request to certified authority + selected inputs |
 | Source/provenance ledger | Validator | `src/governance/validator-runtime.js` + `source-trace-verifier.js` | deterministic locator/source/reference checks; no model turn or semantic repair |
 | Task / Project / Gateway / Certified State / Result persistence | Task Core | `src/core/task-service.js` + `src/core/json-repository.js` | atomic repository transactions |
-| Human question/answer transport | Human Gateway | Scheduler + Repository + UI/API | answer is a Root trigger; transport does not interpret it |
+| Human question/answer transport | Human Gateway | Scheduler + Repository + public API | answer is a Root trigger; transport does not interpret it |
 | Skill method | Skill | injected Skill library | selected method only; no Authority |
 | Model/file/command/network operation | Executor Extension | `src/extensions/public-api.js` contract + external `TaskBoard-Ecosystem` implementation | realizes AuthorizedGrant; no Task judgment |
-| UI presentation / user intent | UI / Surface | `src/ui/*`, `src/server/*` | projection only; durable truth remains Core/Scheduler |
+| Product UI presentation / user intent | UI Extension | external `TaskBoard-Ecosystem` UI artifact + public TaskBoard API | projection only; durable truth remains Core/Scheduler |
+| UI recovery / extension repair | Extension Host | `src/recovery-ui/*` + `src/server/*` | recovery surface exposes composition repair only; it is not product UI or Task owner |
 | Task concurrency | Scheduler | `src/core/runtime-settings.js` | configured ceiling, no preemption |
 | Per-Task Subagent concurrency | Root Runtime | `src/core/runtime-settings.js` | limits active Work Units, not Work Unit count |
 
@@ -49,6 +50,8 @@ Root ── judgment / plan / next action
 
 Effect recovery is also not a new role: it is a fail-closed safety boundary for an already-started side effect whose Reality outcome is unknown. It may block a new mutation, but it does not interpret Task meaning.
 
+UI discovery/binding is likewise composition, not Task authority. The stock Host may inspect only deterministic extension roots and may serve the tiny recovery shell when the selected UI is absent; neither operation may synthesize product UI semantics inside Core.
+
 ## Explicit absences
 
 - Project Knowledge subsystem：未实现。
@@ -56,6 +59,7 @@ Effect recovery is also not a new role: it is a fail-closed safety boundary for 
 - Validator model / semantic proof / repair loop：不存在。
 - Runtime telemetry wrapper / semantic observability owner：不存在；诊断只记录事实，不能进入业务判断。
 - Root-owned Project/network execution：不存在；实际操作进入 Subagent Work Unit。
+- Core-owned concrete product UI：不存在；具体 UI Artifact 属于 `TaskBoard-Ecosystem`。
 
 ## Architecture audit
 

@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { EXTENSION_API_VERSION } from './extension-registry.js';
 
-const STORE_SCHEMA_VERSION = 1;
+const STORE_SCHEMA_VERSION = 2;
 
 function text(value, max = 4096) {
   return String(value == null ? '' : value).trim().slice(0, max);
@@ -24,6 +24,20 @@ function normalizedDirectory(value, rootDir) {
   if (!existsSync(candidate)) throw new Error('EXTENSION_IMPORT_DIRECTORY_NOT_FOUND');
   if (!statSync(candidate).isDirectory()) throw new Error('EXTENSION_IMPORT_DIRECTORY_NOT_DIRECTORY');
   return realpathSync(candidate);
+}
+
+function validatedUiRoot(directory, manifest) {
+  if (manifest?.provides?.ui !== true) return null;
+  const uiName = text(manifest.uiRoot || 'ui', 1024);
+  if (!uiName) throw new Error('EXTENSION_UI_ROOT_REQUIRED');
+  const candidate = resolve(directory, uiName);
+  if (!inside(directory, candidate)) throw new Error('EXTENSION_UI_ROOT_OUTSIDE_DIRECTORY');
+  if (!existsSync(candidate) || !statSync(candidate).isDirectory()) throw new Error('EXTENSION_UI_ROOT_NOT_FOUND');
+  const uiRoot = realpathSync(candidate);
+  if (!inside(directory, uiRoot)) throw new Error('EXTENSION_UI_ROOT_OUTSIDE_DIRECTORY');
+  const indexFile = resolve(uiRoot, 'index.html');
+  if (!existsSync(indexFile) || !statSync(indexFile).isFile()) throw new Error('EXTENSION_UI_INDEX_REQUIRED');
+  return uiRoot;
 }
 
 function readManifest(directory) {
@@ -52,8 +66,10 @@ function readManifest(directory) {
   const provides = {
     executor: manifest?.provides?.executor === true,
     continuation: manifest?.provides?.continuation === true,
+    ui: manifest?.provides?.ui === true,
   };
-  return { id, displayName, apiVersion, entryPath, provides };
+  const uiRoot = validatedUiRoot(directory, manifest);
+  return { id, displayName, apiVersion, entryPath, provides, uiRoot };
 }
 
 function normalizeEntry(value = {}) {
@@ -70,14 +86,16 @@ function normalizeEntry(value = {}) {
     provides: {
       executor: value?.provides?.executor === true,
       continuation: value?.provides?.continuation === true,
+      ui: value?.provides?.ui === true,
     },
+    uiRoot: value?.provides?.ui === true ? text(value.uiRoot) || null : null,
+    source: value?.source === 'system' ? 'system' : 'manual',
     importedAt: text(value.importedAt, 64) || new Date().toISOString(),
   };
 }
 
-function normalizeStore(value = {}) {
-  if (value?.schemaVersion !== STORE_SCHEMA_VERSION || !Array.isArray(value.extensions)) throw new Error('EXTENSION_REGISTRY_STORE_INVALID');
-  const extensions = value.extensions.map(normalizeEntry);
+function normalizedState(value = {}) {
+  const extensions = (Array.isArray(value.extensions) ? value.extensions : []).map(normalizeEntry);
   const ids = new Set();
   const directories = new Set();
   for (const item of extensions) {
@@ -87,7 +105,30 @@ function normalizeStore(value = {}) {
     directories.add(item.directory);
   }
   const activeExecutorId = text(value.activeExecutorId, 96) || null;
-  return { schemaVersion: STORE_SCHEMA_VERSION, activeExecutorId, extensions };
+  const activeUiId = text(value.activeUiId, 96) || null;
+  return { schemaVersion: STORE_SCHEMA_VERSION, activeExecutorId, activeUiId, extensions };
+}
+
+function normalizeStore(value = {}) {
+  if (value?.schemaVersion === 1 && Array.isArray(value.extensions)) {
+    return normalizedState({ ...value, activeUiId:null, extensions:value.extensions.map(item=>({ ...item, source:'manual' })) });
+  }
+  if (value?.schemaVersion !== STORE_SCHEMA_VERSION || !Array.isArray(value.extensions)) throw new Error('EXTENSION_REGISTRY_STORE_INVALID');
+  return normalizedState(value);
+}
+
+function systemChildDirectories(rootValue, rootDir) {
+  const root = isAbsolute(String(rootValue||'')) || /^[A-Za-z]:[\\/]/.test(String(rootValue||''))
+    ? resolve(String(rootValue)) : resolve(rootDir || process.cwd(), String(rootValue||''));
+  if (!existsSync(root) || !statSync(root).isDirectory()) return [];
+  return readdirSync(root, { withFileTypes:true })
+    .filter(entry=>entry.isDirectory())
+    .map(entry=>resolve(root, entry.name))
+    .sort((a,b)=>a.localeCompare(b));
+}
+
+function sameValue(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 export class ImportedExtensionStore {
@@ -98,12 +139,12 @@ export class ImportedExtensionStore {
   }
 
   load() {
-    if (!this.file || !existsSync(this.file)) return { schemaVersion: STORE_SCHEMA_VERSION, activeExecutorId: null, extensions: [] };
+    if (!this.file || !existsSync(this.file)) return normalizedState({ extensions:[] });
     try { return normalizeStore(JSON.parse(readFileSync(this.file, 'utf8'))); }
-    catch { return { schemaVersion: STORE_SCHEMA_VERSION, activeExecutorId: null, extensions: [] }; }
+    catch { return normalizedState({ extensions:[] }); }
   }
 
-  persist(value) {
+  persist(value = this.value) {
     if (!this.file) return;
     mkdirSync(dirname(this.file), { recursive: true });
     const tmp = `${this.file}.${process.pid}.${Date.now()}.tmp`;
@@ -118,23 +159,93 @@ export class ImportedExtensionStore {
 
   entries() { return this.value.extensions.map(clone); }
   activeExecutorId() { return this.value.activeExecutorId || null; }
+  activeUiId() { return this.value.activeUiId || null; }
+  activeUiEntry() { const id=this.activeUiId();return id?clone(this.value.extensions.find(item=>item.id===id&&item.provides.ui)||null):null; }
+
+  addManifest(directory, manifest, { source='manual', autoSelectExecutor=false } = {}) {
+    const existingByDirectory=this.value.extensions.find(item=>item.directory===directory);
+    if (existingByDirectory) return { entry:clone(existingByDirectory), added:false };
+    const existingById=this.value.extensions.find(item=>item.id===manifest.id);
+    if (existingById) throw new Error(`EXTENSION_IMPORT_ID_EXISTS:${manifest.id}`);
+    const entry=normalizeEntry({ ...manifest, directory, source, importedAt:new Date().toISOString() });
+    const activeExecutorId=this.value.activeExecutorId || (autoSelectExecutor&&entry.provides.executor?entry.id:null);
+    this.value={...this.value,activeExecutorId,extensions:[...this.value.extensions,entry]};
+    return{entry:clone(entry),added:true};
+  }
 
   importDirectory(directoryValue) {
     const directory = normalizedDirectory(directoryValue, this.rootDir);
     const manifest = readManifest(directory);
-    if (this.value.extensions.some(item => item.id === manifest.id)) throw new Error(`EXTENSION_IMPORT_ID_EXISTS:${manifest.id}`);
-    if (this.value.extensions.some(item => item.directory === directory)) throw new Error('EXTENSION_IMPORT_DIRECTORY_EXISTS');
-    const entry = normalizeEntry({ ...manifest, directory, importedAt: new Date().toISOString() });
-    const activeExecutorId = this.value.activeExecutorId || (entry.provides.executor ? entry.id : null);
-    this.value = { ...this.value, activeExecutorId, extensions: [...this.value.extensions, entry] };
-    this.persist(this.value);
-    return clone(entry);
+    const result=this.addManifest(directory,manifest,{source:'manual',autoSelectExecutor:true});
+    if(!result.added)throw new Error('EXTENSION_IMPORT_DIRECTORY_EXISTS');
+    if(!this.value.activeUiId&&result.entry.provides.ui)this.value={...this.value,activeUiId:result.entry.id};
+    this.persist();
+    return clone(result.entry);
   }
 
-  publicState({ loadedIds = [], loadErrors = {} } = {}) {
+  discoverRoots(rootValues = []) {
+    const previous=this.value;
+    const previousSystem=new Map(previous.extensions.filter(item=>item.source==='system').map(item=>[item.directory,item]));
+    const extensions=previous.extensions.filter(item=>item.source!=='system').map(clone);
+    const ids=new Set(extensions.map(item=>item.id));
+    const directories=new Set(extensions.map(item=>item.directory));
+    const discovered=[];
+    const updated=[];
+    const errors={};
+
+    for(const rootValue of Array.isArray(rootValues)?rootValues:[]){
+      for(const candidate of systemChildDirectories(rootValue,this.rootDir)){
+        let directory=candidate;
+        try{
+          directory=realpathSync(candidate);
+          if(directories.has(directory))throw new Error('EXTENSION_SYSTEM_DIRECTORY_DUPLICATE');
+          const manifest=readManifest(directory);
+          if(ids.has(manifest.id))throw new Error(`EXTENSION_IMPORT_ID_EXISTS:${manifest.id}`);
+          const old=previousSystem.get(directory);
+          const entry=normalizeEntry({
+            ...manifest,
+            directory,
+            source:'system',
+            importedAt:old?.id===manifest.id?old.importedAt:new Date().toISOString(),
+          });
+          extensions.push(entry);
+          ids.add(entry.id);
+          directories.add(directory);
+          if(!old||old.id!==entry.id)discovered.push(clone(entry));
+          else if(!sameValue(old,entry))updated.push(clone(entry));
+        }catch(error){errors[directory]=error?.message||String(error);}
+      }
+    }
+
+    let activeExecutorId=previous.activeExecutorId||null;
+    if(activeExecutorId&&!extensions.some(item=>item.id===activeExecutorId&&item.provides.executor))activeExecutorId=null;
+    let activeUiId=previous.activeUiId||null;
+    if(activeUiId&&!extensions.some(item=>item.id===activeUiId&&item.provides.ui))activeUiId=null;
+    if(!activeUiId){
+      const uiCandidates=extensions.filter(item=>item.source==='system'&&item.provides.ui);
+      if(uiCandidates.length===1)activeUiId=uiCandidates[0].id;
+    }
+
+    const next=normalizedState({extensions,activeExecutorId,activeUiId});
+    const nextSystemIds=new Set(next.extensions.filter(item=>item.source==='system').map(item=>item.id));
+    const removedIds=previous.extensions.filter(item=>item.source==='system'&&!nextSystemIds.has(item.id)).map(item=>item.id);
+    this.value=next;
+    if(!sameValue(previous,next))this.persist();
+    return{discovered,updated,removedIds,errors};
+  }
+
+  setActiveUi(idValue) {
+    const id=text(idValue,96)||null;
+    if(id){const entry=this.value.extensions.find(item=>item.id===id);if(!entry)throw new Error('EXTENSION_NOT_IMPORTED');if(!entry.provides.ui)throw new Error('EXTENSION_HAS_NO_UI');}
+    this.value={...this.value,activeUiId:id};this.persist();return this.activeUiId();
+  }
+
+  publicState({ loadedIds = [], loadErrors = {}, discoveryErrors = {} } = {}) {
     const loaded = new Set(loadedIds.map(String));
     return {
       activeExecutorId: this.value.activeExecutorId || null,
+      activeUiId: this.value.activeUiId || null,
+      discoveryErrors: clone(discoveryErrors || {}),
       extensions: this.value.extensions.map(item => {
         const error = loadErrors?.[item.id] || null;
         return {
@@ -143,6 +254,7 @@ export class ImportedExtensionStore {
           directory: item.directory,
           apiVersion: item.apiVersion,
           provides: clone(item.provides),
+          source:item.source,
           importedAt: item.importedAt,
           status: loaded.has(item.id) ? 'loaded' : (error ? 'load-failed' : 'pending-restart'),
           error: error ? String(error) : null,

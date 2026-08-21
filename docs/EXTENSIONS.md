@@ -1,6 +1,6 @@
 # TaskBoard Extension Contract
 
-TaskBoard Core owns Task lifecycle, governed Authority, Root/Subagent/Validator semantics, model-facing instructions/context/response contracts, Certified State and Completion. An Extension supplies removable execution/runtime capability behind stable ports; removing one Extension must not make Core reinterpret those semantics.
+TaskBoard Core owns Task lifecycle, governed Authority, Root/Subagent/Validator semantics, model-facing instructions/context/response contracts, Certified State and Completion. An Extension supplies removable execution/runtime or presentation capability behind stable Host boundaries; removing one Extension must not make Core reinterpret those semantics.
 
 The governing rule is:
 
@@ -65,7 +65,7 @@ It does **not** own or copy:
 
 If an Executor cannot realize the compiled request faithfully, it reports unavailable/failure; it does not weaken or reinterpret the request.
 
-## Composition
+## Composition and startup discovery
 
 External distributions may compose their own registry without editing TaskBoard Core:
 
@@ -84,7 +84,11 @@ const runtime=bootstrap({
 });
 ```
 
-Passing the registry is a Composition Root choice, not a new Task/Core semantic owner. Core does not scan the filesystem for Extensions.
+Passing the registry is a Composition Root choice, not a new Task/Core semantic owner.
+
+The stock product startup also supports deterministic filesystem discovery. It inspects only direct child directories under `<TaskBoard>/data/extensions` plus roots explicitly listed in `TASKBOARD_EXTENSION_DIRS`. It never scans the machine or arbitrary project trees. System-discovered entries are rebuilt from the currently valid directories at startup, so adding/removing a directory is a real plug/unplug operation rather than a permanent registry mutation.
+
+Manual import remains available for explicitly selected directories and is stored separately from system-discovered composition.
 
 ## Extension shape
 
@@ -110,6 +114,22 @@ An Extension factory returns:
 - `continuation` is optional and implements `health()`, `read()`, `write()`.
 - `presentation` carries safe display metadata only.
 - `surfaceHosts[]` are optional interaction surfaces and may coexist as facets of the owning Extension.
+
+A replaceable product UI is an Artifact-level contribution declared in `package.json.taskboard` rather than a Task semantic owner:
+
+```json
+{
+  "taskboard": {
+    "id": "taskboard-ui-next",
+    "apiVersion": 2,
+    "entry": "src/index.js",
+    "uiRoot": "ui",
+    "provides": { "ui": true }
+  }
+}
+```
+
+The Host validates that `uiRoot` remains inside the Artifact and contains `index.html`. Concrete UI code consumes public APIs only. The tiny Core recovery shell is not a product UI Extension; it exists solely to recover when the active UI is missing or invalid.
 
 Provider/Profile secrets, provider identity and provider-specific launch projection remain inside the owning Executor Extension. Task Core and `ModelRouter` consume normalized capability facts rather than provider brands or transport fields.
 
@@ -161,6 +181,8 @@ When discovery is declared, TaskBoard may pass current unsaved field values to t
 
 An Extension Artifact is the install/version/enable/disable/remove boundary. One Artifact may carry multiple facets that share that lifecycle. Independent Extension Points are introduced only when real product/runtime evidence establishes an independent contract and lifecycle.
 
+UI now has that independent lifecycle: multiple UI Artifacts may be installed, exactly one product UI may be active, and removing the active system UI must leave Core usable through the recovery shell rather than manufacturing a fallback product UI.
+
 Skill is a different Artifact type and uses the Skill Library boundary. A Skill is reusable method content and gains no Task Authority merely because it is installable beside Runtime Extensions.
 
 ## Continuation is optional working cognition
@@ -187,9 +209,10 @@ The current Runtime supports only this mode.
 
 Installation and active binding are different concepts.
 
-- A registry may contain multiple Executor or Continuation Extensions.
+- A registry may contain multiple Executor, Continuation or UI Extensions.
 - One TaskBoard process currently binds one active Executor Extension.
 - One TaskBoard process binds zero or one active Continuation Extension.
+- One TaskBoard process binds zero or one active product UI Extension; no active usable UI means recovery shell.
 - One active Executor may expose many models; one turn uses at most one explicit model when supported.
 - Provider/Profile cardinality is Extension-owned.
 - `surfaceHosts[]` may have multiple simultaneous contributors inside the active Extension composition.
@@ -209,8 +232,10 @@ A new Executor Extension is compatible only when all of these hold:
 7. a real Runtime turn completes on the intended value path;
 8. disabling/removing the Extension leaves stock TaskBoard semantics valid.
 
+For a UI Extension, compatibility additionally requires a valid in-Artifact `uiRoot`, a usable `index.html`, public-API-only interaction, correct startup plug/unplug behavior and recovery-shell fallback when the UI is unavailable.
+
 For a Continuation Extension, removing it must likewise leave stock execution semantics unchanged and its content must never become product/runtime truth without fresh verification.
 
 ## Repository ownership — non-negotiable
 
-`masquermax/TaskBoard` owns the generic Extension Host only. Every concrete Extension implementation, including first-party defaults and test/demo Extensions, lives in `masquermax/TaskBoard-Ecosystem` and is versioned there. No TaskBoard branch may contain, vendor, generate or reintroduce a concrete Extension implementation. Release convenience and default-product composition do not create an exception; composition happens through explicit Extension import/binding.
+`masquermax/TaskBoard` owns the generic Extension Host only. Every concrete Extension implementation, including first-party defaults and test/demo Extensions, lives in `masquermax/TaskBoard-Ecosystem` and is versioned there. No TaskBoard branch may contain, vendor, generate or reintroduce a concrete Extension implementation. Release convenience and default-product composition do not create an exception; composition happens through explicit Extension import/binding or deterministic external Extension discovery.

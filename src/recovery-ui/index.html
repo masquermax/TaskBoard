@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>TaskBoard · 扩展恢复</title>
+  <link rel="stylesheet" href="/recovery.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <span class="eyebrow">TaskBoard Recovery</span>
+      <h1>产品 UI 未加载</h1>
+      <p>TaskBoard Core 正常运行。这里仅保留扩展发现、导入和 UI 切换入口，具体产品界面由 UI 扩展提供。</p>
+    </section>
+    <section class="card">
+      <div class="row"><div><h2>扩展</h2><p class="muted">启动时只扫描 <code>data/extensions</code> 和显式配置的扩展目录，不扫描整台机器。</p></div><button id="refresh">刷新</button></div>
+      <div id="discovery-errors" class="notice hidden"></div>
+      <div id="extensions" class="list"></div>
+    </section>
+    <section class="card">
+      <h2>手动导入</h2>
+      <div class="form"><input id="directory" placeholder="扩展目录"><button id="import">导入</button></div>
+      <p class="muted">导入或切换 UI 后需要重启 TaskBoard。</p>
+    </section>
+    <div id="toast" class="toast"></div>
+  </main>
+  <script type="module" src="/recovery.js"></script>
+</body>
+</html>

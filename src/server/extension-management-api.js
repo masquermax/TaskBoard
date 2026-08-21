@@ -13,6 +13,11 @@ const CLIENT_ERRORS = new Set([
   'EXTENSION_IMPORT_ENTRY_NOT_FOUND',
   'EXTENSION_IMPORT_DIRECTORY_EXISTS',
   'EXTENSION_API_VERSION_REQUIRED',
+  'EXTENSION_UI_ROOT_REQUIRED',
+  'EXTENSION_UI_ROOT_OUTSIDE_DIRECTORY',
+  'EXTENSION_UI_ROOT_NOT_FOUND',
+  'EXTENSION_UI_INDEX_REQUIRED',
+  'EXTENSION_HAS_NO_UI',
 ]);
 
 function statusFor(message) {
@@ -47,6 +52,7 @@ export function createExtensionManagementHandler({
   store,
   registry,
   loadState = { loadedIds: [], loadErrors: {} },
+  discoveryErrors = {},
   activeExtension = null,
   rootDir,
   taskboardUrl,
@@ -56,7 +62,7 @@ export function createExtensionManagementHandler({
   const loadErrors = () => loadState.loadErrors || {};
 
   function state() {
-    return store.publicState({ loadedIds: loadedIds(), loadErrors: loadErrors() });
+    return store.publicState({ loadedIds: loadedIds(), loadErrors: loadErrors(), discoveryErrors });
   }
 
   function imported(id) {
@@ -90,6 +96,19 @@ export function createExtensionManagementHandler({
       } catch (error) {
         const message = error?.message || 'EXTENSION_IMPORT_FAILED';
         json(res, statusFor(message), { error: message });
+      }
+      return true;
+    }
+    if (url.pathname === '/api/extensions/active-ui') {
+      if (req.method !== 'PUT') { json(res, 405, { error:'METHOD_NOT_ALLOWED' }); return true; }
+      if (req.headers['x-taskboard-action'] !== 'ui') { json(res, 403, { error:'FORBIDDEN' }); return true; }
+      try {
+        const body=await readJson(req);
+        store.setActiveUi(body?.id||null);
+        json(res,200,{registry:state(),restartRequired:true});
+      } catch(error) {
+        const message=error?.message||'EXTENSION_UI_SELECTION_FAILED';
+        json(res,statusFor(message),{error:message});
       }
       return true;
     }

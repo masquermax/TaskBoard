@@ -20,4 +20,4 @@ Status: ACTIVE
 只保存对未来继续、恢复、判断、追溯或外部副作用安全有价值的事实和边界；可重新产生的过程噪音不进入业务历史。持久化由“未来价值”决定，不由执行次数、Agent 数量或过程长度决定。
 
 ## C-006 — Core Repository Never Owns Concrete Extensions
-`masquermax/TaskBoard` 永远只拥有通用 Extension Contract / Public API / Host / Loader / Registry / Persistence / generic management surfaces；任何可被命名、替换、移除的具体 Extension 实现（包括第一方、测试/演示、Codex、Provider、Executor、Surface、Continuation、Automation 以及未来扩展类型）都必须由 `masquermax/TaskBoard-Ecosystem` 独立拥有和版本化。不得以“默认内置、发布方便、测试方便、临时兼容、启动兜底”等理由把具体 Extension 复制、vendor、生成或重新提交到任何 TaskBoard 分支。需要默认体验时，通过安装/导入/分发组合解决，不通过污染 Core Repository 解决。
+`masquermax/TaskBoard` 永远只拥有通用 Extension Contract / Public API / Host / Loader / Registry / Persistence / generic management and recovery surfaces；任何可被命名、替换、移除的具体 Extension 实现（包括第一方、测试/演示、Codex、Provider、Executor、产品 UI、Surface、Continuation、Automation 以及未来扩展类型）都必须由 `masquermax/TaskBoard-Ecosystem` 独立拥有和版本化。不得以“默认内置、发布方便、测试方便、临时兼容、启动兜底”等理由把具体 Extension 复制、vendor、生成或重新提交到任何 TaskBoard 分支。需要默认体验时，通过安装/导入/分发组合解决；当产品 UI 缺失或损坏时，Core 只允许提供最小恢复壳，不得借恢复名义重新拥有一份产品 UI。
