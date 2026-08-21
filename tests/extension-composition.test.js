@@ -10,6 +10,7 @@ import { CapabilityProviderPort, basicCapabilitySnapshot } from '../src/extensio
 
 class ExternalExecutor extends ExecutorPort {
   async health(){return{executor:'external',displayName:'External',available:true,connected:true,ready:true};}
+  async execute(request){return request;}
 }
 class ExternalCapability extends CapabilityProviderPort {
   constructor(){super();this.current=basicCapabilitySnapshot({extensionId:'external',displayName:'External',version:'test'});}
