@@ -7,7 +7,7 @@ test('runtime roots mismatch records requested and returned roots before failing
   const calls=[];
   const command=process.platform==='win32'?'C:\\fake\\codex':'/fake/codex';
   const cwd=process.platform==='win32'?'D:\\workspace':'/workspace';
-  const runtimeRoot=process.platform==='win32'?'D:\\workspace\\probe':'/workspace/probe';
+  const runtimeRoot=process.platform==='win32'?'D:\\workspace\\root-runtime':'/workspace/root-runtime';
   const client=new CodexAppServerClient({command,diagnosticLogger:line=>diagnostics.push(line)});
   client.version='codex-cli 0.147.0';
   client.connect=async()=>{};
@@ -32,7 +32,7 @@ test('runtime roots mismatch records requested and returned roots before failing
     networkAccess:false,
     permissionProfile:'taskboard_runtime',
     runtimeWorkspaceRoots:[runtimeRoot],
-    diagnosticContext:{taskId:'T-ROOTS',workUnitId:null,role:'diagnostic-probe'},
+    diagnosticContext:{taskId:'T-ROOTS',workUnitId:null},
   }),/CODEX_RUNTIME_ROOTS_NOT_APPLIED/);
 
   assert.deepEqual(calls,['thread/start'],'turn/start must not run after roots confirmation mismatch');
@@ -41,7 +41,7 @@ test('runtime roots mismatch records requested and returned roots before failing
   assert.ok(mismatch,'roots mismatch must emit a dedicated diagnostic event');
   assert.equal(mismatch.taskId,'T-ROOTS');
   assert.equal(mismatch.workUnitId,null);
-  assert.equal(mismatch.role,'diagnostic-probe');
+  assert.equal('role' in mismatch,false);
   assert.equal(mismatch.requestedPermissionProfile,'taskboard_runtime');
   assert.equal(mismatch.activePermissionProfile,'taskboard_runtime');
   assert.deepEqual(mismatch.requestedRuntimeWorkspaceRoots,[runtimeRoot]);
