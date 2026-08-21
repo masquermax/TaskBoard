@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const source = path => readFileSync(resolve(path),'utf8');
+function sourceFiles(dir='src',out=[]){for(const entry of readdirSync(resolve(dir),{withFileTypes:true})){const path=`${dir}/${entry.name}`;if(entry.isDirectory())sourceFiles(path,out);else if(entry.isFile()&&path.endsWith('.js'))out.push(path);}return out;}
 
 test('Gate B: Codex transports use grants and factual Work identity, never role identity or a synthetic Work lease',()=>{
   for(const path of ['src/extensions/executors/codex/app-server-client.js','src/extensions/executors/codex/exec-client.js']){
@@ -11,6 +12,11 @@ test('Gate B: Codex transports use grants and factual Work identity, never role 
     assert.doesNotMatch(text,/roleCanExecute|roleCanWrite|roleCanNetwork|diagnosticContext\?\.role|role\s*===\s*['"](?:root|subagent|validator)['"]/);
     assert.doesNotMatch(text,/subagentExecutionWindowMs|WORK_UNIT_EXECUTION_BOUNDARY|executionBoundary/);
   }
+});
+
+test('Gate B: retired compensation and second-owner mechanisms stay absent from all active source',()=>{
+  const forbidden=/subagentExecutionWindowMs|WORK_UNIT_EXECUTION_BOUNDARY|executionBoundary|planningFeedback|validationFeedback|authorityHandoff|completionFeedback|semanticReviewRoot|validatorPrompt|validatorSchema|runValidator|AnalysisResultValidator|postSaturation|convergenceSteer|turn-steered|\btaskMode\b|role\s*[:=]\s*['"]validator['"]|owner\s*===\s*['"]validator['"]/;
+  for(const path of sourceFiles())assert.doesNotMatch(source(path),forbidden,`retired Runtime mechanism leaked into ${path}`);
 });
 
 test('Gate B: Runtime has no parallel stage-result, semantic History, Validator-model or repair channel',()=>{
