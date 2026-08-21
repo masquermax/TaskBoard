@@ -3,6 +3,8 @@
 Status: HISTORICAL SHA VERIFIED
 Release gate: CI_VERIFIED_REAL_RUNTIME_PENDING
 
+Evidence scope: the exact named Git trees below only. Current release acceptance is tracked separately and does not widen historical SHA proof.
+
 This record separates three different proof classes:
 
 1. exact named Git-tree CI proof;
