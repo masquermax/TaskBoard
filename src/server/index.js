@@ -44,6 +44,11 @@ const runtime = bootstrap({
   allowMissingExecutor: true,
   startScheduler: process.env.TASKBOARD_SCHEDULER !== 'off',
 });
+if (requestedExecutor && runtime.extensionLoadError) {
+  extensionLoadState.loadedIds = extensionLoadState.loadedIds.filter(id => id !== requestedExecutor);
+  extensionLoadState.loadErrors[requestedExecutor] = runtime.extensionLoadError;
+  console.warn(`[extensions] active Executor ${requestedExecutor} failed activation; TaskBoard is starting in management mode: ${runtime.extensionLoadError}`);
+}
 let server = null;
 let shuttingDown = false;
 let extensionManagementHandler = null;
