@@ -30,7 +30,6 @@ function readable(error){const code=error?.message;return presentationState?.err
 
 function ensureManagementUi(){
   const projectDialog=$('project-dialog');const card=projectDialog?.querySelector('.dialog-card');if(!card||$('management-tab-project'))return;
-  const simple=$('simple-config-link');if(simple){simple.classList.add('hidden');simple.setAttribute('aria-hidden','true');}
   const head=card.querySelector('.dialog-head');const eyebrow=head?.querySelector('.eyebrow');const title=head?.querySelector('h2');if(eyebrow)eyebrow.textContent='管理';if(title)title.textContent='TaskBoard 管理';
 
   const tabs=document.createElement('div');tabs.className='form-grid';tabs.setAttribute('role','tablist');tabs.innerHTML='<button type="button" id="management-tab-project" class="primary-button" role="tab" aria-selected="true">项目</button><button type="button" id="management-tab-extension" class="secondary-button" role="tab" aria-selected="false">导入扩展</button>';
