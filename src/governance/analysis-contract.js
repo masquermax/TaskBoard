@@ -50,7 +50,7 @@ export const claimSchema = {
     // later aggregates these explicit Root judgments deterministically.
     obligationRefs:{type:'array',items:{type:'string'},maxItems:20},
   },
-  required:['id','statement','level','evidenceIds','scope','coverage','hops'],
+  required:['id','statement','level','evidenceIds','scope','coverage','hops','obligationRefs'],
   additionalProperties:false,
 };
 
