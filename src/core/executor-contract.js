@@ -21,7 +21,7 @@ export const ROOT_RESPONSE_CONTRACT={
     delegations:{type:'array',items:{type:'object',properties:{id:{type:'string'},title:{type:'string'},goal:{type:'string'},expectedOutput:{type:'string'},stopCondition:{type:'string'},projectAccess:{type:'string',enum:['none','read','write']},networkAccess:{type:'boolean'},skillId:{type:['string','null']},dependsOn:{type:'array',items:{type:'string'}},inputRefs:{type:'array',items:{type:'string'},maxItems:40}},required:['id','title','goal','expectedOutput','stopCondition','projectAccess','networkAccess','skillId','dependsOn','inputRefs'],additionalProperties:false}},
     effectClosures:{type:'array',items:effectClosureSchema,maxItems:4},
   },
-  required:['kind','summary','finalResult','resultMode','evidence','claims','gaps','recommendations','steps','gateway','gapResolutions','delegations'],
+  required:['kind','summary','finalResult','resultMode','evidence','claims','gaps','recommendations','steps','gateway','gapResolutions','delegations','effectClosures'],
   additionalProperties:false,
 };
 
