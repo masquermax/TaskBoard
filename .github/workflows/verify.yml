@@ -29,6 +29,17 @@ jobs:
       - name: Run ${{ matrix.layer }} tests
         run: npm run test:${{ matrix.layer }}
 
+  coverage:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Measure full-suite coverage
+        run: npm run test:coverage
+
   verify:
     timeout-minutes: 10
     strategy:
@@ -47,6 +58,7 @@ jobs:
   fresh-unpack:
     needs:
       - layered
+      - coverage
       - verify
     timeout-minutes: 10
     runs-on: ubuntu-latest
