@@ -13,6 +13,8 @@
     "dev": "node --watch src/server/index.js",
     "start": "node src/server/index.js",
     "test": "node --test",
+    "test:module": "node scripts/run-test-layer.mjs module",
+    "test:functional": "node scripts/run-test-layer.mjs functional",
     "check": "node scripts/check-syntax.mjs",
     "verify": "npm run check && npm test"
   },
