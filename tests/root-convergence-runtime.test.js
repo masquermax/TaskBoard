@@ -92,3 +92,23 @@ test('T-0016 shape converges after one read-only Work Unit even when synthesis r
     assert.equal(subagentCalls,1);
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
+
+test('changed Certified State boundary permits a fresh Validator repair attempt',()=>{
+  const validator=new ValidatorRuntime();
+  const task={id:'T-BOUNDARY',instruction:'bounded'};
+  const first=validator.reviewRoot({task,currentState:analysisState(),availableEvidence:[],decision:unsupportedClaimDecision()});
+  assert.equal(first.outcome,'reject');
+
+  const changed={...analysisState(),version:2};
+  const second=validator.reviewRoot({task,currentState:changed,availableEvidence:[],decision:unsupportedClaimDecision()});
+  assert.equal(second.outcome,'reject');
+});
+
+test('a successful Validator pass clears prior rejection memory',()=>{
+  const validator=new ValidatorRuntime();
+  const task={id:'T-CLEAR',instruction:'bounded'};
+  const state=analysisState();
+  assert.equal(validator.reviewRoot({task,currentState:state,availableEvidence:[],decision:unsupportedClaimDecision()}).outcome,'reject');
+  assert.equal(validator.reviewRoot({task,currentState:state,availableEvidence:[],decision:decision('complete')}).outcome,'pass');
+  assert.equal(validator.reviewRoot({task,currentState:state,availableEvidence:[],decision:unsupportedClaimDecision()}).outcome,'reject');
+});
