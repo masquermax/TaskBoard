@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { applyCertifiedDelta } from '../src/governance/certified-state.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
+import { SubagentRuntime } from '../src/core/subagent-runtime.js';
+import { GovernanceCompiler } from '../src/governance/governance-compiler.js';
 import { ValidatorRuntime } from '../src/governance/validator-runtime.js';
 
 function evidence(id='E-NEW'){
@@ -48,4 +53,42 @@ test('the same deterministic Validator rejection gets one repair turn but cannot
 
   await assert.rejects(runtime.execute(task),/VALIDATOR_REJECTION_NON_CONVERGENCE/);
   assert.equal(rootCalls,2);
+});
+
+test('T-0016 shape converges after one read-only Work Unit even when synthesis redundantly restates the resolved Gap',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'taskboard-t0016-'));
+  try{
+    writeFileSync(join(dir,'facts.txt'),'alpha=17\nbeta=29\n','utf8');
+    const work={id:'WU-001',title:'Read facts.txt',goal:'Read alpha and beta from facts.txt.',expectedOutput:'Return both values with exact source lines.',stopCondition:'Both values and their source lines are established.',projectAccess:'read',networkAccess:false,skillId:null,dependsOn:[],inputRefs:['project:0']};
+    let rootCalls=0,subagentCalls=0;
+    const executor={
+      async runRoot({subagentResults,onExecutionStarted}){
+        rootCalls+=1;onExecutionStarted?.();
+        if(!subagentResults.length)return decision('delegate',{gaps:[gap()],delegations:[work]});
+        return decision('complete',{
+          claims:[{id:'C-FACTS',statement:'facts.txt establishes alpha=17 and beta=29.',level:'confirmed',evidenceIds:['E-FACTS'],scope:'single_system',coverage:'component',hops:[],obligationRefs:['OBL-FACTS']}],
+          gaps:[gap({reason:'Stale restatement emitted alongside the real closure.'})],
+          gapResolutions:[{gapId:'G-001',reason:'Direct project-file evidence now establishes both values.',evidenceIds:['E-FACTS']}],
+        });
+      },
+      async runSubagent({delegation,onExecutionStarted}){
+        subagentCalls+=1;onExecutionStarted?.();assert.equal(delegation.id,'WU-001');
+        return{delegationId:'WU-001',result:'alpha=17; beta=29',evidence:[evidence('E-FACTS')],blocker:null};
+      },
+    };
+    const modelRouter={async prepare(){},route(){return{};},release(){}};
+    const compiler=new GovernanceCompiler();
+    const completionEvaluator={evaluate({certifiedContext}){
+      assert.equal(certifiedContext.gaps.some(item=>item.id==='G-001'),false);
+      assert.deepEqual(certifiedContext.claims.find(item=>item.id==='C-FACTS')?.obligationRefs,['OBL-FACTS']);
+      return{goalState:'satisfied',assessments:[]};
+    }};
+    const runtime=new RootRuntime({executor,modelRouter,subagentRuntime:new SubagentRuntime({executor,modelRouter}),validatorRuntime:new ValidatorRuntime(),governanceCompiler:compiler,completionEvaluator});
+    const task={id:'T-0016-SHAPE',title:'Read facts',instruction:'Read facts.txt and report alpha and beta with sources. Do not modify files.',ready_reason:'NEW',projectScopes:[{path:dir,label:'test'}],attachments:[],references:[],taskContract:{authority:{},obligations:[{id:'OBL-FACTS',certification:'supported'}]},analysisState:null,workReceipts:[]};
+
+    const outcome=await runtime.execute(task);
+    assert.equal(outcome.kind,'goal_satisfied');
+    assert.equal(rootCalls,2);
+    assert.equal(subagentCalls,1);
+  }finally{rmSync(dir,{recursive:true,force:true});}
 });
