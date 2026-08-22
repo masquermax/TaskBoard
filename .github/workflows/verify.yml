@@ -79,3 +79,29 @@ jobs:
           tar -xf /tmp/taskboard.tar -C /tmp/taskboard-unpack
           cd /tmp/taskboard-unpack
           npm run verify
+
+  test-complete:
+    if: always()
+    needs:
+      - layered
+      - coverage
+      - verify
+      - fresh-unpack
+    timeout-minutes: 2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert autonomous test suite completed successfully
+        shell: bash
+        run: |
+          echo "module/functional matrix: ${{ needs.layered.result }}"
+          echo "coverage gate: ${{ needs.coverage.result }}"
+          echo "full verify matrix: ${{ needs.verify.result }}"
+          echo "fresh unpack: ${{ needs.fresh-unpack.result }}"
+          if [[ "${{ needs.layered.result }}" != "success" || \
+                "${{ needs.coverage.result }}" != "success" || \
+                "${{ needs.verify.result }}" != "success" || \
+                "${{ needs.fresh-unpack.result }}" != "success" ]]; then
+            echo 'AUTONOMOUS_TEST_SUITE_INCOMPLETE'
+            exit 1
+          fi
+          echo 'AUTONOMOUS_TEST_SUITE_COMPLETE'
