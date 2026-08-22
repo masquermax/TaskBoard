@@ -21,6 +21,7 @@ const layers = Object.freeze({
     'tests/authority-http-acceptance.test.js',
     'tests/lifecycle-actions.test.js',
     'tests/extension-management-mode.test.js',
+    'tests/extension-management-api.test.js',
     'tests/extension-connection-api.test.js',
     'tests/queue-runtime.test.js',
     'tests/effect-recovery-scheduler.test.js'
