@@ -27,6 +27,7 @@ function safeKey(value){return String(value||'field').replace(/[^A-Za-z0-9_-]/g,
 function fieldId(field){return `extension-field-${safeKey(field?.key)}`;}
 function fieldNoteId(field){return `${fieldId(field)}-note`;}
 function readable(error){const code=error?.message;return presentationState?.errors?.[code]||code||'操作失败';}
+function setImportStatus(message){const note=$('extension-import-status');if(note)note.textContent=message||'';}
 
 function ensureManagementUi(){
   const projectDialog=$('project-dialog');const card=projectDialog?.querySelector('.dialog-card');if(!card||$('management-tab-project'))return;
@@ -80,9 +81,9 @@ function syncExtensionSelection(){
   else note.textContent='只访问你明确填写的扩展目录，不扫描其他位置。';
 }
 async function importExtension(){
-  const input=$('extension-import-directory');const directory=String(input?.value||'').trim();if(!directory)return toast('请填写扩展目录');const button=$('extension-import-add');if(button)button.disabled=true;
-  try{await api('/api/extensions/import',{method:'POST',body:JSON.stringify({directory})});input.value='';await loadExtensions();toast('扩展已导入，重启 TaskBoard 后生效');}
-  catch(error){console.error(error);toast(error?.message||'扩展导入失败');}
+  const input=$('extension-import-directory');const directory=String(input?.value||'').trim();if(!directory){setImportStatus('请填写扩展目录。');return;}const button=$('extension-import-add');if(button)button.disabled=true;setImportStatus('正在导入扩展…');
+  try{await api('/api/extensions/import',{method:'POST',body:JSON.stringify({directory})});input.value='';await loadExtensions();setImportStatus('扩展已导入，重启 TaskBoard 后生效。');}
+  catch(error){console.error(error);setImportStatus(`导入失败：${error?.message||'扩展导入失败'}`);}
   finally{if(button)button.disabled=false;}
 }
 
@@ -178,10 +179,10 @@ async function discoverExtensionCapabilities({silent=false}={}){
   finally{if(button)button.disabled=false;}
 }
 async function openSelectedExtension(){
-  const id=$('extension-imported-select')?.value||'';if(!id)return;try{const body=await api(`/api/extensions/${encodeURIComponent(id)}/connection`);activeConfigId=id;presentationState=body.presentation||null;connectionState=body.connection||{};discoveryState=null;renderConfig();$('extension-config-dialog').showModal();if(presentationState?.discovery?.auto&&connectionState?.apiKeyConfigured)scheduleDiscovery();}catch(error){console.error(error);toast(error?.message||'无法打开扩展配置');}
+  const id=$('extension-imported-select')?.value||'';if(!id)return;try{const body=await api(`/api/extensions/${encodeURIComponent(id)}/connection`);activeConfigId=id;presentationState=body.presentation||null;connectionState=body.connection||{};discoveryState=null;renderConfig();$('extension-config-dialog').showModal();if(presentationState?.discovery?.auto&&connectionState?.apiKeyConfigured)scheduleDiscovery();}catch(error){console.error(error);setImportStatus(`打开失败：${error?.message||'无法打开扩展配置'}`);}
 }
 async function saveExtensionConfig(){
-  if(!activeConfigId)return;const button=$('extension-config-save');if(button)button.disabled=true;
+  if(!activeConfigId)return;const button=$('extension-config-save');if(button)button.disabled=true;setDiscoveryStatus('正在应用 AI 连接…','loading');
   try{
     const actions=presentationState?.actions||{},kind=String(presentationState?.kind||'form');let payload;
     if(kind==='profiles'){
@@ -189,15 +190,15 @@ async function saveExtensionConfig(){
       if(selected!==NEW_PROFILE_ID&&profile?.editable!==true)payload={action:actions.select||'selectProfile',profileId:selected};
       else{const next=fieldValues();if(selected!==NEW_PROFILE_ID)next.id=selected;payload={action:actions.save||'saveProfile',profile:next,select:true};}
     }else payload={action:actions.save||'save',values:fieldValues()};
-    const body=await api(`/api/extensions/${encodeURIComponent(activeConfigId)}/connection`,{method:'PUT',body:JSON.stringify(payload)});presentationState=body.presentation||presentationState;connectionState=body.connection||{};renderConfig();if(presentationState?.discovery?.auto)scheduleDiscovery();toast('扩展配置已保存并立即生效');
-  }catch(error){console.error(error);toast(readable(error)||'扩展配置保存失败');}
+    const body=await api(`/api/extensions/${encodeURIComponent(activeConfigId)}/connection`,{method:'PUT',body:JSON.stringify(payload)});presentationState=body.presentation||presentationState;connectionState=body.connection||{};renderConfig();setDiscoveryStatus('AI 连接已应用。','success');if(presentationState?.discovery?.auto)scheduleDiscovery();
+  }catch(error){console.error(error);setDiscoveryStatus(`应用失败：${readable(error)||'扩展配置保存失败'}`,'error');}
   finally{if(button)button.disabled=false;}
 }
 async function deleteExtensionProfile(){
   if(!activeConfigId)return;const profile=selectedProfile();if(!profile?.deletable)return;if(typeof globalThis.confirm==='function'&&!globalThis.confirm(`删除“${profile.name||profile.id}”？`))return;
-  const button=$('extension-config-delete');if(button)button.disabled=true;
-  try{const action=presentationState?.actions?.delete||'deleteProfile';const body=await api(`/api/extensions/${encodeURIComponent(activeConfigId)}/connection`,{method:'PUT',body:JSON.stringify({action,profileId:profile.id})});presentationState=body.presentation||presentationState;connectionState=body.connection||{};discoveryState=null;renderConfig();toast('扩展配置已更新并立即生效');}
-  catch(error){console.error(error);toast(readable(error)||'扩展配置更新失败');}
+  const button=$('extension-config-delete');if(button)button.disabled=true;setDiscoveryStatus('正在更新 AI 连接…','loading');
+  try{const action=presentationState?.actions?.delete||'deleteProfile';const body=await api(`/api/extensions/${encodeURIComponent(activeConfigId)}/connection`,{method:'PUT',body:JSON.stringify({action,profileId:profile.id})});presentationState=body.presentation||presentationState;connectionState=body.connection||{};discoveryState=null;renderConfig();setDiscoveryStatus('AI 连接已更新。','success');}
+  catch(error){console.error(error);setDiscoveryStatus(`更新失败：${readable(error)||'扩展配置更新失败'}`,'error');}
   finally{if(button)button.disabled=false;}
 }
 
