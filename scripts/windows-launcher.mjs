@@ -173,7 +173,7 @@ try {
     windowsHide: true,
     detached: true,
     stdio: ['ignore', logFd, logFd],
-    env: process.env,
+    env: { ...process.env, TASKBOARD_STDIO_REDIRECTED:'1' },
   });
   child.unref();
   appendLog(`[launcher] spawned pid=${child.pid}`);

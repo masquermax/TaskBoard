@@ -7,6 +7,7 @@ import { createApp } from './app.js';
 import { createExtensionConnectionHandler } from './extension-connection-api.js';
 import { createExtensionManagementHandler } from './extension-management-api.js';
 import { presentExtensionLoadState } from './extension-load-presentation.js';
+import { installRuntimeLogMirror } from './runtime-log-mirror.js';
 import { ExtensionRegistry } from '../extensions/runtime/extension-registry.js';
 import { ImportedExtensionStore } from '../extensions/runtime/imported-extension-store.js';
 import { loadRegisteredExtensionsAsync } from '../extensions/runtime/external-extension-loader.js';
@@ -19,6 +20,7 @@ const taskboardUrl = process.env.TASKBOARD_URL || `http://127.0.0.1:${port}`;
 const runtimeDir = resolve(rootDir, 'data/runtime');
 const instanceFile = resolve(runtimeDir, 'taskboard-instance.json');
 mkdirSync(runtimeDir, { recursive: true });
+installRuntimeLogMirror({ logFile:resolve(runtimeDir,'taskboard.log') });
 
 const importedExtensionStore = new ImportedExtensionStore({
   file: resolve(rootDir, 'data/extension-registry.json'),
