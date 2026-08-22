@@ -13,6 +13,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  layered:
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        layer: [module, functional]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Run ${{ matrix.layer }} tests
+        run: npm run test:${{ matrix.layer }}
+
   verify:
     timeout-minutes: 10
     strategy:
@@ -29,7 +45,9 @@ jobs:
         run: npm run verify
 
   fresh-unpack:
-    needs: verify
+    needs:
+      - layered
+      - verify
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
