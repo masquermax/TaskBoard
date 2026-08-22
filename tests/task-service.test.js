@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { JsonTaskDatabase, JsonTaskRepository } from '../src/core/json-repository.js';
@@ -9,21 +9,25 @@ import { TaskStatus } from '../src/core/types.js';
 import { Scheduler } from '../src/core/scheduler.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
 import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
+import { asRuntimeExecutor } from './helpers/runtime-executor.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
 import { ModelRouter } from '../src/core/model-router.js';
-import { MockExecutor } from '../src/extensions/executors/mock/mock-executor.js';
+import { TestExecutor as MockExecutor } from './helpers/test-executor.js';
+import { AttachmentStore } from '../src/core/attachment-store.js';
 
-function setup() {
+function setup(extensionExecutor=new MockExecutor()) {
   const dir = mkdtempSync(join(tmpdir(), 'taskboard-test-'));
   const db = new JsonTaskDatabase(join(dir, 'db.json'));
   const repo = new JsonTaskRepository(db);
   const service = new TaskService(repo);
-  const executor = new MockExecutor(); const router = new ModelRouter();
+  const executor=asRuntimeExecutor(extensionExecutor); const router = new ModelRouter();
   const subagentRuntime = new SubagentRuntime({ executor, modelRouter:router });
   const rootRuntime = new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(), executor, modelRouter:router, subagentRuntime });
   const scheduler = new Scheduler({ repository:repo, taskService:service, rootRuntime, intervalMs:999999 });
   return { dir, db, repo, service, scheduler, close(){ scheduler.stop(); db.close(); rmSync(dir,{recursive:true,force:true}); } };
 }
+
+function humanGatewayExecutor(){const gap={id:'G-PHASE',question:'请选择范围',reason:'范围由用户拥有',kind:'business_decision',blocking:true,evidenceIds:[]};return{async runRoot({onExecutionStarted}){onExecutionStarted?.();return{kind:'human_gateway',summary:'需要用户范围',finalResult:null,resultMode:'execution',evidence:[],claims:[],gaps:[gap],recommendations:[],steps:[],gapResolutions:[],gateway:{gapId:gap.id,question:gap.question,context:gap.reason,options:['基础办公']},delegations:[]};},async runSubagent(){throw new Error('unused');}};}
 
 test('temporary project scope does not enter Project List', () => {
   const x = setup();
@@ -53,9 +57,9 @@ test('title fuzzy search is scoped by status and project filter', () => {
 });
 
 test('phase history records every Scheduler-owned entry while UI can read current status_entered_at', async () => {
-  const x = setup();
+  const x = setup(humanGatewayExecutor());
   try {
-    const task = x.scheduler.createTask({ title:'做一个 OA 系统', instruction:'你帮我做了吧' });
+    const task = x.scheduler.createTask({ title:'需要用户范围', instruction:'执行' });
     await x.scheduler.tick();
     const waiting = x.service.getTask(task.id);
     assert.equal(waiting.status, TaskStatus.WAITING_HUMAN);
@@ -88,9 +92,6 @@ test('completed task can be referenced without reverse mutation', async () => {
     assert.equal(x.service.getTask(source.id).final_result, sourceBefore);
   } finally { x.close(); }
 });
-
-import { existsSync, readFileSync } from 'node:fs';
-import { AttachmentStore } from '../src/core/attachment-store.js';
 
 test('task attachments are durable task inputs and do not enter Project List', () => {
   const dir = mkdtempSync(join(tmpdir(), 'taskboard-attachment-test-'));

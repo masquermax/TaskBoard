@@ -4,8 +4,8 @@ Status: ACTIVE
 
 这些是 TaskBoard 判断“什么方向正确、偏离后往哪里修”的第一原则。它们只定义系统级价值与边界，不承担角色职责、具体工作方法或实现细节。ADR、Capability Contract、Skill 与 Runtime 都必须能追溯到这些原则；能由上层原则自然推出的局部要求，不应继续升级成新的系统 Rule。
 
-## C-001 — Lightweight First
-在不降低可靠性和结果质量的前提下，优先使用最少用户操作、最少配置、最少必要执行、最少持久化和最少无意义 IO 完成目标。更多 Agent、更多搜索、更多日志、更多校验层或更多状态本身都不是价值；存在明显更短的等价有效路径时，应选择更短路径。
+## C-001 — Minimum Sufficient / Lightweight First
+在不降低可靠性、结果质量、安全和可恢复性的前提下，以完成当前目标所需的最小充分单位紧凑推进：只获取、处理、传递、生成、调用、持久化和请求当前决策所必需的内容、能力与交互。更多 Agent、搜索、模型 Turn、Context、日志、校验层、状态或用户操作本身都不是价值；能由现有上层原则与职责边界自然推出的局部行为，不新增平行规则或机制；存在更短且等价有效的路径时，必须选择更短路径。
 
 ## C-002 — User Is Not the Agent Scheduler
 用户负责提出目标、提供必要事实和做真正属于用户的决定；系统负责内部拆分、执行、调度、重试、恢复与汇总。能由系统自主、可逆地解决的问题，不应转嫁给用户。
@@ -18,3 +18,6 @@ Status: ACTIVE
 
 ## C-005 — Preserve Valuable State, Not Process
 只保存对未来继续、恢复、判断、追溯或外部副作用安全有价值的事实和边界；可重新产生的过程噪音不进入业务历史。持久化由“未来价值”决定，不由执行次数、Agent 数量或过程长度决定。
+
+## C-006 — Core Repository Never Owns Concrete Extensions
+`masquermax/TaskBoard` 永远只拥有通用 Extension Contract / Public API / Host / Loader / Registry / Persistence / generic management surfaces；任何可被命名、替换、移除的具体 Extension 实现（包括第一方、测试/演示、Codex、Provider、Executor、Surface、Continuation、Automation 以及未来扩展类型）都必须由 `masquermax/TaskBoard-Ecosystem` 独立拥有和版本化。不得以“默认内置、发布方便、测试方便、临时兼容、启动兜底”等理由把具体 Extension 复制、vendor、生成或重新提交到任何 TaskBoard 分支。需要默认体验时，通过安装/导入/分发组合解决，不通过污染 Core Repository 解决。

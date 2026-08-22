@@ -14,10 +14,12 @@ export function taskInputCatalog(task={}){
 export function taskInputRefs(task={}){return taskInputCatalog(task).map(item=>item.ref);}
 
 // Subagent context is built from an allow-list. Missing inputRefs means no Task
-// source input; it never falls back to the complete Task object.
+// source input; it never falls back to the complete Task object. Selected Project
+// scopes retain their original logical ref so a scoped list cannot silently
+// renumber project:1 into project:0 before Core compiles the Executor request.
 export function scopeTaskInputs(task={},inputRefs=[]){
   const selected=new Set((Array.isArray(inputRefs)?inputRefs:[]).map(text).filter(Boolean));
-  const projectScopes=(task.projectScopes||[]).filter((_,index)=>selected.has(`project:${index}`));
+  const projectScopes=(task.projectScopes||[]).flatMap((scope,index)=>selected.has(`project:${index}`)?[{...scope,inputRef:`project:${index}`}]:[]);
   const attachments=(task.attachments||[]).filter(item=>selected.has(`attachment:${text(item?.id)}`));
   const references=(task.references||[]).filter(item=>selected.has(`reference:${text(item?.source_task_id)}`));
   return clone({

@@ -1,13 +1,17 @@
 {
   "name": "taskboard-codex",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "private": true,
   "type": "module",
-  "description": "Local-first AI task board with Human Gateway and a decoupled Codex Executor.",
+  "description": "Local-first governed AI task board with externally owned pluggable Extensions.",
+  "exports": {
+    "./bootstrap": "./src/server/bootstrap.js",
+    "./extension-api": "./src/extensions/public-api.js",
+    "./extensions": "./src/extensions/index.js"
+  },
   "scripts": {
-    "dev": "node --watch src/server/mock.js",
+    "dev": "node --watch src/server/index.js",
     "start": "node src/server/index.js",
-    "start:mock": "node src/server/mock.js",
     "test": "node --test",
     "check": "node scripts/check-syntax.mjs",
     "verify": "npm run check && npm test"
