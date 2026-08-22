@@ -1,4 +1,5 @@
 import './extension-management.js';
+import './model-selection.js';
 
 const $=id=>document.getElementById(id);
 const embedConfig=globalThis.__TASKBOARD_EMBED_CONFIG__||null;

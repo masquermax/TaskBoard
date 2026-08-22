@@ -88,6 +88,8 @@ const appHandler = createApp({
   settingsStore: runtime.settingsStore,
   runtimeSettingsState: runtime.runtimeSettingsState,
   applyRuntimeSettings: runtime.applyRuntimeSettings,
+  modelSelectionState: runtime.modelSelectionState,
+  applyModelSelection: runtime.applyModelSelection,
   uiRoot: resolve(rootDir, 'src/ui'),
   onShutdown: shutdown,
   instanceRoot: rootDir,

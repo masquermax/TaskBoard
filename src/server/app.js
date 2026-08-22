@@ -4,7 +4,7 @@ import { json, readFormData, readJson, serveFile, serveStatic } from './http.js'
 
 function errorStatus(message){
   if(['TASK_NOT_FOUND','PROJECT_NOT_FOUND','ATTACHMENT_NOT_FOUND','ATTACHMENT_FILE_NOT_FOUND'].includes(message))return 404;
-  if(['TASK_CANCEL_NOT_ALLOWED','TASK_DELETE_BECAME_RUNNING','TASK_DELETE_NOT_ALLOWED','TASK_LOCKED','TASK_LOCK_NOT_ALLOWED','TASK_NOT_QUIESCENT','TASK_RETRY_NOT_ALLOWED','RETRY_TARGET_NOT_SUSPENDED'].includes(message))return 409;
+  if(['TASK_CANCEL_NOT_ALLOWED','TASK_DELETE_BECAME_RUNNING','TASK_DELETE_NOT_ALLOWED','TASK_LOCKED','TASK_LOCK_NOT_ALLOWED','TASK_NOT_QUIESCENT','TASK_RETRY_NOT_ALLOWED','RETRY_TARGET_NOT_SUSPENDED','MODEL_SELECTION_CATALOG_UNAVAILABLE','MODEL_SELECTION_MODEL_UNAVAILABLE','MODEL_SELECTION_EXPLICIT_UNSUPPORTED'].includes(message))return 409;
   if(['TITLE_REQUIRED','INSTRUCTION_REQUIRED','ANSWER_REQUIRED','PROJECT_FIELDS_REQUIRED','PROJECT_OR_TEMP_ONLY','REFERENCE_MUST_BE_COMPLETED','NO_PENDING_GATEWAY','ATTACHMENT_TOO_MANY','ATTACHMENT_TOO_LARGE','ATTACHMENT_TOTAL_TOO_LARGE','ATTACHMENT_INVALID','ATTACHMENT_NAME_REQUIRED','ATTACHMENT_STORAGE_UNAVAILABLE','REQUEST_TOO_LARGE','INVALID_JSON','INVALID_PATH','PROJECT_PATH_NOT_FOUND','PROJECT_PATH_NOT_DIRECTORY','PROJECT_NAME_EXISTS','PROJECT_PATH_EXISTS','RUNTIME_SETTINGS_OUT_OF_RANGE'].includes(message))return 400;
   return 500;
 }
@@ -23,7 +23,7 @@ function runtimeLogLevel(){
   return ['error','warn','info','debug','trace'].includes(value)?value:'info';
 }
 
-export function createApp({taskService,executor,scheduler=null,capabilityProvider=null,surfaceManager=null,extension=null,settingsStore=null,runtimeSettingsState=null,applyRuntimeSettings=null,uiRoot,onShutdown=null,instanceRoot=null}){
+export function createApp({taskService,executor,scheduler=null,capabilityProvider=null,surfaceManager=null,extension=null,settingsStore=null,runtimeSettingsState=null,applyRuntimeSettings=null,modelSelectionState=null,applyModelSelection=null,uiRoot,onShutdown=null,instanceRoot=null}){
   return async function handler(req,res){
     try{
       const url=new URL(req.url,'http://localhost');const path=url.pathname;
@@ -32,10 +32,12 @@ export function createApp({taskService,executor,scheduler=null,capabilityProvide
       if(path==='/api/health'&&req.method==='GET'){
         const health=await executor.health();
         const identity=extensionIdentity(extension);
-        return json(res,200,{ok:true,executor:{...health,extensionId:identity.id,displayName:health?.displayName||identity.displayName,orchestrationMode:identity.orchestrationMode},surfaces:surfaceManager?.status?.()||[]});
+        return json(res,200,{ok:true,executor:{...health,extensionId:identity.id,displayName:health?.displayName||identity.displayName,orchestrationMode:identity.orchestrationMode},modelSelection:modelSelectionState?.()||null,surfaces:surfaceManager?.status?.()||[]});
       }
-      if(path==='/api/capabilities'&&req.method==='GET'){const capability=capabilityProvider?.snapshot?.()||(capabilityProvider?.initialize?await capabilityProvider.initialize({backgroundRefresh:true}):(capabilityProvider?.discover?await capabilityProvider.discover():null));return json(res,200,{ok:true,extension:extensionIdentity(extension),capability,surfaces:surfaceManager?.status?.()||[]});}
-      if(path==='/api/capabilities/refresh'&&req.method==='POST'){if(!capabilityProvider?.refresh)return json(res,503,{ok:false,error:'CAPABILITY_REFRESH_UNAVAILABLE',capability:capabilityProvider?.snapshot?.()||null});const result=await capabilityProvider.refresh({reason:'manual-ui',manual:true});return json(res,200,{ok:Boolean(result?.refreshed),refreshed:Boolean(result?.refreshed),error:result?.error||null,capability:result?.capability||capabilityProvider.snapshot?.()||null});}
+      if(path==='/api/capabilities'&&req.method==='GET'){const capability=capabilityProvider?.snapshot?.()||(capabilityProvider?.initialize?await capabilityProvider.initialize({backgroundRefresh:true}):(capabilityProvider?.discover?await capabilityProvider.discover():null));return json(res,200,{ok:true,extension:extensionIdentity(extension),capability,modelSelection:modelSelectionState?.()||null,surfaces:surfaceManager?.status?.()||[]});}
+      if(path==='/api/capabilities/refresh'&&req.method==='POST'){if(!capabilityProvider?.refresh)return json(res,503,{ok:false,error:'CAPABILITY_REFRESH_UNAVAILABLE',capability:capabilityProvider?.snapshot?.()||null,modelSelection:modelSelectionState?.()||null});const result=await capabilityProvider.refresh({reason:'manual-ui',manual:true});return json(res,200,{ok:Boolean(result?.refreshed),refreshed:Boolean(result?.refreshed),error:result?.error||null,capability:result?.capability||capabilityProvider.snapshot?.()||null,modelSelection:modelSelectionState?.()||null});}
+      if(path==='/api/model-selection'&&req.method==='GET')return json(res,200,{ok:true,modelSelection:modelSelectionState?.()||null});
+      if(path==='/api/model-selection'&&req.method==='PUT'){if(!applyModelSelection)return json(res,503,{error:'MODEL_SELECTION_UNAVAILABLE'});return json(res,200,{ok:true,modelSelection:applyModelSelection(await readJson(req))});}
       if(path==='/api/surfaces/start'&&req.method==='POST'){surfaceManager?.start?.();const surfaces=await surfaceManager?.scanNow?.();return json(res,200,{ok:true,surfaces:surfaces||surfaceManager?.status?.()||[]});}
       if(path==='/api/system/shutdown'&&req.method==='POST'){if(!onShutdown)return json(res,503,{error:'SHUTDOWN_UNAVAILABLE'});json(res,202,{ok:true});setTimeout(()=>onShutdown(),40);return;}
       if(path==='/api/settings'&&req.method==='GET'){const state=runtimeSettingsState?.()||{configured:settingsStore?.get?.()||{taskConcurrency:2,taskMaxSubagents:3},limits:{taskConcurrency:null,taskMaxSubagents:null},effective:settingsStore?.get?.()||{taskConcurrency:2,taskMaxSubagents:3}};return json(res,200,{settings:state.configured,limits:state.limits,effective:state.effective});}
