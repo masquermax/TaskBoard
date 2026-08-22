@@ -11,6 +11,7 @@ const layers = Object.freeze({
     'tests/root-plan-contract.test.js',
     'tests/subagent-minimal-boundary.test.js',
     'tests/validator-runtime-boundary.test.js',
+    'tests/source-trace-verifier.test.js',
     'tests/completion-evaluator-phase4.test.js',
     'tests/extension-framework.test.js',
     'tests/work-capability-contract.test.js'
