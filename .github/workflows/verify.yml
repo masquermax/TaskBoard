@@ -1,55 +1,49 @@
 name: Verify
 
 on:
-  pull_request:
-    branches: [main]
   push:
+  pull_request:
+    branches:
+      - main
+      - v0.9.2
   workflow_dispatch:
 
-permissions:
-  contents: write
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  migrate-host-only:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'v0.9.2' && github.actor != 'github-actions[bot]'
-    runs-on: ubuntu-latest
+  verify:
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: v0.9.2
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Apply migration
-        shell: bash
-        run: |
-          node scripts/migrate-host-only.mjs
-          git restore --source=HEAD -- .github/workflows/verify.yml .github/workflows/migrate-extension-boundary.yml
-      - name: Verify migrated Host
-        run: |
-          npm install --ignore-scripts --no-audit --no-fund
-          npm run verify
-      - name: Commit verified migration
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "masquermax"
-          git config user.email "224842982+masquermax@users.noreply.github.com"
-          mapfile -t changed < <(git diff --name-only)
-          if ((${#changed[@]})); then git add -- "${changed[@]}"; fi
-          git add -- tests/helpers/test-executor.js tests/helpers/test-extension-registry.js tests/extension-repository-boundary.test.js
-          git status --short
-          git commit -m "refactor: keep concrete extensions outside TaskBoard"
-          git push origin HEAD:v0.9.2
+      - name: Verify
+        run: npm run verify
 
-  verify-current:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.ref != 'v0.9.2' || github.actor == 'github-actions[bot]'
+  fresh-unpack:
+    needs: verify
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: npm run verify
+      - name: Build tracked-files archive
+        run: git archive --format=tar --output=/tmp/taskboard.tar HEAD
+      - name: Verify fresh unpack
+        shell: bash
+        run: |
+          rm -rf /tmp/taskboard-unpack
+          mkdir -p /tmp/taskboard-unpack
+          tar -xf /tmp/taskboard.tar -C /tmp/taskboard-unpack
+          cd /tmp/taskboard-unpack
+          npm run verify
