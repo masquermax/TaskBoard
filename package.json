@@ -15,7 +15,7 @@
     "test": "node --test",
     "test:module": "node scripts/run-test-layer.mjs module",
     "test:functional": "node scripts/run-test-layer.mjs functional",
-    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=src/**/*.js",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=src/**/*.js --test-coverage-lines=94 --test-coverage-branches=74 --test-coverage-functions=87",
     "check": "node scripts/check-syntax.mjs",
     "verify": "npm run check && npm test"
   },
