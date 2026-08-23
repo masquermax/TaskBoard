@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyRetry, isInterrupted, retryReasonFromMessage } from '../src/core/retry-policy.js';
+import { classifyRetry, isInterrupted, retryReasonFromMessage, suspendedInstruction } from '../src/core/retry-policy.js';
 import { RuntimeFailureCode, attachRuntimeFailure } from '../src/core/runtime-failure.js';
 
 test('plain transport timeout remains retryable instead of becoming a semantic Work Unit boundary',()=>{
@@ -48,4 +48,10 @@ test('structured abort remains interruption rather than a retryable network fail
 
 test('generic transport copy stays Executor-agnostic',()=>{
   assert.equal(retryReasonFromMessage('stream disconnected before completion'),'Executor 流式连接中断');
+});
+
+test('deterministic governance suspension does not mislabel itself as an execution-environment problem',()=>{
+  const guidance=suspendedInstruction('确定性执行错误','ROOT_INVALID_CONTROL_DECISION: gap G-001 revision rejected',1);
+  assert.doesNotMatch(guidance,/请处理上面的执行环境问题/);
+  assert.match(guidance,/请根据上面的错误处理对应问题后/);
 });

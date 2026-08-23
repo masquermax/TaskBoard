@@ -13,6 +13,8 @@ function byId(values=[]){return new Map(list(values).map(item=>[text(item?.id),i
 function mergeUniqueById(...groups){const out=[],seen=new Set();for(const item of groups.flatMap(group=>list(group))){const id=text(item?.id);if(!id||seen.has(id))continue;seen.add(id);out.push(item);}return out;}
 function refsExist(ids,map){const refs=uniqueStrings(ids);return{refs,missing:refs.filter(id=>!map.has(id))};}
 function feedback(target,reason,action='REJECT_LEDGER_ENTRY'){return{ruleId:'C-003',target,reason,action};}
+function rejectionBoundary(task,currentState,availableEvidence=[]){return JSON.stringify({taskId:text(task?.id)||'task',stateVersion:normalizeCertifiedState(currentState).version,evidenceIds:uniqueStrings(list(availableEvidence).map(item=>item?.id)).sort()});}
+function rejectionFingerprint(violations=[]){return JSON.stringify(list(violations).map(item=>({ruleId:text(item?.ruleId),target:text(item?.target),reason:text(item?.reason),action:text(item?.action)})));}
 
 function ledgerViolations(decision,evidenceById,currentState){
   const violations=[];
@@ -71,7 +73,7 @@ function ledgerViolations(decision,evidenceById,currentState){
  * to reinterpret the same material. Root owns every semantic judgment.
  */
 export class ValidatorRuntime{
-  constructor({sourceTraceVerifier=new SourceTraceVerifier()}={}){this.sourceTraceVerifier=sourceTraceVerifier;}
+  constructor({sourceTraceVerifier=new SourceTraceVerifier()}={}){this.sourceTraceVerifier=sourceTraceVerifier;this.lastRejectionByTask=new Map();}
 
   reviewRoot({decision,task=null,humanGatewayHistory=[],currentState=null,availableEvidence=[]}={}){
     const proposed=copyAnalysis(decision);
@@ -98,7 +100,18 @@ export class ValidatorRuntime{
     for(const action of list(traced.actions))if(action?.action==='REJECT_UNTRACEABLE_SOURCE')violations.push(feedback(`evidence:${text(action?.target)||'unknown'}`,text(action?.reason)||'Evidence 来源无法追溯。','REJECT_UNTRACEABLE_SOURCE'));
     violations.push(...ledgerViolations(proposed,evidenceById,currentState));
 
-    if(violations.length)return{outcome:'reject',decision:proposed,feedback:violations,actions:[...list(traced.actions)],sourceVerifications:traced.verifications};
+    const taskId=text(task?.id)||'task';
+    if(violations.length){
+      const boundary=rejectionBoundary(task,currentState,availableEvidence),fingerprint=rejectionFingerprint(violations),previous=this.lastRejectionByTask.get(taskId);
+      if(previous?.boundary===boundary&&previous?.fingerprint===fingerprint){
+        this.lastRejectionByTask.delete(taskId);
+        const error=new Error(`VALIDATOR_REJECTION_NON_CONVERGENCE: same deterministic rejection repeated without new Certified State or Evidence (${violations.map(item=>item.action||item.ruleId).join(', ')})`);
+        error.nonRetryable=true;error.validatorFeedback=violations;throw error;
+      }
+      this.lastRejectionByTask.set(taskId,{boundary,fingerprint});
+      return{outcome:'reject',decision:proposed,feedback:violations,actions:[...list(traced.actions)],sourceVerifications:traced.verifications};
+    }
+    this.lastRejectionByTask.delete(taskId);
     return{outcome:'pass',decision:proposed,feedback:[],actions:[...list(traced.actions)],sourceVerifications:traced.verifications};
   }
 }
