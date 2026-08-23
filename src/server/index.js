@@ -4,7 +4,6 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bootstrap } from './bootstrap.js';
 import { createApp } from './app.js';
-import { createExtensionConnectionHandler } from './extension-connection-api.js';
 import { createExtensionManagementHandler } from './extension-management-api.js';
 import { presentExtensionLoadState } from './extension-load-presentation.js';
 import { installRuntimeLogMirror } from './runtime-log-mirror.js';
@@ -26,8 +25,6 @@ const importedExtensionStore = new ImportedExtensionStore({
   file: resolve(rootDir, 'data/extension-registry.json'),
   rootDir,
 });
-// Product Runtime starts from an empty generic registry. Every concrete Extension,
-// including Executors, enters only through the user's explicit imported registry.
 const extensionRegistry = new ExtensionRegistry();
 const extensionLoadState = await loadRegisteredExtensionsAsync(extensionRegistry, {
   rootDir,
@@ -69,9 +66,6 @@ async function shutdown() {
   runtime.surfaceManager?.stop?.();
   extensionManagementHandler?.close?.();
   runtime.executor?.close?.();
-  // Let active Scheduler runs observe the executor interruption and leave their
-  // Tasks RUNNING for normal startup recovery. Never close persistence while an
-  // in-flight run can still write to it.
   await runtime.scheduler.waitForIdle?.(1000);
   removeInstanceFile();
   try { runtime.database.close(); } catch { /* process shutdown must continue */ }
@@ -94,10 +88,6 @@ const appHandler = createApp({
   onShutdown: shutdown,
   instanceRoot: rootDir,
 });
-const connectionHandler=createExtensionConnectionHandler({
-  connectionSettings:runtime.extension?.connectionSettings||null,
-  extension:runtime.extension||null,
-});
 extensionManagementHandler=createExtensionManagementHandler({
   store: importedExtensionStore,
   registry: runtime.extensionRegistry,
@@ -108,7 +98,6 @@ extensionManagementHandler=createExtensionManagementHandler({
 });
 const handler=async(req,res)=>{
   if(await extensionManagementHandler(req,res))return;
-  if(await connectionHandler(req,res))return;
   return appHandler(req,res);
 };
 server = createServer(handler);
@@ -138,8 +127,6 @@ server.listen(port, '127.0.0.1', () => {
   for (const [id, error] of Object.entries(extensionLoadState.loadErrors)) console.warn(`[extensions] ${id}: ${error}`);
   if(process.env.TASKBOARD_SURFACES==='on') runtime.surfaceManager?.start?.();
   runtime.cleanup?.startDailySchedule?.();
-  // Startup cleanup waits until the executor startup/health attempt has settled.
-  // Connected OR a definite failure/timeout both count as settled; CONNECTING itself does not.
   Promise.resolve(runtime.executor.health?.()).catch(error => ({ error:error?.message || String(error) })).finally(() => {
     runtime.cleanup?.trigger?.('startup-settled').then(result => {
       if (result?.ok) console.log(`[cleanup] startup cleanup complete; deleted=${result.deleted}`);
