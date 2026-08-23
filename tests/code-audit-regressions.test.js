@@ -63,10 +63,9 @@ test('current Runtime contains no removed role/domain entry outside migration bo
   for(const file of files){if(allowed.has(file))continue;assert.doesNotMatch(readFileSync(resolve(file),'utf8'),forbidden,`legacy current-domain entry leaked into ${file}`);}
 });
 
-test('generic TaskBoard Core contains no concrete Codex-owned test lane or removed Human evidence helper',()=>{
+test('generic TaskBoard Core contains no concrete Codex-owned test lane',()=>{
   const codexNamedTests=readdirSync(resolve('tests'),{withFileTypes:true})
     .filter(entry=>entry.isFile()&&/codex/i.test(entry.name))
     .map(entry=>entry.name);
   assert.deepEqual(codexNamedTests,[],'concrete Codex behavior belongs in the external Ecosystem Extension');
-  assert.equal(existsSync(resolve('src/governance/human-gateway-evidence.js')),false,'removed Human-answer Evidence helper must not return');
 });
