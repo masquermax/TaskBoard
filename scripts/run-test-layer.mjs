@@ -22,6 +22,7 @@ const layers = Object.freeze({
     'tests/http.test.js',
     'tests/authority-http-acceptance.test.js',
     'tests/model-selection-api.test.js',
+    'tests/model-selection-ui.test.js',
     'tests/lifecycle-actions.test.js',
     'tests/extension-management-mode.test.js',
     'tests/extension-management-api.test.js',
