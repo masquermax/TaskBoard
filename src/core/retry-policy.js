@@ -93,7 +93,7 @@ export function suspendedInstruction(reason, message, failureCount) {
   const prefix = failureCount >= MAX_TOTAL_ATTEMPTS
     ? `${reason}，已连续执行失败 ${failureCount} 次，系统已停止自动重试。`
     : `${reason}，继续自动重试无法解决。`;
-  return `${prefix}\n${message}\n请处理上面的执行环境问题后，再点击右上角 ↻ 重试按钮。`;
+  return `${prefix}\n${message}\n请根据上面的错误处理对应问题后，再点击右上角 ↻ 重试按钮。`;
 }
 
 export function waitingRetryInstruction(reason, message, failureCount, delayMs) {

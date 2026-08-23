@@ -38,16 +38,20 @@ export function applyCertifiedDelta(state,decision,{triggerRefs=[],committedAt=n
   const base=normalizeCertifiedState(state),current=clone(base.current),candidate=normalizeAnalysisFields(decision),issues=[],delta={evidence:[],claims:[],gaps:[],gapResolutions:[],recommendations:[],steps:[]};
   mergeById(current.evidence,candidate.evidence,{kind:'evidence',issues,delta:delta.evidence,immutable:true});
   mergeById(current.claims,candidate.claims,{kind:'claim',issues,delta:delta.claims,requiresNewEvidence:true});
-  mergeById(current.gaps,candidate.gaps,{kind:'gap',issues,delta:delta.gaps,requiresNewEvidence:true});
 
-  const evidenceMap=byId(current.evidence),gapMap=byId(current.gaps);
+  // A valid closure is the semantic owner of an already-certified Gap in this turn.
+  // Structured model output can redundantly restate the same Gap while also emitting
+  // an evidence-backed gapResolution. Do not let that stale restatement defeat the
+  // stronger, independently validated closure fact.
+  const evidenceMap=byId(current.evidence),gapMap=byId(current.gaps),resolvedGapIds=new Set();
   for(const resolution of normalizeGapResolutions(decision?.gapResolutions)){
     const previous=gapMap.get(resolution.gapId);
     if(!previous){issues.push({code:'GAP_RESOLUTION_UNKNOWN',target:resolution.gapId,reason:`待闭合 Gap ${resolution.gapId} 不在当前认证状态中。`});continue;}
     if(!resolution.evidenceIds.length||resolution.evidenceIds.some(id=>!evidenceMap.has(id))){issues.push({code:'GAP_RESOLUTION_REQUIRES_EVIDENCE',target:resolution.gapId,reason:`闭合 Gap ${resolution.gapId} 必须引用当前认证状态中存在的证据。`});continue;}
     if(!resolution.evidenceIds.some(id=>evidenceMap.get(id)?.strength==='direct')){issues.push({code:'GAP_RESOLUTION_REQUIRES_DIRECT_EVIDENCE',target:resolution.gapId,reason:`闭合 Gap ${resolution.gapId} 至少需要一条 DIRECT Evidence；间接线索只能缩小不确定性，不能删除已认证 Gap。`});continue;}
-    const index=current.gaps.findIndex(item=>text(item?.id)===resolution.gapId);if(index>=0)current.gaps.splice(index,1);gapMap.delete(resolution.gapId);delta.gapResolutions.push(clone(resolution));
+    const index=current.gaps.findIndex(item=>text(item?.id)===resolution.gapId);if(index>=0)current.gaps.splice(index,1);gapMap.delete(resolution.gapId);resolvedGapIds.add(resolution.gapId);delta.gapResolutions.push(clone(resolution));
   }
+  mergeById(current.gaps,candidate.gaps.filter(item=>!resolvedGapIds.has(text(item?.id))),{kind:'gap',issues,delta:delta.gaps,requiresNewEvidence:true});
 
   current.recommendations=[];current.steps=[];
   const changed=Object.values(delta).some(items=>Array.isArray(items)&&items.length>0);if(!changed)return{state:base,current:base.current,delta,turnNode:null,issues};
