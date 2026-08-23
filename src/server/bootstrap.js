@@ -4,6 +4,7 @@ import { JsonTaskDatabase, JsonTaskRepository } from '../core/json-repository.js
 import { TaskService } from '../core/task-service.js';
 import { AttachmentStore } from '../core/attachment-store.js';
 import { ModelRouter } from '../core/model-router.js';
+import { ModelSelectionStore } from '../core/model-selection.js';
 import { RootRuntime } from '../core/root-runtime.js';
 import { SubagentRuntime } from '../core/subagent-runtime.js';
 import { ExecutorRuntimeAdapter } from '../core/executor-runtime.js';
@@ -79,20 +80,24 @@ export function bootstrap({
 
   const settingsStore=new RuntimeSettingsStore({file:resolve(rootDir,'data/settings.json')});
   const runtimeSettings=settingsStore.get();
+  const modelSelectionStore=new ModelSelectionStore({file:resolve(rootDir,'data/model-selection.json')});
   const governanceCompiler=new GovernanceCompiler({rootDir:packageRoot});
-  const modelRouter=new ModelRouter({capabilityProvider});
+  const modelRouter=new ModelRouter({capabilityProvider,modelSelection:modelSelectionStore});
 
   const validatorRuntime=new ValidatorRuntime();
   const taskContractFidelityVerifier=new TaskContractFidelityVerifier();
   const completionEvaluator=new CompletionEvaluator();
   const subagentRuntime=new SubagentRuntime({executor,modelRouter});
-  const currentLimits=()=>executionLimitsFromCapability(capabilityProvider?.snapshot?.()||null);
+  const currentCapability=()=>capabilityProvider?.snapshot?.()||null;
+  const currentLimits=()=>executionLimitsFromCapability(currentCapability());
   const rootRuntime=new RootRuntime({executor,modelRouter,subagentRuntime,governanceCompiler,validatorRuntime,taskContractFidelityVerifier,completionEvaluator,maxConcurrentSubagents:runtimeSettings.taskMaxSubagents,capabilityLimits:currentLimits});
   const scheduler=new Scheduler({repository,taskService,rootRuntime,maxConcurrentTasks:runtimeSettings.taskConcurrency,capabilityLimits:currentLimits});
-  const runtimeSettingsState=()=>resolveEffectiveRuntimeSettings(settingsStore.get(),capabilityProvider?.snapshot?.()||null);
+  const runtimeSettingsState=()=>resolveEffectiveRuntimeSettings(settingsStore.get(),currentCapability());
   const applyRuntimeSettings=next=>{const value=settingsStore.update(next);rootRuntime.setConcurrency?.(value.taskMaxSubagents);scheduler.setConcurrency?.(value.taskConcurrency);return runtimeSettingsState();};
+  const modelSelectionState=()=>modelSelectionStore.publicState(currentCapability());
+  const applyModelSelection=next=>modelSelectionStore.update(next,{capability:currentCapability()});
   const recovered=scheduler.recoverStaleRunningTasks();if(recovered)console.log(`[recovery] reconciled ${recovered} stale RUNNING task(s)`);
   const cleanup=new DailyCleanupController({repository,attachmentStore});
   if(startScheduler)scheduler.start();
-  return{database,repository,taskService,executor,extensionExecutor,capabilityProvider,extension,extensionLoadError,extensionRegistry:registry,continuation,continuationExtension,surfaceManager,governanceCompiler,validatorRuntime,rootRuntime,scheduler,cleanup,settingsStore,runtimeSettingsState,applyRuntimeSettings,storage:persistence.storage,storageFile:persistence.filename};
+  return{database,repository,taskService,executor,extensionExecutor,capabilityProvider,extension,extensionLoadError,extensionRegistry:registry,continuation,continuationExtension,surfaceManager,governanceCompiler,validatorRuntime,rootRuntime,scheduler,cleanup,settingsStore,runtimeSettingsState,applyRuntimeSettings,modelSelectionStore,modelSelectionState,applyModelSelection,storage:persistence.storage,storageFile:persistence.filename};
 }
