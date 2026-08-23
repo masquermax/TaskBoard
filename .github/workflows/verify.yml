@@ -6,6 +6,8 @@ on:
     branches:
       - main
       - v0.9.2
+  schedule:
+    - cron: '17 18 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -13,6 +15,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  layered:
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        layer: [module, functional]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Run ${{ matrix.layer }} tests
+        run: npm run test:${{ matrix.layer }}
+
+  coverage:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Measure full-suite coverage
+        run: npm run test:coverage
+
   verify:
     timeout-minutes: 10
     strategy:
@@ -29,7 +58,10 @@ jobs:
         run: npm run verify
 
   fresh-unpack:
-    needs: verify
+    needs:
+      - layered
+      - coverage
+      - verify
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
@@ -47,3 +79,29 @@ jobs:
           tar -xf /tmp/taskboard.tar -C /tmp/taskboard-unpack
           cd /tmp/taskboard-unpack
           npm run verify
+
+  test-complete:
+    if: always()
+    needs:
+      - layered
+      - coverage
+      - verify
+      - fresh-unpack
+    timeout-minutes: 2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert autonomous test suite completed successfully
+        shell: bash
+        run: |
+          echo "module/functional matrix: ${{ needs.layered.result }}"
+          echo "coverage gate: ${{ needs.coverage.result }}"
+          echo "full verify matrix: ${{ needs.verify.result }}"
+          echo "fresh unpack: ${{ needs.fresh-unpack.result }}"
+          if [[ "${{ needs.layered.result }}" != "success" || \
+                "${{ needs.coverage.result }}" != "success" || \
+                "${{ needs.verify.result }}" != "success" || \
+                "${{ needs.fresh-unpack.result }}" != "success" ]]; then
+            echo 'AUTONOMOUS_TEST_SUITE_INCOMPLETE'
+            exit 1
+          fi
+          echo 'AUTONOMOUS_TEST_SUITE_COMPLETE'
