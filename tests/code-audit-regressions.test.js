@@ -62,3 +62,10 @@ test('current Runtime contains no removed role/domain entry outside migration bo
   const forbidden=/SystemFilter|\bOUTSIDE\b|temporaryPath|taskMaxThreads|workerConcurrency|runLead|runWorker|LeadRuntime|WorkerRuntime|ExecutionAdapterPort|ownerLabel|ownerType|RESOURCE_WAIT|pendingSubagentValidation|reviewSubagent|resumeValidation|workerExecutionWindowMs|\bWorker\b|\bworker\b/;
   for(const file of files){if(allowed.has(file))continue;assert.doesNotMatch(readFileSync(resolve(file),'utf8'),forbidden,`legacy current-domain entry leaked into ${file}`);}
 });
+
+test('generic TaskBoard Core contains no concrete Codex-owned test lane',()=>{
+  const codexNamedTests=readdirSync(resolve('tests'),{withFileTypes:true})
+    .filter(entry=>entry.isFile()&&/codex/i.test(entry.name))
+    .map(entry=>entry.name);
+  assert.deepEqual(codexNamedTests,[],'concrete Codex behavior belongs in the external Ecosystem Extension');
+});
