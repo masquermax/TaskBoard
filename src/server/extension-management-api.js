@@ -1,27 +1,12 @@
 import { URL } from 'node:url';
 import { json, readJson } from './http.js';
 
-const CLIENT_ERRORS = new Set([
-  'EXTENSION_IMPORT_DIRECTORY_REQUIRED',
-  'EXTENSION_IMPORT_DIRECTORY_NOT_FOUND',
-  'EXTENSION_IMPORT_DIRECTORY_NOT_DIRECTORY',
-  'EXTENSION_IMPORT_MANIFEST_REQUIRED',
-  'EXTENSION_IMPORT_MANIFEST_INVALID',
-  'EXTENSION_IMPORT_ID_INVALID',
-  'EXTENSION_IMPORT_ENTRY_REQUIRED',
-  'EXTENSION_IMPORT_ENTRY_OUTSIDE_DIRECTORY',
-  'EXTENSION_IMPORT_ENTRY_NOT_FOUND',
-  'EXTENSION_IMPORT_DIRECTORY_EXISTS',
-  'EXTENSION_API_VERSION_REQUIRED',
-]);
-
-function statusFor(message) {
-  if (CLIENT_ERRORS.has(message) || String(message).startsWith('EXTENSION_API_VERSION_UNSUPPORTED:') || String(message).startsWith('EXTENSION_IMPORT_ID_EXISTS:')) return 400;
-  if (message === 'EXTENSION_NOT_IMPORTED' || message === 'EXTENSION_NOT_FOUND') return 404;
+function hostStatus(message) {
+  if (/^EXTENSION_IMPORT_|^EXTENSION_API_VERSION_REQUIRED$|^EXTENSION_API_VERSION_UNSUPPORTED:/.test(message)) return 400;
+  if (message === 'EXTENSION_NOT_IMPORTED') return 404;
   if (message === 'EXTENSION_RESTART_REQUIRED' || message === 'EXTENSION_LOAD_FAILED') return 409;
   if (message === 'EXTENSION_CONNECTION_UNAVAILABLE' || message === 'EXTENSION_CONNECTION_DISCOVERY_UNAVAILABLE') return 503;
-  if (String(message).startsWith('EXECUTOR_CONNECTION_')) return 400;
-  return 500;
+  return null;
 }
 
 function publicExtension(extension) {
@@ -35,12 +20,28 @@ function publicExtension(extension) {
 }
 
 function connectionPayload(extension) {
-  const settings = extension?.connectionSettings || null;
+  const settings = extension.connectionSettings;
   return {
     extension: publicExtension(extension),
-    presentation: settings?.describe?.() || null,
-    connection: settings?.getPublic?.() || {},
+    presentation: settings.describe(),
+    connection: settings.getPublic(),
   };
+}
+
+function requireConnectionSettings(extension) {
+  const settings = extension?.connectionSettings;
+  if (!settings) throw new Error('EXTENSION_CONNECTION_UNAVAILABLE');
+  return settings;
+}
+
+function requireUiAction(req) {
+  if (req.headers['x-taskboard-action'] !== 'ui') throw new Error('FORBIDDEN');
+}
+
+function writeError(res, error, { extensionOperation = false } = {}) {
+  const message = error?.message || 'EXTENSION_MANAGEMENT_FAILED';
+  if (message === 'FORBIDDEN') return json(res, 403, { error: message });
+  json(res, hostStatus(message) ?? (extensionOperation ? 422 : 500), { error: message });
 }
 
 export function createExtensionManagementHandler({
@@ -52,107 +53,85 @@ export function createExtensionManagementHandler({
   taskboardUrl,
 } = {}) {
   const instances = new Map();
-  const loadedIds = () => Array.isArray(loadState.loadedIds) ? loadState.loadedIds : [];
-  const loadErrors = () => loadState.loadErrors || {};
 
   function state() {
-    return store.publicState({ loadedIds: loadedIds(), loadErrors: loadErrors() });
+    return store.publicState({
+      loadedIds: Array.isArray(loadState.loadedIds) ? loadState.loadedIds : [],
+      loadErrors: loadState.loadErrors || {},
+    });
   }
 
-  function imported(id) {
-    return store.entries().find(item => item.id === id) || null;
+  function extensionState(id) {
+    return state().extensions.find(item => item.id === id) || null;
   }
 
   function extensionFor(id) {
     if (activeExtension?.id === id) return activeExtension;
     if (instances.has(id)) return instances.get(id);
-    const item = imported(id);
+
+    const item = extensionState(id);
     if (!item) throw new Error('EXTENSION_NOT_IMPORTED');
-    if (loadErrors()[id]) throw new Error('EXTENSION_LOAD_FAILED');
-    if (!registry?.has?.(id)) throw new Error('EXTENSION_RESTART_REQUIRED');
+    if (item.status === 'load-failed') throw new Error('EXTENSION_LOAD_FAILED');
+    if (item.status !== 'loaded') throw new Error('EXTENSION_RESTART_REQUIRED');
+
     const extension = registry.create(id, { rootDir, taskboardUrl });
     instances.set(id, extension);
     return extension;
   }
 
+  async function handleConnection(req, res, id, discover = false) {
+    try {
+      const extension = extensionFor(id);
+      const settings = requireConnectionSettings(extension);
+
+      if (discover) {
+        if (req.method !== 'POST') { json(res, 405, { error: 'METHOD_NOT_ALLOWED' }); return; }
+        requireUiAction(req);
+        if (typeof settings.discover !== 'function') throw new Error('EXTENSION_CONNECTION_DISCOVERY_UNAVAILABLE');
+        const discovery = await settings.discover(await readJson(req));
+        json(res, 200, { ...connectionPayload(extension), discovery: discovery || null });
+        return;
+      }
+
+      if (req.method === 'GET') { json(res, 200, connectionPayload(extension)); return; }
+      if (req.method !== 'PUT') { json(res, 405, { error: 'METHOD_NOT_ALLOWED' }); return; }
+      requireUiAction(req);
+      await settings.update(await readJson(req));
+      json(res, 200, connectionPayload(extension));
+    } catch (error) {
+      writeError(res, error, { extensionOperation: true });
+    }
+  }
+
   async function handler(req, res) {
     const url = new URL(req.url, 'http://localhost');
+
     if (url.pathname === '/api/extensions' && req.method === 'GET') {
       json(res, 200, state());
       return true;
     }
+
     if (url.pathname === '/api/extensions/import' && req.method === 'POST') {
-      if (req.headers['x-taskboard-action'] !== 'ui') { json(res, 403, { error: 'FORBIDDEN' }); return true; }
       try {
-        const body = await readJson(req);
-        const extension = store.importDirectory(body?.directory);
+        requireUiAction(req);
+        const extension = store.importDirectory((await readJson(req))?.directory);
         json(res, 201, { extension: { ...extension, status: 'pending-restart' }, registry: state(), restartRequired: true });
       } catch (error) {
-        const message = error?.message || 'EXTENSION_IMPORT_FAILED';
-        json(res, statusFor(message), { error: message });
+        writeError(res, error);
       }
       return true;
     }
 
-    const discoverMatch = url.pathname.match(/^\/api\/extensions\/([^/]+)\/connection\/discover$/);
-    if (discoverMatch) {
-      const id = decodeURIComponent(discoverMatch[1]);
-      try {
-        const extension = extensionFor(id);
-        const settings = extension?.connectionSettings || null;
-        if (!settings?.describe || !settings?.getPublic || !settings?.update) {
-          json(res, 503, { error: 'EXTENSION_CONNECTION_UNAVAILABLE' });
-          return true;
-        }
-        if (req.method !== 'POST') {
-          json(res, 405, { error: 'METHOD_NOT_ALLOWED' });
-          return true;
-        }
-        if (req.headers['x-taskboard-action'] !== 'ui') {
-          json(res, 403, { error: 'FORBIDDEN' });
-          return true;
-        }
-        if (typeof settings.discover !== 'function') {
-          json(res, 503, { error: 'EXTENSION_CONNECTION_DISCOVERY_UNAVAILABLE' });
-          return true;
-        }
-        const discovery = await settings.discover(await readJson(req));
-        json(res, 200, { ...connectionPayload(extension), discovery: discovery || null });
-        return true;
-      } catch (error) {
-        const message = error?.message || 'EXTENSION_CONNECTION_DISCOVERY_FAILED';
-        json(res, statusFor(message), { error: message });
-        return true;
-      }
+    const discover = url.pathname.match(/^\/api\/extensions\/([^/]+)\/connection\/discover$/);
+    if (discover) {
+      await handleConnection(req, res, decodeURIComponent(discover[1]), true);
+      return true;
     }
 
-    const match = url.pathname.match(/^\/api\/extensions\/([^/]+)\/connection$/);
-    if (!match) return false;
-    const id = decodeURIComponent(match[1]);
-    try {
-      const extension = extensionFor(id);
-      const settings = extension?.connectionSettings || null;
-      if (!settings?.describe || !settings?.getPublic || !settings?.update) {
-        json(res, 503, { error: 'EXTENSION_CONNECTION_UNAVAILABLE' });
-        return true;
-      }
-      if (req.method === 'GET') {
-        json(res, 200, connectionPayload(extension));
-        return true;
-      }
-      if (req.method === 'PUT') {
-        if (req.headers['x-taskboard-action'] !== 'ui') { json(res, 403, { error: 'FORBIDDEN' }); return true; }
-        await settings.update(await readJson(req));
-        json(res, 200, connectionPayload(extension));
-        return true;
-      }
-      json(res, 405, { error: 'METHOD_NOT_ALLOWED' });
-      return true;
-    } catch (error) {
-      const message = error?.message || 'EXTENSION_MANAGEMENT_FAILED';
-      json(res, statusFor(message), { error: message });
-      return true;
-    }
+    const connection = url.pathname.match(/^\/api\/extensions\/([^/]+)\/connection$/);
+    if (!connection) return false;
+    await handleConnection(req, res, decodeURIComponent(connection[1]));
+    return true;
   }
 
   handler.close = () => {
