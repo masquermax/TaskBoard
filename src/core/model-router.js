@@ -5,6 +5,7 @@ function taskComplexity(task){const instruction=String(task?.instruction||''),ti
 function isRetrievalAnalysis(task){const value=`${task?.title||''}\n${task?.instruction||''}`,hasSourceContext=(Array.isArray(task?.attachments)&&task.attachments.length>0)||(Array.isArray(task?.projectScopes)&&task.projectScopes.length>0),asksAnalysis=/分析|核对|审查|根据附件|根据项目|需求|查找|定位|review|analy[sz]e|inspect/i.test(value),asksDeepDesign=/架构设计|重构|迁移|安全审计|性能优化|并发设计|端到端重构|architecture design|migration|security audit/i.test(value);return hasSourceContext&&asksAnalysis&&!asksDeepDesign;}
 function configuredModel(snapshot){const value=String(snapshot?.defaults?.model||'').trim();return value||null;}
 function supportsExplicitModelSelection(snapshot){const selection=snapshot?.modelSelection;return selection?.explicitPerTurn===true&&Number.isInteger(selection?.maxPerTurn)&&selection.maxPerTurn>=1;}
+function selectedPreference(modelSelection,snapshot){const value=modelSelection?.get?.(snapshot);return value?.mode==='specific'&&value?.model?{mode:'specific',model:String(value.model)}:{mode:'auto',model:null};}
 function taskContext(task){const cwd=(task?.projectScopes||[]).map(scope=>scope?.path).find(Boolean)||null;return cwd?{cwd}:null;}
 function workText(work){return[work?.title,work?.goal,work?.expectedOutput,work?.stopCondition].map(value=>String(value||'').trim()).filter(Boolean).join('\n');}
 function isFiniteReadOnlyWork(work){return Boolean(work&&String(work?.projectAccess||'none').toLowerCase()==='read'&&String(work?.goal||'').trim()&&String(work?.expectedOutput||'').trim()&&String(work?.stopCondition||'').trim());}
@@ -18,18 +19,28 @@ function priorityValue(model){const value=Number(model?.priority);return Number.
 function chooseModelForTier(models,requiredTier,configured){const available=(Array.isArray(models)?models:[]).filter(model=>model?.id&&!model.hidden),tiered=available.map(model=>({model,tier:inferredModelTier(model)})).filter(item=>item.tier),acceptable=requiredTier==='efficient'?['efficient','balanced','frontier']:requiredTier==='balanced'?['balanced','frontier']:['frontier'];for(const tier of acceptable){const matches=tiered.filter(item=>item.tier===tier).map(item=>item.model).sort((a,b)=>{const configuredDelta=(a.id===configured?0:1)-(b.id===configured?0:1);return configuredDelta||priorityValue(a)-priorityValue(b)||String(a.id).localeCompare(String(b.id));});if(matches.length)return{model:matches[0],tier};}return null;}
 
 export class ModelRouter{
-  constructor({capabilityProvider=null}={}){this.capabilityProvider=capabilityProvider;this.prepared=new Map();}
+  constructor({capabilityProvider=null,modelSelection=null}={}){this.capabilityProvider=capabilityProvider;this.modelSelection=modelSelection;this.prepared=new Map();}
   release(taskId){if(taskId)this.prepared.delete(taskId);}
   async prepare({role,task}={}){
     if(!this.capabilityProvider?.discover)return null;
     // Only a selected Subagent Project scope may influence cwd-sensitive capability discovery.
     // Root owns judgment, not Project execution, so Root discovery receives no local Project path.
     const context=role==='subagent'?taskContext(task):null;
-    let snapshot=null;try{snapshot=await this.capabilityProvider.discover(context?{context}:{});}catch{snapshot=this.capabilityProvider.snapshot?.()||null;}if(task?.id)this.prepared.set(task.id,snapshot);return snapshot;
+    let snapshot=null;try{snapshot=await this.capabilityProvider.discover(context?{context}:{});}catch{snapshot=this.capabilityProvider.snapshot?.()||null;}
+    this.modelSelection?.reconcile?.(snapshot);
+    if(task?.id)this.prepared.set(task.id,snapshot);return snapshot;
   }
   route({role,task,work=null}){
     if(!['root','subagent'].includes(role)){const error=new Error(`MODEL_ROUTE_ROLE_INVALID:${String(role||'missing')}`);error.nonRetryable=true;throw error;}
-    const snapshot=(task?.id&&this.prepared.get(task.id))||this.capabilityProvider?.snapshot?.()||null,configured=configuredModel(snapshot),requiredTier=requiredModelTier(role,task,work),policy={quality:requiredTier==='frontier'?'quality':'balanced',model:null,configuredDefaultModel:configured,reasoningEffort:null,capabilityLevel:snapshot?.discoveryLevel||'basic',routeReason:'executor-default'};
+    const snapshot=(task?.id&&this.prepared.get(task.id))||this.capabilityProvider?.snapshot?.()||null,configured=configuredModel(snapshot),preference=selectedPreference(this.modelSelection,snapshot),requiredTier=requiredModelTier(role,task,work),policy={quality:requiredTier==='frontier'?'quality':'balanced',model:null,configuredDefaultModel:configured,reasoningEffort:null,capabilityLevel:snapshot?.discoveryLevel||'basic',selectionMode:preference.mode,routeReason:'executor-default'};
+    if(preference.mode==='specific'){
+      if(snapshot?.routingSafe===false||!supportsExplicitModelSelection(snapshot)){const error=new Error('MODEL_SELECTION_EXPLICIT_UNSUPPORTED');error.nonRetryable=true;throw error;}
+      const selectedModel=(snapshot?.models||[]).find(model=>model?.id===preference.model&&!model.hidden);
+      if(!selectedModel){const error=new Error('MODEL_SELECTION_MODEL_UNAVAILABLE');error.nonRetryable=true;throw error;}
+      policy.model=selectedModel.id;policy.routeReason='user-selected-model';
+      const efforts=Array.isArray(selectedModel.reasoningEfforts)?selectedModel.reasoningEfforts:[],targetBand=requiredReasoningBand(role,task,work),chosen=chooseMinimumSufficientEffort(efforts,targetBand);if(chosen)policy.reasoningEffort=chosen;
+      return policy;
+    }
     if(snapshot?.routingSafe===false||!supportsExplicitModelSelection(snapshot))return policy;
     if(configured){policy.model=configured;policy.routeReason='configured-model';}
     const selection=chooseModelForTier(snapshot?.models,requiredTier,configured),selectedModel=selection?.model||(snapshot?.models||[]).find(model=>model.id===configured)||null;if(!selectedModel)return policy;policy.model=selectedModel.id;
