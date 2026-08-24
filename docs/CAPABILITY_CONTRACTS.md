@@ -1,244 +1,220 @@
-# Role Guides / Capability Documentation v2
+# Role Guides / Capability Documentation
 
 Status: ACTIVE — NON-AUTHORITATIVE ROLE GUIDE
 
-本文件是角色职责的人类可读说明与 Prompt 投影，不是 Runtime Authority 数据源。静态角色能力事实只来自 `src/governance/role-capability-contract.js`；Task-specific Authority 只来自 governed `TaskContract`；只有 `GovernanceCompiler` 可以把 Task facts、RoleCapabilityContract、Work Unit request、selected scope 与 policy 收窄成 `AuthorizedGrant`。Executor 只执行该 Grant 并报告 Runtime availability，不从本文件、Task wording、`taskMode` 或默认 sandbox 补权。
-
-下列 `Owns` / `Capabilities` 用于解释位置职责；它们不能独立扩大机器 Contract 或 `AuthorizedGrant`。遇到自身职责之外的问题，按 `Handoff` 交回有权位置。
+这里只描述当前角色边界。机器 Authority 来自 `RoleCapabilityContract + TaskContract + GovernanceCompiler -> AuthorizedGrant`；本文档不进入 Runtime 数据面。
 
 ## SCHEDULER
 
-Identity: Task lifecycle authority.
+Identity:
+- Task lifecycle authority.
 
-Purpose: 根据真实执行资源与已提交事实维护 Task 生命周期。
+Purpose:
+- 让 Task 开始、等待、恢复、结束，并控制 Task 级并发。
 
 Owns:
-- Task admission 与 READY / RUNNING / WAITING_HUMAN / COMPLETED 生命周期迁移。
-- 取消、锁定、逻辑删除等 Task 生命周期裁决。
-- Task 级并发上限与 Root admission。
+- Task lifecycle / admission。
 
 Capabilities:
-- 读取 Task Core 当前事实与 Root Runtime quiescence / execution claim。
-- 请求 Root 开始、停止、恢复执行。
-- 在满足真实边界后提交生命周期变更。
+- 读取 Runtime 是否真正执行或静止，并提交合法生命周期迁移。
 
 Produces:
-- Task lifecycle decision。
-- Scheduler activity state。
+- Task lifecycle state。
 
 Handoff:
-- Task 如何分析、拆分或继续 → Root。
-- 业务结果是否成立 → Validator。
-- 具体持久化实现 → Task Core 的 JSON Repository。
+- 判断与拆分 → Root；执行 → Subagent；持久化 → Task Core。
 
 ## ROOT
 
-Identity: Task-level reasoning and organization authority.
+Identity:
+- The Task brain and sole Task-level judgment owner.
 
-Purpose: 持续掌握一个 Task，决定下一步需要什么工作，并把经过认证的局部结果综合成 Task 级结果。
+Purpose:
+- 用当前最小充分信息持续推进目标。
 
 Owns:
-- Task 目标理解与执行规划。
-- Work Unit 创建、依赖关系、优先顺序、Task Input 选择与能力请求。
-- 是否 Delegate，以及为 Work Unit 选择 Skill。
-- 已认证局部结果的综合、阶段判断、Gap 收敛与最终 Task Result 候选。
-- 是否存在真正需要用户拥有信息的 blocker 候选。
+- 是否拆分、如何拆分、结果意味着什么、是否足够、下一步、Claim / Gap / completion judgment / Human Gateway intent。
 
 Capabilities:
-- 读取 Task Baseline、Task Input Catalog 的逻辑引用、Current Certified State、新 Subagent Result 与触发当前 Turn 的 Human answer；不取得 Project Scope 文件系统路径、附件本地路径或网络能力。
-- 创建有限 Work Unit 并显式声明 `inputRefs`、`projectAccess=none|read|write` 与 `networkAccess`；Root 自己的控制/综合 Turn 不继承这些执行能力。
-- 根据新发现调整计划；普通 Root Turn 必须由 Task 启动、新 Work Unit Result、已解决 Human Gateway 或技术恢复触发，Current Certified State 本身不产生新的 Root Turn。
-- 当 Current Certified State 存在标记为 `blocking` 的 Gap 时，Root 必须把不安全的完成/收敛视为阻塞；若仍需系统可获得的证据，可以创建独立满足 Work Unit Contract 与 `AuthorizedGrant` 的有限 evidence-acquisition Work Unit。该 Work Unit 只能返回证据/局部发现，不能自行关闭 Gap；若剩余信息或决定确属用户拥有或系统不可获得，Root 再为该 Gap 提交 Human Gateway intent。
-- 每次 Root 决策都把本轮形成/更新的 Task 级 Claims/Gaps 作为 Root Result candidate 提交 Validator；History 是否形成不由 Root 决定。
+- 只读取当前判断所需的 Task input catalog、Claims/Gaps、未满足 obligations、当前 Work Unit 结果和当前 Human trigger。
+- 只创建填补当前必要缺口的最小 Work Unit；互不依赖的工作一次并行给出。
+- Work Unit 返回后由 Root 判断正确性、充分性与 Task 级含义；Subagent 不替 Root 判断。
+- `CONFIRMED` 只依赖 DIRECT 来源；推断保持 `SUPPORTED`；未知保持 Gap。
+- 完成某个 governed obligation 时，由 Root 在 CONFIRMED Claim 的 `obligationRefs[]` 中显式建立关系。
+- 跨边界只输出新判断与下一动作，不重放旧过程。
 
 Produces:
-- Work Unit。
-- Root Result candidate。
-- Human Gateway intent candidate。
+- Minimal Work Units。
+- Task-level judgment delta。
+- Next control action。
 
 Handoff:
-- 有限 delegated execution → Subagent。
-- 某类工作的成熟做法 → Skill。
-- 结果认证 → Validator。
-- Task 生命周期 → Scheduler。
-- 状态/History 持久化 → Task Core。
+- 执行 → Subagent；来源核对 → Validator；生命周期 → Scheduler；durable state → Task Core。
 
 ## WORK_UNIT
 
-Identity: A bounded work order created by Root; not an authority role.
+Identity:
+- A bounded execution order, not an authority role.
 
-Purpose: 把 Root 当前需要解决的一个具体问题表达成有限、可执行、可停止的工作。
+Purpose:
+- 把 Root 已决定的一小件工作完整传给 Subagent。
 
 Owns:
-- Root 已决定的当前工作边界之结构化表达与完整传递。
+- 当前执行边界的结构化表达。
 
 Capabilities:
-- 必须显式描述 `goal`、`expectedOutput`、`stopCondition`、`projectAccess`（`none` / `read` / `write`）、`networkAccess`、`inputRefs`、`dependsOn` 与可选 `skillId`。
-- 通过 `inputRefs` 携带完成本工作所需的最小 Task 输入，并通过 `dependsOn` 接收前置结果。
-- 未声明能力按最小权限处理：缺失/无效 Project 能力为 `none`，网络为关闭；Runtime 不补权。
+- 明确 `goal / expectedOutput / stopCondition / inputRefs / dependsOn / projectAccess / networkAccess`；未声明能力视为不存在。
 
 Produces:
-- 一个 delegated execution 的工作边界；当前 first-class executor 为 Subagent。
+- One bounded executable order。
 
 Handoff:
-- 新发现但超出当前 Work Unit 的问题 → Root。
-- 当前问题无法在现有证据/能力下闭合 → Result 中返回 Blocker / Discovery 给 Root，由 Root 判断是否形成 Task Gap 或新 Work Unit。
+- 执行结果或 blocker → Root。
 
 ## SUBAGENT
 
-Identity: Short-lived executor of one delegated Work Unit.
+Identity:
+- The hands: executor of exactly one Work Unit.
 
-Purpose: 在给定 Work Unit 边界内使用指定 Skill/Tool 完成具体工作，并尽快把结果交回。
+Purpose:
+- 指哪打哪，达到 Work Unit 停止条件立即返回。
 
 Owns:
-- 当前 Work Unit 的具体执行过程。
+- 当前 Work Unit 的实际执行。
 
 Capabilities:
-- 只读取 Work Unit 通过 `inputRefs` 明确选择的 Task 输入与依赖结果；未选择的 Task 输入不进入该 Subagent 的 Task Context。
-- `projectAccess` 是 Work Unit request，不是授权事实；最终 Project 能力只取 `AuthorizedGrant`。所选 Project 可被收窄到 `none` / `read` / `write`，其中 `write` 必须同时满足 machine Role capability、governed TaskContract authority、Work Unit request 与 selected Project scope。
-- `networkAccess=true` 只表示 Work Unit 请求网络；Executor 仍可基于实际环境继续削减，未声明时网络关闭。
-- 临时产物只写 TaskBoard-managed scratch；能力未声明时 Runtime fail-closed，不从 Task 或 Executor 默认值补权。
-- 返回 source-near Evidence、局部 Finding、blocker 与超范围 Discovery；Finding 只表达当前 Work Unit 内由证据支持的局部发现，不定义 Task 级 Claim / Gap / Recommendation。
-- 达到 stopCondition 后结束本次执行；Codex Executor 还以软收敛 steer + 最终 interrupt 的技术租约落实有限执行，租约只负责停止边界，不替代业务完成判断。
-- 当 Root 已形成经过认证的 Task 收敛决定时，可响应 Runtime 的停止请求结束仍在进行且无副作用的只读调查；写入型 Work Unit 不因这种收敛被强行中断。
+- 只使用 Work Unit 选中的输入和 AuthorizedGrant。
+- 只返回 `result + source-near Evidence + optional blocker`。
+- 不生成 Task Claim、Gap、Recommendation、confidence、uncertainty、Discovery、下一任务、完成判断或 Human Gateway。
 
 Produces:
-- Work Unit Result（Evidence + local Findings）。
-- Discovery / Blocker。
+- Work Unit execution result / source locator / blocker。
 
 Handoff:
-- Task 级事实判断、Gap、Recommendation、下一步与完成判断 → Root。
-- 新工作、扩大 Scope、下一阶段或更多 Agent → Root。
-- 用户信息 → Root；Subagent 不直接进入 Human Gateway。
+- 所有判断与后续动作 → Root。
 
 ## VALIDATOR
 
-Identity: Peer certification authority for Task-level candidate knowledge.
+Identity:
+- The accountant: deterministic source/provenance checker.
 
-Purpose: 判断 Root Candidate Delta 是否可被当前证据与 Contract 正式支持，并把越界部分收敛到证据真正支持的范围或明确 Gap。
+Purpose:
+- 只核 Root 引用的凭证是否真实且引用关系成立。
 
 Owns:
-- Root Result / Candidate Delta 是否可成为正式 Task 结论。
-- 已认证 Root Result 是否形成新的、有未来价值的 History 边界。
+- Source/provenance ledger correctness。
 
 Capabilities:
-- 核对 Root Candidate Delta 使用的可追溯原始证据地址与结构关系。
-- 对可确定问题执行确定性认证。
-- 在确实无法机械认证且存在可直接提供的精确原始语义输入时，仅检查当前具体 proof obligation；不得重新规划、浏览 Project Scope 或重新调查 Task。
-- 首次不通过时把局部认证反馈交回 Root；仍无法成立时保留可认证内容并形成明确 Gap。
+- 来源真实且 DIRECT observation 与 locator 对应 → 保留 DIRECT。
+- 来源真实但不能机械核对 → 只能 INDIRECT。
+- Referenced completed Result 只能证明“这个历史 Result 的确这样写过”；原始来源链不会随引用自动继承，因此始终只作为 INDIRECT。
+- 来源不存在、伪造、locator/observation 不匹配 → 拒绝。
+- Claim/Gap/Step 引用不存在的凭证 → 拒绝。
+- CONFIRMED 依赖 INDIRECT → 拒绝可信度升级。
+- 不重新调查、不解释业务、不修 Root 结论、不决定 Gap 是否应该存在，也不调用模型。
 
 Produces:
-- Certified Result / Narrowed Result / Gap。
-- History commit decision。
+- Accepted / downgraded / rejected ledger result。
 
 Handoff:
-- 需要重新调查、重新规划或创建 Work Unit → Root。
-- 原子持久化 → Task Core。
-- Task 生命周期 → Scheduler。
+- 证据意味着什么、是否继续、Gap 是否闭合 → Root；durable state → Task Core。
 
 ## TASK_CORE
 
-Identity: Business-state source of truth and persistence executor.
+Identity:
+- Durable business-state source of truth.
 
-Purpose: 以原子方式保存 TaskBoard 已授权的业务事实。
+Purpose:
+- 原子保存跨执行必须继续存在的事实。
 
 Owns:
-- Task、Project List、附件引用、Human Gateway、正式结果、History、引用关系等 durable facts 的一致性。
-- 已完成数据在固定 retention policy 下的持久化清理一致性；清理策略本身由 Constitution/ADR/Specification 决定，不由 Task Core 临时发明。
+- Task / Project / attachment refs / Gateway / Certified State / Result persistence。
 
 Capabilities:
-- 校验写入前置条件与不可变边界。
-- 创建/读取 Task、Project List、附件元数据与引用等 durable facts。
-- 原子写入/读取 Repository。
-- 按固定 retention predicate 清理 eligible COMPLETED 数据，并保持数据库/附件的一致性与失败回滚。
-- 在写入成功后暴露新的 durable state。
+- 校验写入前置条件并原子提交；不保存可由当前状态重建的认知过程噪音。
 
 Produces:
-- Durable Task state / History / Result。
+- Durable Task state。
 
 Handoff:
-- 生命周期决定 → Scheduler。
-- 业务分析与规划 → Root。
-- 结果是否正确 → Validator。
+- 判断与规划 → Root；生命周期 → Scheduler。
 
 ## HUMAN_GATEWAY
 
-Identity: Thin transport between human-owned information and Task execution.
+Identity:
+- Thin human-owned information transport.
 
-Purpose: 只在系统无法自行获得且确实影响继续执行时传递问题与回答。
+Purpose:
+- 只传递确实由人拥有且阻塞推进的问题与回答。
 
 Owns:
-- 人类问题与回答的传递完整性。
+- 问题与回答的传输完整性。
 
 Capabilities:
-- 展示 Scheduler 已授权且绑定到一个当前认证 blocking Gap 的问题；Gateway question 必须保持该 Gap 的认证问题语义。
-- 保存用户回答及系统验证出的 Gateway/Gap provenance 并交回 Task Core；普通 Root context 只接收触发当前 Turn 的回答，不自动重放全部历史问答。
+- 问题绑定当前 blocking Gap；回答作为当前 Human trigger 交给 Root，不自动生成 Evidence 或 Gap resolution。
 
 Produces:
-- Human answer fact。
+- Human answer trigger。
 
 Handoff:
-- 是否需要询问用户 → Root candidate + Scheduler lifecycle decision。
-- 回答如何影响 Task → Root。
+- 回答的含义与是否足够 → Root。
 
 ## SKILL
 
-Identity: User-owned reusable method asset supplied through a Skill library.
+Identity:
+- Reusable execution method asset.
 
-Purpose: 把“某类工作怎么做”的成熟经验作为独立方法资产供具体 Work Unit 复用。
+Purpose:
+- 给 Work Unit 提供方法，不成为 Authority。
 
 Owns:
-- 某类工作的可复用方法定义。
+- 可复用 Method 与适用边界。
 
 Capabilities:
-- 声明适用工作、Method、方法 Contract、Capability Requirements 与 Stop Condition。
-- 被 Skill library 发现，并在 Root 选择后作为当前 Work Unit 的方法上下文提供给执行者。
+- 只作为 Root 选定后的 Subagent 方法上下文。
 
 Produces:
 - Method context。
 
 Handoff:
-- 何时使用哪个 Skill → Root。
-- 具体 Work Unit 执行 → Subagent / assigned executor。
-- 结果认证 → Validator。
+- 是否使用 → Root；执行 → Subagent。
 
 ## EXECUTOR
 
-Identity: Operational capability surface.
+Identity:
+- Operational capability surface.
 
-Purpose: 执行文件读取、搜索、命令、模型 Turn、外部适配等明确操作。
+Purpose:
+- 在明确 Grant 内执行模型、文件、命令或外部操作。
 
 Owns:
-- 自身操作协议、能力声明与单次操作执行。
+- 单次操作协议与实际可用性。
 
 Capabilities:
-- 暴露明确、可审计的操作能力与当前可用性。
-- 在授权 Scope 内执行请求并返回结果。
+- 只实现 AuthorizedGrant；不能从 Task wording、Prompt 或默认环境补权。
 
 Produces:
-- Executor operation result。
+- Operation result / runtime availability。
 
 Handoff:
-- 为什么做、是否继续做 → 调用 Executor 的当前 Owner（Root / Subagent / Validator）。
-- 结果是否构成正式事实 → Validator。
-- Task 生命周期 → Scheduler。
+- 为什么调用、调用后怎么办 → 当前 Owner。
 
 ## UI_SURFACE
 
-Identity: User-facing display and intent surface.
+Identity:
+- User-facing projection and intent surface.
 
-Purpose: 展示 TaskBoard 真实状态并收集用户意图。
+Purpose:
+- 如实显示 Task/Core/Scheduler/Runtime 状态并收集用户意图。
 
 Owns:
-- 视觉呈现与用户输入交互；不拥有 Task 业务状态。
+- 展示与交互，不拥有业务真相。
 
 Capabilities:
-- 读取 Task/Core/Scheduler 暴露的状态。
-- 提交 create / retry / cancel / answer / configuration 等用户意图。
+- 不把 Work Unit retry/failure 冒充 Task 起点或完成事实；不从视觉状态自行推导 Runtime 真相。
 
 Produces:
-- User intent。
+- User-visible projection / user intent。
 
 Handoff:
-- 生命周期意图 → Scheduler / Task Core API。
-- Human Gateway answer → Human Gateway / Task Core。
+- 生命周期意图 → Scheduler / Task Core；Human answer → Human Gateway。
