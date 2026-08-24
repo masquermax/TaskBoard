@@ -21,8 +21,8 @@ function analysisState(){
 function decision(kind='complete',overrides={}){
   return{kind,summary:'bounded control',finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[],effectClosures:[],...overrides};
 }
-function unsupportedClaimDecision(){
-  return decision('complete',{claims:[{id:'C-001',statement:'unsupported claim',level:'confirmed',evidenceIds:[],scope:'general',coverage:'component',hops:[],obligationRefs:[]}]});
+function unsupportedClaimDecision(id='C-001',statement='unsupported claim'){
+  return decision('complete',{claims:[{id,statement,level:'confirmed',evidenceIds:[],scope:'general',coverage:'component',hops:[],obligationRefs:[]}]});
 }
 
 test('a valid DIRECT gap resolution wins over a redundant same-turn restatement of that gap',()=>{
@@ -35,6 +35,18 @@ test('a valid DIRECT gap resolution wins over a redundant same-turn restatement 
   assert.deepEqual(next.issues,[]);
   assert.equal(next.current.gaps.some(item=>item.id==='G-001'),false);
   assert.deepEqual(next.delta.gapResolutions.map(item=>item.gapId),['G-001']);
+});
+
+test('Validator preflights a Certified Gap revision instead of letting it fail after Validator pass',()=>{
+  const validator=new ValidatorRuntime();
+  const reviewed=validator.reviewRoot({
+    task:{id:'T-PREFLIGHT',instruction:'bounded',projectScopes:[]},
+    currentState:analysisState(),
+    availableEvidence:[],
+    decision:decision('complete',{gaps:[gap({reason:'Reworded without any new Evidence.'})]}),
+  });
+  assert.equal(reviewed.outcome,'reject');
+  assert.equal(reviewed.feedback.some(item=>item.action==='GAP_REVISION_REQUIRES_NEW_EVIDENCE'),true);
 });
 
 test('the same deterministic Validator rejection gets one repair turn but cannot consume an unbounded series of Root turns',async()=>{
@@ -50,6 +62,26 @@ test('the same deterministic Validator rejection gets one repair turn but cannot
   const modelRouter={async prepare(){},route(){return{};},release(){}};
   const runtime=new RootRuntime({executor,modelRouter,subagentRuntime:{},validatorRuntime:new ValidatorRuntime()});
   const task={id:'T-CONVERGE',title:'convergence',instruction:'bounded',ready_reason:'NEW',projectScopes:[],attachments:[],references:[],taskContract:{obligations:[]},analysisState:null,workReceipts:[]};
+
+  await assert.rejects(runtime.execute(task),/VALIDATOR_REJECTION_NON_CONVERGENCE/);
+  assert.equal(rootCalls,2);
+});
+
+test('a changed Validator rejection still cannot spend a third Root turn at the same Certified State and Evidence boundary',async()=>{
+  let rootCalls=0;
+  const executor={
+    async runRoot({onExecutionStarted}){
+      rootCalls+=1;
+      if(rootCalls>2)throw new Error('TEST_TOO_MANY_ROOT_TURNS');
+      onExecutionStarted?.();
+      return rootCalls===1
+        ? unsupportedClaimDecision('C-001','first unsupported claim')
+        : unsupportedClaimDecision('C-002','different unsupported repair claim');
+    },
+  };
+  const modelRouter={async prepare(){},route(){return{};},release(){}};
+  const runtime=new RootRuntime({executor,modelRouter,subagentRuntime:{},validatorRuntime:new ValidatorRuntime()});
+  const task={id:'T-CONVERGE-CHANGED',title:'convergence',instruction:'bounded',ready_reason:'NEW',projectScopes:[],attachments:[],references:[],taskContract:{obligations:[]},analysisState:null,workReceipts:[]};
 
   await assert.rejects(runtime.execute(task),/VALIDATOR_REJECTION_NON_CONVERGENCE/);
   assert.equal(rootCalls,2);

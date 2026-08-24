@@ -1,6 +1,6 @@
 import { ClaimLevel, EvidenceSourceType, normalizeAnalysisFields } from './analysis-contract.js';
 import { SourceTraceVerifier } from './source-trace-verifier.js';
-import { normalizeCertifiedState, normalizeGapResolutions } from './certified-state.js';
+import { applyCertifiedDelta, normalizeCertifiedState, normalizeGapResolutions } from './certified-state.js';
 
 function text(value){return String(value==null?'':value).trim();}
 function list(value){return Array.isArray(value)?value:[];}
@@ -14,7 +14,7 @@ function mergeUniqueById(...groups){const out=[],seen=new Set();for(const item o
 function refsExist(ids,map){const refs=uniqueStrings(ids);return{refs,missing:refs.filter(id=>!map.has(id))};}
 function feedback(target,reason,action='REJECT_LEDGER_ENTRY'){return{ruleId:'C-003',target,reason,action};}
 function rejectionBoundary(task,currentState,availableEvidence=[]){return JSON.stringify({taskId:text(task?.id)||'task',stateVersion:normalizeCertifiedState(currentState).version,evidenceIds:uniqueStrings(list(availableEvidence).map(item=>item?.id)).sort()});}
-function rejectionFingerprint(violations=[]){return JSON.stringify(list(violations).map(item=>({ruleId:text(item?.ruleId),target:text(item?.target),reason:text(item?.reason),action:text(item?.action)})));}
+function pushUniqueViolation(violations,item){if(!violations.some(value=>value.ruleId===item.ruleId&&value.target===item.target&&value.reason===item.reason&&value.action===item.action))violations.push(item);}
 
 function ledgerViolations(decision,evidenceById,currentState){
   const violations=[];
@@ -96,19 +96,26 @@ export class ValidatorRuntime{
     const evidenceById=byId(mergeUniqueById(current.evidence,proposed.evidence));
     const violations=[];
 
-    for(const item of unownedRootEvidence)violations.push(feedback(`evidence:${text(item?.id)||'unknown'}`,`Root 不能自行制造 ${text(item?.sourceType)||'unknown'} Evidence；该来源必须来自执行结果或系统持有的真实来源。`,'REJECT_UNOWNED_ROOT_EVIDENCE'));
-    for(const action of list(traced.actions))if(action?.action==='REJECT_UNTRACEABLE_SOURCE')violations.push(feedback(`evidence:${text(action?.target)||'unknown'}`,text(action?.reason)||'Evidence 来源无法追溯。','REJECT_UNTRACEABLE_SOURCE'));
-    violations.push(...ledgerViolations(proposed,evidenceById,currentState));
+    for(const item of unownedRootEvidence)pushUniqueViolation(violations,feedback(`evidence:${text(item?.id)||'unknown'}`,`Root 不能自行制造 ${text(item?.sourceType)||'unknown'} Evidence；该来源必须来自执行结果或系统持有的真实来源。`,'REJECT_UNOWNED_ROOT_EVIDENCE'));
+    for(const action of list(traced.actions))if(action?.action==='REJECT_UNTRACEABLE_SOURCE')pushUniqueViolation(violations,feedback(`evidence:${text(action?.target)||'unknown'}`,text(action?.reason)||'Evidence 来源无法追溯。','REJECT_UNTRACEABLE_SOURCE'));
+    for(const item of ledgerViolations(proposed,evidenceById,currentState))pushUniqueViolation(violations,item);
+
+    // Certified State is the final deterministic ledger owner. Preflight its
+    // immutable/revision rules here so Root receives the complete rejection in
+    // the one bounded repair opportunity instead of passing Validator and then
+    // failing later as ROOT_INVALID_CONTROL_DECISION.
+    const preflight=applyCertifiedDelta(currentState,proposed,{triggerRefs:['validator:preflight']});
+    for(const issue of list(preflight.issues))pushUniqueViolation(violations,feedback(issue?.target||'state',text(issue?.reason)||'Certified State rejected the candidate delta.',text(issue?.code)||'REJECT_CERTIFIED_STATE_DELTA'));
 
     const taskId=text(task?.id)||'task';
     if(violations.length){
-      const boundary=rejectionBoundary(task,currentState,availableEvidence),fingerprint=rejectionFingerprint(violations),previous=this.lastRejectionByTask.get(taskId);
-      if(previous?.boundary===boundary&&previous?.fingerprint===fingerprint){
+      const boundary=rejectionBoundary(task,currentState,availableEvidence),previous=this.lastRejectionByTask.get(taskId);
+      if(previous?.boundary===boundary){
         this.lastRejectionByTask.delete(taskId);
-        const error=new Error(`VALIDATOR_REJECTION_NON_CONVERGENCE: same deterministic rejection repeated without new Certified State or Evidence (${violations.map(item=>item.action||item.ruleId).join(', ')})`);
+        const error=new Error(`VALIDATOR_REJECTION_NON_CONVERGENCE: repair turn was rejected again without new Certified State or Evidence (${violations.map(item=>item.action||item.ruleId).join(', ')})`);
         error.nonRetryable=true;error.validatorFeedback=violations;throw error;
       }
-      this.lastRejectionByTask.set(taskId,{boundary,fingerprint});
+      this.lastRejectionByTask.set(taskId,{boundary});
       return{outcome:'reject',decision:proposed,feedback:violations,actions:[...list(traced.actions)],sourceVerifications:traced.verifications};
     }
     this.lastRejectionByTask.delete(taskId);
