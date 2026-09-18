@@ -13,10 +13,13 @@ export function taskInputCatalog(task={}){
 
 export function taskInputRefs(task={}){return taskInputCatalog(task).map(item=>item.ref);}
 
-// Subagent context is built from an allow-list. Missing inputRefs means no Task
-// source input; it never falls back to the complete Task object. Selected Project
-// scopes retain their original logical ref so a scoped list cannot silently
-// renumber project:1 into project:0 before Core compiles the Executor request.
+// Subagent source context is built from an allow-list. Missing inputRefs means no
+// Task source input; it never falls back to the complete Task object. Governed
+// TaskContract semantics are not source input and therefore always cross this
+// scoping boundary: they constrain the Work Unit but do not grant it more data or
+// authority. Selected Project scopes retain their original logical ref so a
+// scoped list cannot silently renumber project:1 into project:0 before Core
+// compiles the Executor request.
 export function scopeTaskInputs(task={},inputRefs=[]){
   const selected=new Set((Array.isArray(inputRefs)?inputRefs:[]).map(text).filter(Boolean));
   const projectScopes=(task.projectScopes||[]).flatMap((scope,index)=>selected.has(`project:${index}`)?[{...scope,inputRef:`project:${index}`}]:[]);
@@ -26,6 +29,7 @@ export function scopeTaskInputs(task={},inputRefs=[]){
     id:task.id||null,
     title:task.title||'',
     instruction:selected.has('task:instruction')?(task.instruction||''):'',
+    taskContract:task.taskContract??task.task_contract??null,
     projectScopes,
     attachments,
     references,
