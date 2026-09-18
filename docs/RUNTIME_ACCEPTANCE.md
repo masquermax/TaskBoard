@@ -85,6 +85,21 @@ Pass when:
 4. `CompletionEvaluator` deterministically checks the certified obligation relation;
 5. Task reaches COMPLETED only after that relation is satisfied; a persuasive `finalResult` alone cannot complete the Task.
 
+### E. Parent-boundary inheritance and reopen
+
+Goal: prove a local Work Unit remains inside the parent Task's governed boundary and that contradictory Reality returns upward instead of being locally worked around.
+
+Use a Task with a clear TaskContract obligation/constraint plus a tempting child-local action whose required parent precondition is deliberately absent or contradicted by observable Reality. An evidence-acquisition Work Unit may inspect that missing precondition when that inspection is its explicit bounded goal; it must not execute the dependent action as if the precondition were satisfied.
+
+Pass when:
+
+1. Root and the issued Subagent receive the same governed parent obligations/constraints through Runtime context; the TaskContract is not lost at Task-input scoping.
+2. If the parent conflict is already established before delegation, Root replans or acquires the missing discriminator instead of delegating a child to bypass it.
+3. If the conflict is discovered only inside the Work Unit, Subagent stops inside its bounded scope and returns source-near Evidence plus a precise blocker; it does not weaken the parent rule, invent authority, or execute the dependent local workaround.
+4. Root treats that blocker/Evidence as fresh Reality and performs the Task-level judgment: acquire a missing precondition, replan, challenge/reopen a falsified assumption/rule at its Owner, or use Human Gateway only for a genuinely human-owned choice.
+5. A locally successful action/result cannot by itself satisfy the parent obligation; governed completion still requires the existing Claim→`obligationRefs[]`→`CompletionEvaluator` path.
+6. The scenario completes without a human manually copying the same Runtime error/evidence between child and parent. Any remaining human intervention must be a genuinely human-owned decision rather than information relay.
+
 ## Side-effect recovery
 
 D-023 effect recovery already has extensive deterministic regression coverage. A destructive or business-important real mutation is **not** required merely to claim v0.9.2 acceptance.
@@ -111,7 +126,7 @@ Gap / follow-up:
 Release-ready requires all of the following at the **same current head**:
 
 - exact-head CI GREEN;
-- scenarios A-D have representative real Runtime PASS evidence;
+- scenarios A-E have representative real Runtime PASS evidence;
 - no acceptance result requires restoring a retired parallel owner/mechanism;
 - `docs/VERIFICATION.md` is updated to the exact accepted head and evidence.
 
