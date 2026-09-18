@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compileRootExecutorRequest, compileSubagentExecutorRequest } from '../src/core/executor-contract.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
+import { compileAuthorizedGrant } from '../src/governance/governance-compiler.js';
 
 function governedTask(){
   return{
@@ -9,6 +10,7 @@ function governedTask(){
     projectScopes:[],attachments:[],references:[],
     taskContract:{
       id:'TC-T-PARENT',revision:3,
+      authority:{},
       obligations:[{
         id:'OBL-T-PARENT-GOAL',certification:'supported',
         requirementRefs:[{sourceId:'REQ-T-PARENT-0001',start:0,end:28}],
@@ -69,6 +71,18 @@ test('actual SubagentRuntime scoping preserves parent governance into the execut
   const result=await runtime.run(governedTask(),boundedWork());
   assert.equal(result.result,'observed');
   assert.deepEqual(seen,expectedParentGovernance,'Task input scoping must not erase the parent TaskContract before Executor compilation');
+});
+
+test('semantic parent governance cannot widen the executable AuthorizedGrant',()=>{
+  const task=governedTask();
+  task.projectScopes=[{path:'/project',label:'project'}];
+  task.taskContract.constraints.push({id:'C-WRITE-WISH',kind:'parent_invariant',statement:'Local work would like write access.'});
+  const grant=compileAuthorizedGrant({
+    role:'subagent',task,
+    workUnit:{...boundedWork(),projectAccess:'write',networkAccess:true,inputRefs:['project:0']},
+  });
+  assert.equal(grant.projectAccess,'read','parent semantic context cannot manufacture project-write authority');
+  assert.equal(grant.networkAccess,false,'parent semantic context cannot manufacture network authority');
 });
 
 test('missing TaskContract produces an explicit empty parent boundary rather than invented governance',()=>{
