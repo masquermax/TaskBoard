@@ -44,6 +44,10 @@ export const claimSchema = {
     scope:{type:'string',enum:Object.values(ClaimScope)},
     coverage:{type:'string',enum:Object.values(EvidenceCoverage)},
     hops:{type:'array',items:hopSchema,maxItems:12},
+    // Optional Reality identity. Root uses this only when distinguishing concrete
+    // subjects (for example server A vs server B) can change interpretation or
+    // action. Empty/omitted means no machine subject filter is required here.
+    subjectRefs:{type:'array',items:{type:'string'},maxItems:12},
     // Root owns completion judgment. When a CONFIRMED Claim is intended to prove
     // one or more governed Task obligations, Root names those obligation ids here.
     // Validator still checks only the Claim's source ledger; CompletionEvaluator
