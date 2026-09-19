@@ -4,8 +4,8 @@ import { compileRootExecutorRequest, compileSubagentExecutorRequest, ROOT_RESPON
 import { projectCertifiedKnownClaims, rootRealityContinuityInstructions, certifiedCognitionReuseInstructions } from '../src/core/certified-cognition-reuse.js';
 import { RootRuntime } from '../src/core/root-runtime.js';
 
-function claim(id,statement,{level='confirmed',subjectRefs=[]}={}){
-  return{id,statement,level,evidenceIds:[`E-${id}`],scope:'single_system',coverage:'system',hops:[],subjectRefs,obligationRefs:[]};
+function claim(id,statement,{level='confirmed',subjectRefs=[],evidenceIds=null,obligationRefs=[]}={}){
+  return{id,statement,level,evidenceIds:evidenceIds||[`E-${id}`],scope:'single_system',coverage:'system',hops:[],subjectRefs,obligationRefs};
 }
 
 function task(){
@@ -38,9 +38,11 @@ test('practice 1: an identity-sensitive Work receives A cognition but not B cogn
   assert.equal(known.some(item=>item.id==='C-GUESS'),false,'SUPPORTED guess must not become execution memory');
 });
 
-test('practice 2: when subject identity is not decision-relevant, Runtime does not force an identity filter',()=>{
+test('practice 2: when subject identity is not decision-relevant, subject-bound facts do not become ambient context',()=>{
   const known=projectCertifiedKnownClaims(task(),work({subjectRefs:[]}));
-  assert.deepEqual(known.map(item=>item.id),['C-A','C-B','C-GENERAL']);
+  assert.deepEqual(known.map(item=>item.id),['C-GENERAL']);
+  assert.equal(known.some(item=>item.subjectRefs?.length),false);
+  assert.match(certifiedCognitionReuseInstructions(),/only unbound\/general cognition is injected/i);
 });
 
 test('practice 3: approximate human information stays approximate instead of triggering precision for its own sake',()=>{
@@ -106,4 +108,45 @@ test('practice 7: subjectRefs survives Root plan -> Stage -> actual Subagent han
   const outcome=await runtime.execute(task());
   assert.equal(outcome.kind,'goal_satisfied');
   assert.deepEqual(observedWork?.subjectRefs,['server:A']);
+});
+
+test('practice 8: a long Task does not dump unrelated subject cognition into unbound Work',()=>{
+  const many=Array.from({length:120},(_,i)=>claim(`C-S${i}`,`server S${i} fact`,{subjectRefs:[`server:S${i}`]}));
+  const t=task();
+  t.analysisState.current.claims=[...many,claim('C-READONLY','operation is read-only')];
+  const known=projectCertifiedKnownClaims(t,work({subjectRefs:[]}));
+  assert.deepEqual(known.map(item=>item.id),['C-READONLY']);
+});
+
+test('practice 9: exact semantic duplicate Claims are collapsed before the child pays the same cognition cost twice',()=>{
+  const t=task();
+  t.analysisState.current.claims=[
+    claim('C-A1','server A uses JDK 1.7',{subjectRefs:['server:A'],evidenceIds:['E-1'],obligationRefs:['O-1']}),
+    claim('C-A2','server A uses JDK 1.7',{subjectRefs:['server:A'],evidenceIds:['E-2'],obligationRefs:['O-2']}),
+    claim('C-GENERAL','operation is read-only'),
+  ];
+  const known=projectCertifiedKnownClaims(t,work({subjectRefs:['server:A']}));
+  assert.equal(known.length,2);
+  assert.equal(known[0].id,'C-A1');
+  assert.deepEqual(known[0].evidenceIds,['E-1','E-2']);
+  assert.deepEqual(known[0].obligationRefs,['O-1','O-2']);
+});
+
+test('practice 10: multi-subject Work receives matching subjects plus general cognition and excludes unrelated subjects',()=>{
+  const t=task();
+  t.analysisState.current.claims=[
+    claim('C-A','A fact',{subjectRefs:['server:A']}),
+    claim('C-B','B fact',{subjectRefs:['server:B']}),
+    claim('C-C','C fact',{subjectRefs:['server:C']}),
+    claim('C-G','general fact'),
+  ];
+  const known=projectCertifiedKnownClaims(t,work({subjectRefs:['server:A','server:B']}));
+  assert.deepEqual(known.map(item=>item.id),['C-A','C-B','C-G']);
+});
+
+test('practice 11: duplicate subject refs do not duplicate projected cognition',()=>{
+  const t=task();
+  t.analysisState.current.claims=[claim('C-A','A fact',{subjectRefs:['server:A','server:A']})];
+  const known=projectCertifiedKnownClaims(t,work({subjectRefs:['server:A','server:A']}));
+  assert.deepEqual(known[0].subjectRefs,['server:A']);
 });
