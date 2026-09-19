@@ -23,7 +23,7 @@ function task(){
 }
 
 function work(overrides={}){
-  return{id:'WU-A',title:'inspect app on A',goal:'inspect only the needed app state',expectedOutput:'needed state',stopCondition:'decision can be made',obligationRefs:[],projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[],...overrides};
+  return{id:'WU-A',title:'inspect app on A',goal:'inspect only the needed app state',expectedOutput:'needed state',stopCondition:'decision can be made',obligationRefs:[],subjectRefs:[],projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[],...overrides};
 }
 
 function rootDecision(kind,overrides={}){
@@ -39,7 +39,7 @@ test('practice 1: an identity-sensitive Work receives A cognition but not B cogn
 });
 
 test('practice 2: when subject identity is not decision-relevant, Runtime does not force an identity filter',()=>{
-  const known=projectCertifiedKnownClaims(task(),work());
+  const known=projectCertifiedKnownClaims(task(),work({subjectRefs:[]}));
   assert.deepEqual(known.map(item=>item.id),['C-A','C-B','C-GENERAL']);
 });
 
@@ -74,12 +74,14 @@ test('practice 5: child may harvest useful facts already visible in the same out
   assert.match(request.instructions,/Evidence\/blocker instead of transferring the fact/i);
 });
 
-test('practice 6: subject binding is optional, so irrelevant identity does not become mandatory bureaucracy',()=>{
+test('practice 6: strict shape uses [] to mean identity is irrelevant, without forcing an investigation',()=>{
   const delegationSchema=ROOT_RESPONSE_CONTRACT.properties.delegations.items;
   assert.ok(delegationSchema.properties.subjectRefs);
-  assert.equal(delegationSchema.required.includes('subjectRefs'),false);
-  const claimInstructions=certifiedCognitionReuseInstructions();
-  assert.match(claimInstructions,/If subject identity is irrelevant to the bounded result, do not investigate it/i);
+  assert.equal(delegationSchema.required.includes('subjectRefs'),true);
+  const rootInstructions=rootRealityContinuityInstructions();
+  const childInstructions=certifiedCognitionReuseInstructions();
+  assert.match(rootInstructions,/Use subjectRefs=\[\] when identity cannot change the current decision/i);
+  assert.match(childInstructions,/keep subjectRefs empty and do not investigate it/i);
 });
 
 test('practice 7: subjectRefs survives Root plan -> Stage -> actual Subagent handoff',async()=>{
