@@ -44,13 +44,17 @@ export const claimSchema = {
     scope:{type:'string',enum:Object.values(ClaimScope)},
     coverage:{type:'string',enum:Object.values(EvidenceCoverage)},
     hops:{type:'array',items:hopSchema,maxItems:12},
+    // Strict structured output keeps this field present. [] means concrete
+    // subject identity is irrelevant/not established for this Claim; populated
+    // refs are used only when server/environment identity changes action.
+    subjectRefs:{type:'array',items:{type:'string'},maxItems:12},
     // Root owns completion judgment. When a CONFIRMED Claim is intended to prove
     // one or more governed Task obligations, Root names those obligation ids here.
     // Validator still checks only the Claim's source ledger; CompletionEvaluator
     // later aggregates these explicit Root judgments deterministically.
     obligationRefs:{type:'array',items:{type:'string'},maxItems:20},
   },
-  required:['id','statement','level','evidenceIds','scope','coverage','hops','obligationRefs'],
+  required:['id','statement','level','evidenceIds','scope','coverage','hops','subjectRefs','obligationRefs'],
   additionalProperties:false,
 };
 
