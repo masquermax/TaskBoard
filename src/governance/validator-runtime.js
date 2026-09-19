@@ -5,6 +5,7 @@ import { normalizeCertifiedState, normalizeGapResolutions } from './certified-st
 function text(value){return String(value==null?'':value).trim();}
 function list(value){return Array.isArray(value)?value:[];}
 function uniqueStrings(values){return[...new Set(list(values).map(text).filter(Boolean))];}
+function sameStringSet(a,b){const left=uniqueStrings(a).sort(),right=uniqueStrings(b).sort();return left.length===right.length&&left.every((value,index)=>value===right[index]);}
 function copyAnalysis(result={}){
   const fields=normalizeAnalysisFields(result);
   return{kind:result?.kind||null,summary:text(result?.summary),finalResult:result?.finalResult==null?null:text(result.finalResult),...fields,gateway:result?.gateway||null,gapResolutions:normalizeGapResolutions(result?.gapResolutions),delegations:list(result?.delegations),effectClosures:list(result?.effectClosures)};
@@ -16,7 +17,7 @@ function feedback(target,reason,action='REJECT_LEDGER_ENTRY'){return{ruleId:'C-0
 function rejectionBoundary(task,currentState,availableEvidence=[]){return JSON.stringify({taskId:text(task?.id)||'task',stateVersion:normalizeCertifiedState(currentState).version,evidenceIds:uniqueStrings(list(availableEvidence).map(item=>item?.id)).sort()});}
 function rejectionFingerprint(violations=[]){return JSON.stringify(list(violations).map(item=>({ruleId:text(item?.ruleId),target:text(item?.target),reason:text(item?.reason),action:text(item?.action)})));}
 
-function ledgerViolations(decision,evidenceById,currentState){
+function ledgerViolations(decision,evidenceById,currentState,workSubjectRefsByEvidenceId=new Map()){
   const violations=[];
   const claimById=byId([...list(normalizeCertifiedState(currentState).current.claims),...list(decision.claims)]);
   const gapById=byId([...list(normalizeCertifiedState(currentState).current.gaps),...list(decision.gaps)]);
@@ -30,6 +31,20 @@ function ledgerViolations(decision,evidenceById,currentState){
     if(claim?.level===ClaimLevel.CONFIRMED){
       const indirect=checked.refs.map(ref=>evidenceById.get(ref)).filter(Boolean).filter(item=>item?.strength!=='direct');
       if(indirect.length)violations.push(feedback(`claim:${id}`,`CONFIRMED 结论依赖未验证/INDIRECT 来源：${indirect.map(item=>text(item?.id)).filter(Boolean).join(', ')}；结论可信度不能高于来源。`,'REJECT_TRUST_ESCALATION'));
+
+      // Concrete subject identity is part of provenance, not free Root prose.
+      // When a cited Evidence came from a subject-bound Work Unit, a CONFIRMED
+      // Claim must preserve exactly that concrete Work boundary. This prevents
+      // server B Reality from being certified as server A (or as ambient/general
+      // cognition) and later reused faithfully in the wrong place.
+      const workSubjectRefs=uniqueStrings(checked.refs.flatMap(ref=>list(workSubjectRefsByEvidenceId.get(ref))));
+      if(workSubjectRefs.length&&!sameStringSet(claim?.subjectRefs,workSubjectRefs)){
+        violations.push(feedback(
+          `claim:${id}`,
+          `CONFIRMED 结论的 subjectRefs 与实际产生其 Work Evidence 的对象边界不一致：Claim=[${uniqueStrings(claim?.subjectRefs).join(', ')}]，Evidence Work=[${workSubjectRefs.join(', ')}]。`,
+          'REJECT_SUBJECT_PROVENANCE_MISMATCH'
+        ));
+      }
     }
     for(const hop of list(claim?.hops)){
       const hopChecked=refsExist(hop?.evidenceIds,evidenceById);
@@ -89,6 +104,11 @@ export class ValidatorRuntime{
       ...list(proposed.claims).flatMap(item=>list(item?.hops).flatMap(hop=>uniqueStrings(hop?.evidenceIds))),
     ]);
     const selectedWorkEvidence=list(availableEvidence).filter(item=>wanted.has(text(item?.id)));
+    const workSubjectRefsByEvidenceId=new Map(
+      selectedWorkEvidence
+        .map(item=>[text(item?.id),uniqueStrings(item?._workSubjectRefs)])
+        .filter(([id,subjectRefs])=>id&&subjectRefs.length)
+    );
     proposed.evidence=mergeUniqueById(selectedWorkEvidence,rootEvidence);
 
     const traced=this.sourceTraceVerifier.enforce({task,evidence:proposed.evidence,humanGatewayHistory});
@@ -98,7 +118,7 @@ export class ValidatorRuntime{
 
     for(const item of unownedRootEvidence)violations.push(feedback(`evidence:${text(item?.id)||'unknown'}`,`Root 不能自行制造 ${text(item?.sourceType)||'unknown'} Evidence；该来源必须来自执行结果或系统持有的真实来源。`,'REJECT_UNOWNED_ROOT_EVIDENCE'));
     for(const action of list(traced.actions))if(action?.action==='REJECT_UNTRACEABLE_SOURCE')violations.push(feedback(`evidence:${text(action?.target)||'unknown'}`,text(action?.reason)||'Evidence 来源无法追溯。','REJECT_UNTRACEABLE_SOURCE'));
-    violations.push(...ledgerViolations(proposed,evidenceById,currentState));
+    violations.push(...ledgerViolations(proposed,evidenceById,currentState,workSubjectRefsByEvidenceId));
 
     const taskId=text(task?.id)||'task';
     if(violations.length){
