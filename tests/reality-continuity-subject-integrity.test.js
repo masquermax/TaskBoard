@@ -57,6 +57,22 @@ test('subject provenance: matching Work and Claim subjects pass the deterministi
   assert.equal(reviewed.outcome,'pass');
 });
 
+test('subject provenance survives persisted WorkReceipt and process/session restart',()=>{
+  const restarted=task();
+  restarted.workReceipts=[{
+    id:'WU-B',signature:'sig-b',
+    workUnit:{id:'WU-B',title:'inspect B',subjectRefs:['server:B'],projectAccess:'none',networkAccess:false,inputRefs:[]},
+    result:{delegationId:'WU-B',result:'JDK 8',evidence:[evidence('E-B')],blocker:null},
+    issued_at:'2026-09-19T00:00:00Z',started_at:'2026-09-19T00:00:01Z',completed_at:'2026-09-19T00:00:02Z',consumed_at:null,
+  }];
+  const persistedEvidence={...restarted.workReceipts[0].result.evidence[0]};
+  assert.equal(persistedEvidence._workSubjectRefs,undefined,'restart fixture intentionally has no transient metadata');
+  const validator=new ValidatorRuntime({sourceTraceVerifier:passThroughTrace()});
+  const reviewed=validator.reviewRoot({decision:decision([claim('C-A',['server:A'],['E-B'])]),task:restarted,currentState:null,availableEvidence:[persistedEvidence]});
+  assert.equal(reviewed.outcome,'reject');
+  assert.equal(reviewed.feedback.some(x=>x.action==='REJECT_SUBJECT_PROVENANCE_MISMATCH'),true);
+});
+
 test('work identity: otherwise identical A and B Work Units are not semantic duplicates',async()=>{
   let rootCalls=0;const seen=[];
   const runtime=new RootRuntime({
