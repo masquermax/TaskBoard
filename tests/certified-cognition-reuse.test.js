@@ -4,6 +4,7 @@ import {
   CERTIFIED_COGNITION_REUSE_CAPABILITY,
   certifiedCognitionReuseInstructions,
   projectCertifiedKnownClaims,
+  rootRealityContinuityInstructions,
 } from '../src/core/certified-cognition-reuse.js';
 import { compileSubagentExecutorRequest } from '../src/core/executor-contract.js';
 import { scopeTaskInputs } from '../src/core/task-input-scope.js';
@@ -59,6 +60,15 @@ test('A3: protocol requires conflicting fresh Reality to return upward instead o
   assert.match(instructions,/source-near Evidence/i);
   assert.match(instructions,/do not silently overwrite parent cognition/i);
   assert.match(instructions,/explicitly requires revalidation|explicitly require revalidation|explicitly requires revalidation/i);
+});
+
+test('A3 Root reopen revises the existing Claim instead of accumulating contradictory active cognition',()=>{
+  const instructions=rootRealityContinuityInstructions();
+  assert.match(instructions,/fresh DIRECT Evidence invalidates a current Claim/i);
+  assert.match(instructions,/revise that existing Claim id/i);
+  assert.match(instructions,/one active value/i);
+  assert.match(instructions,/Do not add a second contradictory active Claim/i);
+  assert.match(instructions,/turn history already preserves the prior value/i);
 });
 
 test('A4: known cognition cannot widen executable authority',()=>{
