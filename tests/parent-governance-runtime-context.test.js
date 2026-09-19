@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compileRootExecutorRequest, compileSubagentExecutorRequest } from '../src/core/executor-contract.js';
 import { SubagentRuntime } from '../src/core/subagent-runtime.js';
+import { RootRuntime, validateDelegationPlan } from '../src/core/root-runtime.js';
 import { compileAuthorizedGrant } from '../src/governance/governance-compiler.js';
+import { successfulCompletionDependenciesForControlFlowTest } from './helpers/completion-fixture.js';
 
 function governedTask(){
   return{
@@ -21,10 +23,10 @@ function governedTask(){
   };
 }
 
-function boundedWork(){
+function boundedWork(overrides={}){
   return{
     id:'WU-1',title:'inspect one discriminator',goal:'inspect one bounded fact',expectedOutput:'one observed fact',stopCondition:'fact or blocker returned',
-    projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[],
+    obligationRefs:['OBL-T-PARENT-GOAL'],projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[],...overrides,
   };
 }
 
@@ -43,12 +45,15 @@ test('Root receives the governed parent contract instead of relying on conversat
   assert.deepEqual(request.context.parentGovernance,expectedParentGovernance);
   assert.match(request.instructions,/parentGovernance is the inherited Task-level boundary/);
   assert.match(request.instructions,/Local usefulness alone is not sufficient/);
+  assert.ok(request.responseContract.properties.delegations.items.required.includes('obligationRefs'));
 });
 
 test('Subagent compiler receives the same parent boundary but remains a bounded executor',()=>{
   const task=governedTask();
   const request=compileSubagentExecutorRequest({task,delegation:boundedWork()});
   assert.deepEqual(request.context.parentGovernance,expectedParentGovernance);
+  assert.deepEqual(request.context.workUnit.obligationRefs,['OBL-T-PARENT-GOAL']);
+  assert.match(request.instructions,/workUnit\.obligationRefs identifies the parent obligation/);
   assert.match(request.instructions,/Respect its obligations and constraints before acting/);
   assert.match(request.instructions,/do not work around it/);
   assert.match(request.instructions,/A local result never proves a parent obligation or Task completion/);
@@ -62,7 +67,7 @@ test('actual SubagentRuntime scoping preserves parent governance into the execut
   const executor={
     async runSubagent({task,delegation}){
       const request=compileSubagentExecutorRequest({task,delegation});
-      seen=request.context.parentGovernance;
+      seen={parentGovernance:request.context.parentGovernance,obligationRefs:request.context.workUnit.obligationRefs};
       return{delegationId:delegation.id,result:'observed',evidence:[],blocker:null};
     },
   };
@@ -70,7 +75,44 @@ test('actual SubagentRuntime scoping preserves parent governance into the execut
   const runtime=new SubagentRuntime({executor,modelRouter});
   const result=await runtime.run(governedTask(),boundedWork());
   assert.equal(result.result,'observed');
-  assert.deepEqual(seen,expectedParentGovernance,'Task input scoping must not erase the parent TaskContract before Executor compilation');
+  assert.deepEqual(seen.parentGovernance,expectedParentGovernance,'Task input scoping must not erase the parent TaskContract before Executor compilation');
+  assert.deepEqual(seen.obligationRefs,['OBL-T-PARENT-GOAL']);
+});
+
+test('delegation plan auto-binds one unambiguous parent obligation and rejects ambiguous or foreign bindings',()=>{
+  const one=validateDelegationPlan([boundedWork({obligationRefs:[]})],{governedObligationIds:['OBL-A']});
+  assert.equal(one.valid,true);
+  assert.deepEqual(one.delegations[0].obligationRefs,['OBL-A']);
+
+  const ambiguous=validateDelegationPlan([boundedWork({obligationRefs:[]})],{governedObligationIds:['OBL-A','OBL-B']});
+  assert.equal(ambiguous.valid,false);
+  assert.match(ambiguous.issues.join(' '),/必须通过 obligationRefs 显式绑定至少一个父级 obligation/);
+
+  const foreign=validateDelegationPlan([boundedWork({obligationRefs:['OBL-X']})],{governedObligationIds:['OBL-A','OBL-B']});
+  assert.equal(foreign.valid,false);
+  assert.match(foreign.issues.join(' '),/不存在的父级 obligation：OBL-X/);
+});
+
+test('RootRuntime carries the parent-position binding through Stage into the actual Subagent Work Unit',async()=>{
+  const task=governedTask();
+  let rootCalls=0,seenWork=null;
+  const executor={
+    async runRoot(){
+      rootCalls+=1;
+      if(rootCalls===1)return{
+        kind:'delegate',summary:'inspect one fact',finalResult:null,resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],effectClosures:[],
+        delegations:[boundedWork({obligationRefs:[]})],
+      };
+      return{kind:'complete',summary:'done',finalResult:'done',resultMode:'execution',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[],effectClosures:[]};
+    },
+    async runSubagent({delegation}){seenWork=delegation;return{delegationId:delegation.id,result:'observed',evidence:[],blocker:null};},
+  };
+  const modelRouter={prepare:async()=>{},route:()=>({}),release:()=>{}};
+  const subagentRuntime=new SubagentRuntime({executor,modelRouter});
+  const root=new RootRuntime({...successfulCompletionDependenciesForControlFlowTest(),executor,modelRouter,subagentRuntime,maxConcurrentSubagents:1});
+  const outcome=await root.execute(task);
+  assert.equal(outcome.kind,'goal_satisfied');
+  assert.deepEqual(seenWork.obligationRefs,['OBL-T-PARENT-GOAL'],'sole governed obligation should be bound before the Work Unit reaches Subagent Runtime');
 });
 
 test('semantic parent governance cannot widen the executable AuthorizedGrant',()=>{
