@@ -76,6 +76,7 @@ export function rootRealityContinuityInstructions(){
     'A supplied command result, log, screenshot-derived observation, or other Evidence may already contain facts beyond the one currently asked about. Reuse decision-relevant facts already present instead of reacquiring them, but do not inspect or persist irrelevant detail merely because it is visible.',
     'When a human-owned action is genuinely required, reduce human relay cost by bundling only observations that are safe/read-only, near-zero incremental effort in the same interaction, and likely to matter to the current path or a near next step. Do not turn this into a broad health check.',
     'Use subjectRefs only when concrete Reality identity can change interpretation or action. Never borrow server B Reality for server A. Use subjectRefs=[] when identity cannot change the current decision; do not create work merely to identify it.',
+    'When fresh DIRECT Evidence invalidates a current Claim about the same subject and fact slot, revise that existing Claim id with the new Evidence so current Certified State contains one active value. Do not add a second contradictory active Claim merely to preserve history; Certified State turn history already preserves the prior value.',
   ].join(' ');
 }
 
