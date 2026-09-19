@@ -40,6 +40,20 @@ const expectedParentGovernance={
   constraints:[{id:'C-NO-BYPASS',kind:'parent_invariant',statement:'Do not bypass the governed parent boundary.'}],
 };
 
+function certifiedAnalysisState(){
+  return{
+    version:2,
+    current:{
+      resultMode:'analysis',evidence:[],gaps:[],recommendations:[],steps:[],
+      claims:[
+        {id:'CLM-JDK',statement:'Current runtime uses JDK 1.7.',level:'confirmed',evidenceIds:['EV-JDK'],scope:'single_system',coverage:'system',hops:[],obligationRefs:[]},
+        {id:'CLM-HYP',statement:'Font loading may depend on one candidate path.',level:'supported',evidenceIds:['EV-HYP'],scope:'single_system',coverage:'component',hops:[],obligationRefs:[]},
+      ],
+    },
+    turns:[],
+  };
+}
+
 test('Root receives the governed parent contract instead of relying on conversational memory',()=>{
   const request=compileRootExecutorRequest({task:governedTask(),certifiedContext:{claims:[],gaps:[],unresolvedObligations:[]}});
   assert.deepEqual(request.context.parentGovernance,expectedParentGovernance);
@@ -62,21 +76,38 @@ test('Subagent compiler receives the same parent boundary but remains a bounded 
   assert.equal(task.taskContract.constraints[0].statement,'Do not bypass the governed parent boundary.','Runtime context must not alias durable Task state');
 });
 
-test('actual SubagentRuntime scoping preserves parent governance into the executor request',async()=>{
+test('Subagent receives only CONFIRMED durable cognition, not supported inference or raw history',()=>{
+  const task=governedTask();
+  task.analysisState=certifiedAnalysisState();
+  task.workReceipts=[{id:'WR-OLD',result:{result:'raw history'}}];
+  const request=compileSubagentExecutorRequest({task,delegation:boundedWork()});
+  assert.deepEqual(request.context.knownClaims,[{
+    id:'CLM-JDK',statement:'Current runtime uses JDK 1.7.',evidenceIds:['EV-JDK'],scope:'single_system',coverage:'system',obligationRefs:[],
+  }]);
+  assert.equal('workReceipts' in request.context,false,'raw historical receipts must not be replayed as memory');
+  assert.match(request.instructions,/do not spend this Work merely rediscovering the same fact/);
+
+  request.context.knownClaims[0].statement='mutated';
+  assert.equal(task.analysisState.current.claims[0].statement,'Current runtime uses JDK 1.7.','downward projection must not alias durable cognition');
+});
+
+test('actual SubagentRuntime scoping preserves parent governance and certified cognition into the executor request',async()=>{
+  const task=governedTask();task.analysisState=certifiedAnalysisState();
   let seen=null;
   const executor={
     async runSubagent({task,delegation}){
       const request=compileSubagentExecutorRequest({task,delegation});
-      seen={parentGovernance:request.context.parentGovernance,obligationRefs:request.context.workUnit.obligationRefs};
+      seen={parentGovernance:request.context.parentGovernance,obligationRefs:request.context.workUnit.obligationRefs,knownClaims:request.context.knownClaims};
       return{delegationId:delegation.id,result:'observed',evidence:[],blocker:null};
     },
   };
   const modelRouter={prepare:async()=>{},route:()=>({})};
   const runtime=new SubagentRuntime({executor,modelRouter});
-  const result=await runtime.run(governedTask(),boundedWork());
+  const result=await runtime.run(task,boundedWork());
   assert.equal(result.result,'observed');
   assert.deepEqual(seen.parentGovernance,expectedParentGovernance,'Task input scoping must not erase the parent TaskContract before Executor compilation');
   assert.deepEqual(seen.obligationRefs,['OBL-T-PARENT-GOAL']);
+  assert.deepEqual(seen.knownClaims.map(item=>item.id),['CLM-JDK'],'Task input scoping must carry already-certified cognition into later child execution');
 });
 
 test('delegation plan auto-binds one unambiguous parent obligation and rejects ambiguous or foreign bindings',()=>{
@@ -131,4 +162,5 @@ test('missing TaskContract produces an explicit empty parent boundary rather tha
   const task={id:'T-EMPTY',title:'empty',instruction:'inspect',projectScopes:[],attachments:[],references:[]};
   const request=compileSubagentExecutorRequest({task,delegation:{id:'WU-1'}});
   assert.deepEqual(request.context.parentGovernance,{contractId:null,revision:null,obligations:[],constraints:[]});
+  assert.deepEqual(request.context.knownClaims,[]);
 });
