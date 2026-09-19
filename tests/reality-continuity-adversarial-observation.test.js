@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { compileRootExecutorRequest, compileSubagentExecutorRequest, ROOT_RESPONSE_CONTRACT } from '../src/core/executor-contract.js';
 
 let reuse=null;
@@ -40,6 +41,9 @@ test('adversarial observation: compare old/new continuity cost and residual risk
   const root=compileRootExecutorRequest({task:task(baseClaims),humanGatewayHistory:[{id:'HG',status:'RESOLVED',targetGapId:'G',question:'OS?',answer:'大概是 Win10'}]});
   const child=compileSubagentExecutorRequest({task:task(baseClaims),delegation:work(['server:A'])});
   const delegationSchema=ROOT_RESPONSE_CONTRACT?.properties?.delegations?.items;
+  const rootRuntimeSource=fs.readFileSync(new URL('../src/core/root-runtime.js',import.meta.url),'utf8');
+  const validatorSource=fs.readFileSync(new URL('../src/governance/validator-runtime.js',import.meta.url),'utf8');
+  const signatureBody=(rootRuntimeSource.match(/function workSemanticSignature\(item\)\{([\s\S]*?)\n\}/)||[])[1]||'';
 
   const metrics={
     capabilityPresent:Boolean(reuse?.projectCertifiedKnownClaims),
@@ -55,8 +59,8 @@ test('adversarial observation: compare old/new continuity cost and residual risk
     childZeroCostHarvestGuard:has(child.instructions,'zero extra probing cost'),
     childConflictUpwardGuard:has(child.instructions,'conflicts with a known Claim'),
     subjectAwareRootSchema:Boolean(delegationSchema?.properties?.subjectRefs),
-    subjectRefsInWorkSignatureGuard:false,
-    subjectEvidenceBindingGuard:false,
+    subjectRefsInWorkSignatureGuard:has(signatureBody,'subjectRefs'),
+    subjectEvidenceBindingGuard:has(validatorSource,'REJECT_SUBJECT_PROVENANCE_MISMATCH'),
   };
   console.log(`REALITY_CONTINUITY_ADV=${JSON.stringify(metrics)}`);
   assert.ok(metrics.repeatedProbeCount>=0);
