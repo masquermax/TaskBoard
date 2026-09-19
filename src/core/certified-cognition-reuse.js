@@ -21,15 +21,18 @@ export function projectCertifiedKnownClaims(task={},workUnit={}){
   return list(analysis?.current?.claims)
     .filter(item=>item?.level==='confirmed'&&text(item?.id)&&text(item?.statement))
     .filter(item=>subjectCompatible(item?.subjectRefs,workSubjectRefs))
-    .map(item=>({
-      id:text(item.id),
-      statement:text(item.statement),
-      evidenceIds:refs(item.evidenceIds),
-      scope:text(item.scope)||null,
-      coverage:text(item.coverage)||null,
-      subjectRefs:refs(item.subjectRefs),
-      obligationRefs:refs(item.obligationRefs),
-    }));
+    .map(item=>{
+      const subjectRefs=refs(item.subjectRefs);
+      return{
+        id:text(item.id),
+        statement:text(item.statement),
+        evidenceIds:refs(item.evidenceIds),
+        scope:text(item.scope)||null,
+        coverage:text(item.coverage)||null,
+        ...(subjectRefs.length?{subjectRefs}:{}),
+        obligationRefs:refs(item.obligationRefs),
+      };
+    });
 }
 
 export function rootRealityContinuityInstructions(){
