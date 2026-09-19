@@ -1,38 +1,72 @@
 function text(value){return String(value==null?'':value).trim();}
 function list(value){return Array.isArray(value)?value:[];}
 function refs(value){return [...new Set(list(value).map(text).filter(Boolean))];}
+function stableRefs(value){return refs(value).sort();}
 
 export const CERTIFIED_COGNITION_REUSE_CAPABILITY='certified-cognition-reuse';
 
 function subjectCompatible(claimSubjectRefs=[],workSubjectRefs=[]){
   const claimRefs=refs(claimSubjectRefs),workRefs=refs(workSubjectRefs);
-  if(!workRefs.length||!claimRefs.length)return true;
+  if(!claimRefs.length)return true;
+  if(!workRefs.length)return false;
   const wanted=new Set(workRefs);
   return claimRefs.some(ref=>wanted.has(ref));
 }
 
+function projectionKey(item){
+  return JSON.stringify([
+    text(item?.statement),
+    stableRefs(item?.subjectRefs),
+    text(item?.scope)||null,
+    text(item?.coverage)||null,
+  ]);
+}
+
+function mergeProjectedClaim(target,item){
+  target.evidenceIds=refs([...(target.evidenceIds||[]),...(item.evidenceIds||[])]);
+  target.obligationRefs=refs([...(target.obligationRefs||[]),...(item.obligationRefs||[])]);
+  return target;
+}
+
 // This capability deliberately projects only cognition that has already crossed
 // the Root + Validator admission boundary. It is not a second memory store and
-// it does not re-interpret Task truth. subjectRefs=[] means identity filtering is
-// not needed for this Work/Claim; populated refs enable concrete subject filtering.
+// it does not re-interpret Task truth.
+//
+// subjectRefs=[] on Work means the bounded execution has no concrete subject
+// dependency. In that case only unbound/general cognition is injected; subject-
+// bound facts stay out rather than becoming ambient context. Populated Work refs
+// admit matching subject facts plus unbound/general cognition.
+//
+// Projection also collapses exact semantic duplicates (same statement + subject
+// + scope + coverage) so repeated Claim ids do not make later execution pay the
+// same cognition cost multiple times.
 export function projectCertifiedKnownClaims(task={},workUnit={}){
   const analysis=task?.analysisState??task?.analysis_state??null;
   const workSubjectRefs=refs(workUnit?.subjectRefs);
-  return list(analysis?.current?.claims)
-    .filter(item=>item?.level==='confirmed'&&text(item?.id)&&text(item?.statement))
-    .filter(item=>subjectCompatible(item?.subjectRefs,workSubjectRefs))
-    .map(item=>{
-      const subjectRefs=refs(item.subjectRefs);
-      return{
-        id:text(item.id),
-        statement:text(item.statement),
-        evidenceIds:refs(item.evidenceIds),
-        scope:text(item.scope)||null,
-        coverage:text(item.coverage)||null,
-        ...(subjectRefs.length?{subjectRefs}:{}),
-        obligationRefs:refs(item.obligationRefs),
-      };
-    });
+  const projected=[];
+  const bySemanticKey=new Map();
+
+  for(const item of list(analysis?.current?.claims)){
+    if(item?.level!=='confirmed'||!text(item?.id)||!text(item?.statement))continue;
+    if(!subjectCompatible(item?.subjectRefs,workSubjectRefs))continue;
+
+    const subjectRefs=refs(item.subjectRefs);
+    const candidate={
+      id:text(item.id),
+      statement:text(item.statement),
+      evidenceIds:refs(item.evidenceIds),
+      scope:text(item.scope)||null,
+      coverage:text(item.coverage)||null,
+      ...(subjectRefs.length?{subjectRefs}:{}),
+      obligationRefs:refs(item.obligationRefs),
+    };
+    const key=projectionKey(candidate);
+    const existing=bySemanticKey.get(key);
+    if(existing){mergeProjectedClaim(existing,candidate);continue;}
+    projected.push(candidate);
+    bySemanticKey.set(key,candidate);
+  }
+  return projected;
 }
 
 export function rootRealityContinuityInstructions(){
@@ -48,6 +82,7 @@ export function rootRealityContinuityInstructions(){
 export function certifiedCognitionReuseInstructions(){
   return [
     'knownClaims contains current CONFIRMED Task cognition already admitted by Root/Validator and compatible with explicit workUnit.subjectRefs when populated.',
+    'When workUnit.subjectRefs is empty, only unbound/general cognition is injected; do not treat subject-bound facts from arbitrary systems as ambient context.',
     'Reuse knownClaims as the execution starting point; do not spend this Work merely rediscovering the same fact.',
     'Re-observation is valid only when this Work explicitly requires revalidation or fresh Reality gives a concrete reason the known Claim may no longer hold.',
     'If fresh direct Reality conflicts with a known Claim, return source-near Evidence plus a precise blocker/observation so Root can reopen or revise it; do not silently overwrite parent cognition.',
