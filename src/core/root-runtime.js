@@ -16,7 +16,7 @@ function list(value){return Array.isArray(value)?value:[];}
 
 function snapshotWorkUnit(unit,stageId=null){
   return{
-    id:unit.id,stageId,title:unit.title,
+    id:unit.id,stageId,title:unit.title,obligationRefs:[...list(unit.obligationRefs)],
     projectAccess:unit.projectAccess||'none',networkAccess:unit.networkAccess===true,
     status:unit.status,detail:unit.detail,
     issuedAt:unit.issuedAt||null,startedAt:unit.startedAt||null,updatedAt:unit.updatedAt,completedAt:unit.completedAt||null,
@@ -36,6 +36,7 @@ function workSemanticSignature(item){
   const normalize=value=>text(value).replace(/\s+/g,' ');
   return JSON.stringify({
     title:normalize(item?.title),goal:normalize(item?.goal),expectedOutput:normalize(item?.expectedOutput),stopCondition:normalize(item?.stopCondition),
+    obligationRefs:list(item?.obligationRefs).map(normalize).filter(Boolean).sort(),
     projectAccess:normalize(item?.projectAccess||'none'),networkAccess:item?.networkAccess===true,skillId:normalize(item?.skillId),
     dependsOn:list(item?.dependsOn).map(normalize).filter(Boolean).sort(),inputRefs:list(item?.inputRefs).map(normalize).filter(Boolean).sort(),
   });
@@ -88,20 +89,26 @@ function rootCertifiedProjection(task,session){
 }
 function rootTaskProjection(task){return{...task,workReceipts:[],analysisState:null};}
 
-export function validateDelegationPlan(delegations,{knownWorkIds=[],availableInputRefs=null}={}){
+export function validateDelegationPlan(delegations,{knownWorkIds=[],availableInputRefs=null,governedObligationIds=null}={}){
   const raw=list(delegations),issues=[];
   const selected=raw.map((item,index)=>({
     ...item,id:text(item?.id),title:text(item?.title),goal:text(item?.goal),expectedOutput:text(item?.expectedOutput),stopCondition:text(item?.stopCondition),
+    obligationRefs:[...new Set(list(item?.obligationRefs).map(text).filter(Boolean))],
     projectAccess:text(item?.projectAccess||'none').toLowerCase(),networkAccess:item?.networkAccess===true,skillId:item?.skillId==null||!text(item.skillId)?null:text(item.skillId),
     dependsOn:[...new Set(list(item?.dependsOn).map(text).filter(Boolean))],inputRefs:[...new Set(list(item?.inputRefs).map(text).filter(Boolean))],__index:index,
   }));
-  const previousIds=new Set(list(knownWorkIds).map(text).filter(Boolean)),availableInputs=Array.isArray(availableInputRefs)?new Set(availableInputRefs.map(text).filter(Boolean)):null,batchIds=new Set();
+  const previousIds=new Set(list(knownWorkIds).map(text).filter(Boolean)),availableInputs=Array.isArray(availableInputRefs)?new Set(availableInputRefs.map(text).filter(Boolean)):null,availableObligations=Array.isArray(governedObligationIds)?new Set(governedObligationIds.map(text).filter(Boolean)):null,batchIds=new Set();
   for(const item of selected){
     if(!item.id)issues.push(`第 ${item.__index+1} 项工作缺少 id。`);else if(batchIds.has(item.id)||previousIds.has(item.id))issues.push(`工作 id 重复：${item.id}。`);else batchIds.add(item.id);
     if(!item.title)issues.push(`工作 ${item.id||item.__index+1} 缺少 title。`);
     if(!item.goal)issues.push(`工作 ${item.id||item.__index+1} 缺少有限 goal。`);
     if(!item.expectedOutput)issues.push(`工作 ${item.id||item.__index+1} 缺少 expectedOutput。`);
     if(!item.stopCondition)issues.push(`工作 ${item.id||item.__index+1} 缺少 stopCondition。`);
+    if(availableObligations?.size){
+      if(!item.obligationRefs.length&&availableObligations.size===1)item.obligationRefs=[...availableObligations];
+      else if(!item.obligationRefs.length)issues.push(`工作 ${item.id||item.__index+1} 必须通过 obligationRefs 显式绑定至少一个父级 obligation。`);
+      for(const ref of item.obligationRefs)if(!availableObligations.has(ref))issues.push(`工作 ${item.id||item.__index+1} 引用了不存在的父级 obligation：${ref}。`);
+    }
     if(!['none','read','write'].includes(item.projectAccess))issues.push(`工作 ${item.id||item.__index+1} 的 projectAccess 必须是 none、read 或 write。`);
     if(availableInputs)for(const ref of item.inputRefs)if(!availableInputs.has(ref))issues.push(`工作 ${item.id||item.__index+1} 引用了不存在的 Task Input：${ref}。`);
     const hasProjectInput=item.inputRefs.some(ref=>ref.startsWith('project:'));
@@ -177,7 +184,7 @@ export class RootRuntime{
     const analysisState=normalizeCertifiedState(task.analysisState),receipts=list(task.workReceipts).filter(receipt=>receipt?.signature&&receipt?.workUnit&&receipt?.result),pending=receipts.filter(receipt=>!receipt.consumed_at).map(receipt=>({...clone(receipt.result),workUnit:clone(receipt.workUnit),persistedReceipt:true}));
     const session={
       taskId:task.id,round:0,subagentResults:pending,currentStage:null,
-      completedWorkUnits:receipts.map(receipt=>({id:receipt.id,stageId:null,title:receipt.workUnit.title||receipt.id,projectAccess:receipt.workUnit.projectAccess||'none',networkAccess:receipt.workUnit.networkAccess===true,status:WorkUnitStatus.COMPLETED,detail:receipt.result?.result||'工作已完成。',issuedAt:receipt.issued_at||null,startedAt:receipt.started_at||null,updatedAt:receipt.completed_at||nowIso(),completedAt:receipt.completed_at||null,failureCount:0,nextRetryAt:null,canRetry:false,owner:'subagent'})),
+      completedWorkUnits:receipts.map(receipt=>({id:receipt.id,stageId:null,title:receipt.workUnit.title||receipt.id,obligationRefs:[...list(receipt.workUnit.obligationRefs)],projectAccess:receipt.workUnit.projectAccess||'none',networkAccess:receipt.workUnit.networkAccess===true,status:WorkUnitStatus.COMPLETED,detail:receipt.result?.result||'工作已完成。',issuedAt:receipt.issued_at||null,startedAt:receipt.started_at||null,updatedAt:receipt.completed_at||nowIso(),completedAt:receipt.completed_at||null,failureCount:0,nextRetryAt:null,canRetry:false,owner:'subagent'})),
       cancelRequested:false,rootController:null,runningControllers:new Map(),runningPromises:new Map(),policyContext:this.governanceCompiler?.compileForTask?.(task)||null,
       analysisState,certifiedContext:analysisState.current,
       consumedHumanGatewayIds:new Set(list(analysisState.turns).flatMap(turn=>list(turn?.triggerRefs)).map(text).filter(ref=>ref.startsWith('human:')).map(ref=>ref.slice(6)).filter(Boolean)),
@@ -231,7 +238,7 @@ export class RootRuntime{
     const issuedAt=nowIso(),stage={id:`stage-${session.round+1}`,title:'当前工作',startedAt:issuedAt,workUnits:[]};
     stage.workUnits=list(delegations).map((d,index)=>{
       const id=String(d.id),dependsOn=[...new Set(list(d.dependsOn).map(String))].filter(dep=>dep!==id),waiting=dependsOn.length>0;
-      return{id,title:String(d.title||`工作 ${index+1}`),goal:String(d.goal||''),expectedOutput:String(d.expectedOutput||''),stopCondition:String(d.stopCondition||''),projectAccess:['read','write'].includes(d.projectAccess)?d.projectAccess:'none',networkAccess:d.networkAccess===true,inputRefs:[...list(d.inputRefs)],skillId:d.skillId||null,dependsOn,status:waiting?WorkUnitStatus.WAITING_DEPENDENCY:WorkUnitStatus.WAITING_RESOURCE,detail:waiting?'等待前置工作完成后继续。':'工作已就绪，等待可用 Agent。',issuedAt,startedAt:null,updatedAt:issuedAt,completedAt:null,failureCount:0,nextRetryAt:Date.now(),result:null,owner:null,effectRecoveryRequired:false};
+      return{id,title:String(d.title||`工作 ${index+1}`),goal:String(d.goal||''),expectedOutput:String(d.expectedOutput||''),stopCondition:String(d.stopCondition||''),obligationRefs:[...list(d.obligationRefs)],projectAccess:['read','write'].includes(d.projectAccess)?d.projectAccess:'none',networkAccess:d.networkAccess===true,inputRefs:[...list(d.inputRefs)],skillId:d.skillId||null,dependsOn,status:waiting?WorkUnitStatus.WAITING_DEPENDENCY:WorkUnitStatus.WAITING_RESOURCE,detail:waiting?'等待前置工作完成后继续。':'工作已就绪，等待可用 Agent。',issuedAt,startedAt:null,updatedAt:issuedAt,completedAt:null,failureCount:0,nextRetryAt:Date.now(),result:null,owner:null,effectRecoveryRequired:false};
     });
     session.actor=null;session.currentStage=stage;return stage;
   }
@@ -243,7 +250,7 @@ export class RootRuntime{
   startSubagent(task,session,unit,callbacks){
     unit.status=WorkUnitStatus.WAITING_RESOURCE;unit.owner=null;unit.effectRecoveryRequired=false;unit.detail=unit.failureCount?`正在准备第 ${unit.failureCount+1}/${MAX_TOTAL_ATTEMPTS} 次尝试。`:'工作已就绪，正在获取可用 Subagent。';unit.updatedAt=nowIso();
     const controller=new AbortController();session.runningControllers.set(unit.id,controller);this.emit(session,callbacks);
-    const dependencyResults=unit.dependsOn.map(id=>{const dep=session.currentStage?.workUnits.find(work=>work.id===id);return dep?.result?{id,title:dep.title,result:dep.result}:null;}).filter(Boolean),workUnit={id:unit.id,title:unit.title,goal:unit.goal,expectedOutput:unit.expectedOutput,stopCondition:unit.stopCondition,projectAccess:unit.projectAccess||'none',networkAccess:unit.networkAccess===true,skillId:unit.skillId,dependsOn:[...unit.dependsOn],inputRefs:[...unit.inputRefs]};
+    const dependencyResults=unit.dependsOn.map(id=>{const dep=session.currentStage?.workUnits.find(work=>work.id===id);return dep?.result?{id,title:dep.title,result:dep.result}:null;}).filter(Boolean),workUnit={id:unit.id,title:unit.title,goal:unit.goal,expectedOutput:unit.expectedOutput,stopCondition:unit.stopCondition,obligationRefs:[...unit.obligationRefs],projectAccess:unit.projectAccess||'none',networkAccess:unit.networkAccess===true,skillId:unit.skillId,dependsOn:[...unit.dependsOn],inputRefs:[...unit.inputRefs]};
     const effectCapable=workMayMutate(workUnit),effectAttemptId=effectCapable?`effect:${task.id}:${unit.id}:${unit.failureCount+1}:${Date.now()}`:null;let executionStarted=false,effectAttemptOpen=false;
     const clearSafeAdmission=()=>{if(!effectAttemptOpen||!effectAttemptId)return true;try{callbacks.onEffectAttemptCleared?.(effectAttemptId);effectAttemptOpen=false;return true;}catch(error){unit.status=WorkUnitStatus.SUSPENDED;unit.nextRetryAt=null;unit.effectRecoveryRequired=true;unit.detail=`恢复事实无法安全更新：${error?.message||error}`;unit.updatedAt=nowIso();return false;}};
     if(effectCapable){try{callbacks.onEffectAttempt?.({id:effectAttemptId,workUnitId:unit.id,signature:workSemanticSignature(workUnit),projectAccess:workUnit.projectAccess,networkAccess:workUnit.networkAccess,inputRefs:[...workUnit.inputRefs],admittedAt:nowIso(),reason:'effect-capable-work-admitted',resolved:false});effectAttemptOpen=true;}catch(error){unit.status=WorkUnitStatus.SUSPENDED;unit.nextRetryAt=null;unit.effectRecoveryRequired=true;unit.detail=`无法在现实操作前持久化恢复边界：${error?.message||error}`;unit.updatedAt=nowIso();session.runningControllers.delete(unit.id);this.emit(session,callbacks);return Promise.resolve();}}
@@ -310,7 +317,7 @@ export class RootRuntime{
 
       if(decision.kind==='delegate'){
         if(!decision.delegations.length)throw invalidDelegationPlan(['delegate 决策必须至少包含一个 Work Unit。']);
-        const plan=validateDelegationPlan(decision.delegations,{knownWorkIds:[...session.issuedWorkIds],availableInputRefs:taskInputRefs(task)}),batchSignatures=new Set();
+        const governedObligationIds=list(task?.taskContract?.obligations).filter(item=>obligationId(item)&&item?.certification==='supported').map(obligationId),plan=validateDelegationPlan(decision.delegations,{knownWorkIds:[...session.issuedWorkIds],availableInputRefs:taskInputRefs(task),governedObligationIds}),batchSignatures=new Set();
         for(const item of plan.delegations){
           const signature=workSemanticSignature(item);
           if(batchSignatures.has(signature)){plan.issues.push(`同一 Root 决策重复创建了语义相同的工作：${item.title||item.id}。`);plan.valid=false;}
