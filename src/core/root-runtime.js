@@ -36,7 +36,7 @@ function workSemanticSignature(item){
   const normalize=value=>text(value).replace(/\s+/g,' ');
   return JSON.stringify({
     title:normalize(item?.title),goal:normalize(item?.goal),expectedOutput:normalize(item?.expectedOutput),stopCondition:normalize(item?.stopCondition),
-    obligationRefs:list(item?.obligationRefs).map(normalize).filter(Boolean).sort(),
+    obligationRefs:list(item?.obligationRefs).map(normalize).filter(Boolean).sort(),subjectRefs:[...new Set(list(item?.subjectRefs).map(normalize).filter(Boolean))].sort(),
     projectAccess:normalize(item?.projectAccess||'none'),networkAccess:item?.networkAccess===true,skillId:normalize(item?.skillId),
     dependsOn:list(item?.dependsOn).map(normalize).filter(Boolean).sort(),inputRefs:list(item?.inputRefs).map(normalize).filter(Boolean).sort(),
   });
@@ -93,7 +93,7 @@ export function validateDelegationPlan(delegations,{knownWorkIds=[],availableInp
   const raw=list(delegations),issues=[];
   const selected=raw.map((item,index)=>({
     ...item,id:text(item?.id),title:text(item?.title),goal:text(item?.goal),expectedOutput:text(item?.expectedOutput),stopCondition:text(item?.stopCondition),
-    obligationRefs:[...new Set(list(item?.obligationRefs).map(text).filter(Boolean))],
+    obligationRefs:[...new Set(list(item?.obligationRefs).map(text).filter(Boolean))],subjectRefs:[...new Set(list(item?.subjectRefs).map(text).filter(Boolean))],
     projectAccess:text(item?.projectAccess||'none').toLowerCase(),networkAccess:item?.networkAccess===true,skillId:item?.skillId==null||!text(item.skillId)?null:text(item.skillId),
     dependsOn:[...new Set(list(item?.dependsOn).map(text).filter(Boolean))],inputRefs:[...new Set(list(item?.inputRefs).map(text).filter(Boolean))],__index:index,
   }));
