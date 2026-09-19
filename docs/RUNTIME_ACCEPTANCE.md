@@ -15,6 +15,18 @@ The pre-closure head `bea4c0e4f787967a379a3da266cf703d69bd68c1` passed GitHub Ac
 - Windows full `npm run verify`: PASS
 - fresh tracked-files unpack + `npm run verify`: PASS
 
+The parent/child governance experiment also established deterministic evidence at head `bdbb4dd5ed602d17070a9c05a609514d73ae449c`, GitHub Actions run `35439469900`:
+
+- Ubuntu full verify: PASS
+- Windows full verify: PASS
+- Ubuntu/Windows module layers: PASS
+- Ubuntu/Windows functional layers: PASS
+- coverage: PASS
+- fresh tracked-files unpack verification: PASS
+- final autonomous test-suite completion gate: PASS
+
+This proves the current code path and regression radius described by those tests. It does **not** promote Scenario E's real-model behavioral claim to PASS.
+
 Any descendant commit still requires its own exact-head CI before release-ready status.
 
 ## Real Runtime environment
