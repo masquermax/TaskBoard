@@ -47,6 +47,20 @@ function governedParentContext(task){
   };
 }
 
+function confirmedTaskClaims(task){
+  const analysis=task?.analysisState??task?.analysis_state??null;
+  return list(analysis?.current?.claims)
+    .filter(item=>item?.level==='confirmed'&&text(item?.id)&&text(item?.statement))
+    .map(item=>({
+      id:text(item.id),
+      statement:text(item.statement),
+      evidenceIds:list(item.evidenceIds).map(text).filter(Boolean),
+      scope:text(item.scope)||null,
+      coverage:text(item.coverage)||null,
+      obligationRefs:list(item.obligationRefs).map(text).filter(Boolean),
+    }));
+}
+
 function recoveryInstructions(task){
   const attempts=unresolvedEffectAttempts(task?.executionState);if(!attempts.length)return'';
   const summary=attempts.map(item=>({id:item.id,workUnitId:item.workUnitId||null,projectAccess:item.projectAccess??'unknown',networkAccess:item.networkAccess??null,inputRefs:list(item.inputRefs),admittedAt:item.admittedAt||null,reason:item.reason||null,actuationClosed:item.actuationClosed===true}));
@@ -87,10 +101,11 @@ export function compileRootExecutorRequest({task,subagentResults=[],humanGateway
 }
 
 export function compileSubagentExecutorRequest({task,delegation,policyContext=null,modelPolicy=null,onProgress=null,onExecutionStarted=null,signal=null,executorContext=null}={}){
-  const instructions=`${policyInstructions(policyContext)}\n\nWork Unit protocol:\n- Execute exactly workUnit.goal. workUnit.expectedOutput + workUnit.stopCondition are the complete semantic boundary. Stop immediately when that bounded output is established; unused time/tool budget is not work.\n- workUnit.obligationRefs identifies the parent obligation(s) this local work is allowed to serve. It is a parent-position binding, not proof of completion and not permission to reinterpret the obligation.\n- parentGovernance is inherited from the parent Task. Respect its obligations and constraints before acting. It does not expand your authority or make you a Task-level judge. If current Reality shows a required parent precondition is absent, a parent assumption/rule conflicts with Reality, or the requested Work would need to exceed its governed boundary, do not work around it: return traceable source-near Evidence plus a precise blocker and stop. Root decides whether to acquire a missing precondition, replan, challenge the parent assumption/rule, or escalate the boundary.\n- A local result never proves a parent obligation or Task completion. Return what Reality establishes; Root owns composition and completion judgment.\n- Use only the selected Task inputs and AuthorizedGrant capabilities. Do not expand the Task or select a new goal.\n- Return only result + traceable source-near Evidence + optional execution blocker. Do not classify Task truth, confidence, Gap, recommendation, completion, next work, effect closure, or what the result means.\n- Search output is only a locator. For a source-code fact, read the actual file and emit PROJECT_FILE Evidence with its concrete locator + observation.\n- If expectedOutput cannot be reached inside this boundary, return the blocker and stop. Root decides what happens next.\n- Executor Runtime Context is a supplied runtime fact; do not re-probe capabilities already marked unavailable.`;
+  const instructions=`${policyInstructions(policyContext)}\n\nWork Unit protocol:\n- Execute exactly workUnit.goal. workUnit.expectedOutput + workUnit.stopCondition are the complete semantic boundary. Stop immediately when that bounded output is established; unused time/tool budget is not work.\n- workUnit.obligationRefs identifies the parent obligation(s) this local work is allowed to serve. It is a parent-position binding, not proof of completion and not permission to reinterpret the obligation.\n- parentGovernance is inherited from the parent Task. Respect its obligations and constraints before acting. It does not expand your authority or make you a Task-level judge. If current Reality shows a required parent precondition is absent, a parent assumption/rule conflicts with Reality, or the requested Work would need to exceed its governed boundary, do not work around it: return traceable source-near Evidence plus a precise blocker and stop. Root decides whether to acquire a missing precondition, replan, challenge the parent assumption/rule, or escalate the boundary.\n- knownClaims contains the current CONFIRMED Task cognition already admitted by Root/Validator. Reuse it as the starting point; do not spend this Work merely rediscovering the same fact. If fresh direct Reality conflicts with a known Claim, return source-near Evidence plus a precise blocker/observation so Root can reopen or revise it; do not silently overwrite parent cognition.\n- A local result never proves a parent obligation or Task completion. Return what Reality establishes; Root owns composition and completion judgment.\n- Use only the selected Task inputs and AuthorizedGrant capabilities. Do not expand the Task or select a new goal.\n- Return only result + traceable source-near Evidence + optional execution blocker. Do not classify Task truth, confidence, Gap, recommendation, completion, next work, effect closure, or what the result means.\n- Search output is only a locator. For a source-code fact, read the actual file and emit PROJECT_FILE Evidence with its concrete locator + observation.\n- If expectedOutput cannot be reached inside this boundary, return the blocker and stop. Root decides what happens next.\n- Executor Runtime Context is a supplied runtime fact; do not re-probe capabilities already marked unavailable.`;
   const context={
     task:{id:task?.id||null,title:task?.title||'',instruction:task?.instruction||''},
     parentGovernance:governedParentContext(task),
+    knownClaims:confirmedTaskClaims(task),
     selectedProjects:list(task?.projectScopes).map((scope,index)=>({ref:text(scope?.inputRef)||`project:${index}`,label:scope?.label||`Project ${index+1}`})),
     selectedAttachments:list(task?.attachments).map(a=>({id:a?.id||null,name:a?.name||'',mimeType:a?.mimeType||null,size:a?.size??null})),
     selectedReferencedResults:list(task?.references).map(r=>({taskId:r?.source_task_id,title:r?.title,result:r?.final_result})),
