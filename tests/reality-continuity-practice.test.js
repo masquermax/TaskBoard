@@ -2,15 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compileRootExecutorRequest, compileSubagentExecutorRequest, ROOT_RESPONSE_CONTRACT } from '../src/core/executor-contract.js';
 import { projectCertifiedKnownClaims, rootRealityContinuityInstructions, certifiedCognitionReuseInstructions } from '../src/core/certified-cognition-reuse.js';
+import { RootRuntime } from '../src/core/root-runtime.js';
 
 function claim(id,statement,{level='confirmed',subjectRefs=[]}={}){
   return{id,statement,level,evidenceIds:[`E-${id}`],scope:'single_system',coverage:'system',hops:[],subjectRefs,obligationRefs:[]};
 }
 
 function task(){
-  return{
+  return {
     id:'T-REALITY',title:'operate only as far as needed',instruction:'continue with minimum sufficient Reality',
-    projectScopes:[],attachments:[],references:[],taskContract:{id:'TC-REALITY',revision:1,authority:{},obligations:[],constraints:[]},
+    ready_reason:'NEW',projectScopes:[],attachments:[],references:[],workReceipts:[],
+    taskContract:{id:'TC-REALITY',revision:1,authority:{},obligations:[],constraints:[]},
     analysisState:{current:{claims:[
       claim('C-A','server A uses JDK 1.7',{subjectRefs:['server:A']}),
       claim('C-B','server B uses JDK 8',{subjectRefs:['server:B']}),
@@ -22,6 +24,10 @@ function task(){
 
 function work(overrides={}){
   return{id:'WU-A',title:'inspect app on A',goal:'inspect only the needed app state',expectedOutput:'needed state',stopCondition:'decision can be made',obligationRefs:[],projectAccess:'none',networkAccess:false,skillId:null,dependsOn:[],inputRefs:[],...overrides};
+}
+
+function rootDecision(kind,overrides={}){
+  return{kind,summary:'bounded',finalResult:null,resultMode:'analysis',evidence:[],claims:[],gaps:[],recommendations:[],steps:[],gateway:null,gapResolutions:[],delegations:[],effectClosures:[],...overrides};
 }
 
 test('practice 1: an identity-sensitive Work receives A cognition but not B cognition',()=>{
@@ -74,4 +80,28 @@ test('practice 6: subject binding is optional, so irrelevant identity does not b
   assert.equal(delegationSchema.required.includes('subjectRefs'),false);
   const claimInstructions=certifiedCognitionReuseInstructions();
   assert.match(claimInstructions,/If subject identity is irrelevant to the bounded result, do not investigate it/i);
+});
+
+test('practice 7: subjectRefs survives Root plan -> Stage -> actual Subagent handoff',async()=>{
+  let rootCalls=0,observedWork=null;
+  const executor={
+    async runRoot({onExecutionStarted}){
+      rootCalls+=1;onExecutionStarted?.();
+      if(rootCalls===1)return rootDecision('delegate',{delegations:[work({subjectRefs:['server:A']})]});
+      return rootDecision('complete');
+    },
+  };
+  const subagentRuntime={
+    async run(_task,delegation){
+      observedWork=delegation;
+      return{delegationId:delegation.id,result:'done',evidence:[],blocker:null};
+    },
+  };
+  const modelRouter={async prepare(){},route(){return{};},release(){}};
+  const completionEvaluator={evaluate(){return{goalState:'satisfied',assessments:[]};}};
+  const runtime=new RootRuntime({executor,modelRouter,subagentRuntime,completionEvaluator});
+
+  const outcome=await runtime.execute(task());
+  assert.equal(outcome.kind,'goal_satisfied');
+  assert.deepEqual(observedWork?.subjectRefs,['server:A']);
 });
