@@ -17,6 +17,28 @@ function feedback(target,reason,action='REJECT_LEDGER_ENTRY'){return{ruleId:'C-0
 function rejectionBoundary(task,currentState,availableEvidence=[]){return JSON.stringify({taskId:text(task?.id)||'task',stateVersion:normalizeCertifiedState(currentState).version,evidenceIds:uniqueStrings(list(availableEvidence).map(item=>item?.id)).sort()});}
 function rejectionFingerprint(violations=[]){return JSON.stringify(list(violations).map(item=>({ruleId:text(item?.ruleId),target:text(item?.target),reason:text(item?.reason),action:text(item?.action)})));}
 
+function persistedWorkSubjectRefs(task){
+  const byEvidenceId=new Map();
+  for(const receipt of list(task?.workReceipts)){
+    const subjectRefs=uniqueStrings(receipt?.workUnit?.subjectRefs);
+    if(!subjectRefs.length)continue;
+    for(const item of list(receipt?.result?.evidence)){
+      const id=text(item?.id);if(!id)continue;
+      byEvidenceId.set(id,uniqueStrings([...(byEvidenceId.get(id)||[]),...subjectRefs]));
+    }
+  }
+  return byEvidenceId;
+}
+
+function workSubjectRefsForEvidence(task,selectedWorkEvidence=[]){
+  const byEvidenceId=persistedWorkSubjectRefs(task);
+  for(const item of list(selectedWorkEvidence)){
+    const id=text(item?.id),transient=uniqueStrings(item?._workSubjectRefs);if(!id||!transient.length)continue;
+    byEvidenceId.set(id,uniqueStrings([...(byEvidenceId.get(id)||[]),...transient]));
+  }
+  return byEvidenceId;
+}
+
 function ledgerViolations(decision,evidenceById,currentState,workSubjectRefsByEvidenceId=new Map()){
   const violations=[];
   const claimById=byId([...list(normalizeCertifiedState(currentState).current.claims),...list(decision.claims)]);
@@ -33,10 +55,10 @@ function ledgerViolations(decision,evidenceById,currentState,workSubjectRefsByEv
       if(indirect.length)violations.push(feedback(`claim:${id}`,`CONFIRMED 结论依赖未验证/INDIRECT 来源：${indirect.map(item=>text(item?.id)).filter(Boolean).join(', ')}；结论可信度不能高于来源。`,'REJECT_TRUST_ESCALATION'));
 
       // Concrete subject identity is part of provenance, not free Root prose.
-      // When a cited Evidence came from a subject-bound Work Unit, a CONFIRMED
-      // Claim must preserve exactly that concrete Work boundary. This prevents
-      // server B Reality from being certified as server A (or as ambient/general
-      // cognition) and later reused faithfully in the wrong place.
+      // Runtime binds live Evidence to its Work subject, and persisted WorkReceipt
+      // reconstructs the same binding after process/session restart. A CONFIRMED
+      // Claim must preserve that concrete Work boundary so server B Reality cannot
+      // later become server A (or ambient/general) cognition.
       const workSubjectRefs=uniqueStrings(checked.refs.flatMap(ref=>list(workSubjectRefsByEvidenceId.get(ref))));
       if(workSubjectRefs.length&&!sameStringSet(claim?.subjectRefs,workSubjectRefs)){
         violations.push(feedback(
@@ -104,11 +126,7 @@ export class ValidatorRuntime{
       ...list(proposed.claims).flatMap(item=>list(item?.hops).flatMap(hop=>uniqueStrings(hop?.evidenceIds))),
     ]);
     const selectedWorkEvidence=list(availableEvidence).filter(item=>wanted.has(text(item?.id)));
-    const workSubjectRefsByEvidenceId=new Map(
-      selectedWorkEvidence
-        .map(item=>[text(item?.id),uniqueStrings(item?._workSubjectRefs)])
-        .filter(([id,subjectRefs])=>id&&subjectRefs.length)
-    );
+    const workSubjectRefsByEvidenceId=workSubjectRefsForEvidence(task,selectedWorkEvidence);
     proposed.evidence=mergeUniqueById(selectedWorkEvidence,rootEvidence);
 
     const traced=this.sourceTraceVerifier.enforce({task,evidence:proposed.evidence,humanGatewayHistory});
