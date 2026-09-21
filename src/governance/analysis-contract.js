@@ -44,6 +44,11 @@ export const claimSchema = {
     scope:{type:'string',enum:Object.values(ClaimScope)},
     coverage:{type:'string',enum:Object.values(EvidenceCoverage)},
     hops:{type:'array',items:hopSchema,maxItems:12},
+    // For direct parameter/state Reality only. These are human-readable semantic
+    // coordinates, not opaque ids. Use empty strings when the Claim is not safely
+    // representable as one factual property/value slot.
+    factProperty:{type:'string'},
+    factValue:{type:'string'},
     // Strict structured output keeps this field present. [] means concrete
     // subject identity is irrelevant/not established for this Claim; populated
     // refs are used only when server/environment identity changes action.
@@ -54,7 +59,7 @@ export const claimSchema = {
     // later aggregates these explicit Root judgments deterministically.
     obligationRefs:{type:'array',items:{type:'string'},maxItems:20},
   },
-  required:['id','statement','level','evidenceIds','scope','coverage','hops','subjectRefs','obligationRefs'],
+  required:['id','statement','level','evidenceIds','scope','coverage','hops','factProperty','factValue','subjectRefs','obligationRefs'],
   additionalProperties:false,
 };
 
