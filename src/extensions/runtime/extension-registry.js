@@ -31,6 +31,14 @@ function validateContinuation(id,continuation){
   return continuation;
 }
 
+function validateResourceActivation(id,resourceActivation){
+  if(!resourceActivation)return null;
+  if(typeof resourceActivation.activate!=='function'){
+    throw new Error(`EXTENSION_RESOURCE_ACTIVATION_INVALID:${id}`);
+  }
+  return resourceActivation;
+}
+
 function validateApiVersion(id,value){
   const version=Number(value);
   if(!Number.isInteger(version)||version<1)throw new Error(`EXTENSION_API_VERSION_REQUIRED:${id}`);
@@ -74,6 +82,7 @@ export class ExtensionRegistry {
       capabilityProvider: extension.capabilityProvider || null,
       connectionSettings: validateConnectionSettings(key,extension.connectionSettings||null),
       continuation: validateContinuation(key,extension.continuation||null),
+      resourceActivation: validateResourceActivation(key,extension.resourceActivation||null),
       presentation: normalizePresentation(extension.presentation),
       surfaceHosts: Array.isArray(extension.surfaceHosts) ? extension.surfaceHosts : [],
     };
