@@ -4,4 +4,5 @@ export { ExecutorPort } from '../core/executor-port.js';
 export { CapabilityProviderPort, DiscoveryLevel, basicCapabilitySnapshot } from './ports/capability-provider.js';
 export { ConnectionSettingsPort } from './ports/connection-settings.js';
 export { ContinuationPort } from './ports/continuation.js';
+export { ResourceActivationPort } from './ports/resource-activation.js';
 export { SurfaceHostPort } from './ports/surface-host.js';
