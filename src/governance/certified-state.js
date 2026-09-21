@@ -7,6 +7,17 @@ function stable(value){return JSON.stringify(value);}
 function same(a,b){return stable(a)===stable(b);}
 function byId(items=[]){return new Map((Array.isArray(items)?items:[]).map(item=>[text(item?.id),item]).filter(([id])=>id));}
 function pad(value){return String(value).padStart(4,'0');}
+function normalizedFactProperty(value){return text(value).replace(/\s+/g,' ').toLowerCase();}
+function normalizedFactValue(value){return text(value).replace(/\s+/g,' ');}
+function factSlotKey(item){
+  const property=normalizedFactProperty(item?.factProperty),value=normalizedFactValue(item?.factValue);
+  if(item?.level!==ClaimLevel.CONFIRMED||!property||!value)return null;
+  return stable([
+    property,
+    uniqueStrings(item?.subjectRefs).sort(),
+    text(item?.scope)||null,
+  ]);
+}
 
 export function emptyCertifiedState(){return{version:0,current:{...normalizeAnalysisFields({resultMode:'analysis'}),resultMode:'analysis'},turns:[]};}
 
@@ -34,10 +45,56 @@ function mergeById(target,incoming,{kind,issues,delta,immutable=false,requiresNe
   }
 }
 
+function mergeClaims(target,incoming,{issues,delta}={}){
+  const map=byId(target);
+  for(const raw of Array.isArray(incoming)?incoming:[]){
+    const id=text(raw?.id);if(!id)continue;
+    const item=clone(raw),previousById=map.get(id);
+    if(previousById){
+      if(same(previousById,item))continue;
+      if(!changedWithNewEvidence(previousById,item)){
+        issues.push({code:'CLAIM_REVISION_REQUIRES_NEW_EVIDENCE',target:id,reason:`claim ${id} 已进入认证状态；修改旧认知必须带来新的证据引用。`});
+        continue;
+      }
+      const index=target.findIndex(value=>text(value?.id)===id);target[index]=item;map.set(id,item);delta.push(item);continue;
+    }
+
+    const slot=factSlotKey(item);
+    if(slot){
+      const matches=target.filter(existing=>factSlotKey(existing)===slot);
+      if(matches.length>1){
+        issues.push({code:'CLAIM_FACT_SLOT_AMBIGUOUS_CURRENT',target:id,reason:`同一 factual Reality slot 已存在多个 active Claim；Runtime 无法安全判断哪个是当前值。`});
+        continue;
+      }
+      if(matches.length===1){
+        const previous=matches[0],previousId=text(previous?.id),previousValue=normalizedFactValue(previous?.factValue),nextValue=normalizedFactValue(item?.factValue);
+        const index=target.findIndex(value=>text(value?.id)===previousId);
+        if(previousValue===nextValue){
+          const merged={
+            ...previous,
+            evidenceIds:uniqueStrings([...(previous?.evidenceIds||[]),...(item?.evidenceIds||[])]),
+            obligationRefs:uniqueStrings([...(previous?.obligationRefs||[]),...(item?.obligationRefs||[])]),
+          };
+          if(same(previous,merged))continue;
+          target[index]=merged;map.set(previousId,merged);delta.push(merged);continue;
+        }
+        if(!changedWithNewEvidence(previous,item)){
+          issues.push({code:'CLAIM_FACT_SLOT_REVISION_REQUIRES_NEW_EVIDENCE',target:previousId,reason:`factual Reality slot ${text(item?.factProperty)} 已有当前值；改值必须带来新的证据引用。`});
+          continue;
+        }
+        const revised={...item,id:previousId};
+        target[index]=revised;map.set(previousId,revised);delta.push(revised);continue;
+      }
+    }
+
+    target.push(item);map.set(id,item);delta.push(item);
+  }
+}
+
 export function applyCertifiedDelta(state,decision,{triggerRefs=[],committedAt=new Date().toISOString()}={}){
   const base=normalizeCertifiedState(state),current=clone(base.current),candidate=normalizeAnalysisFields(decision),issues=[],delta={evidence:[],claims:[],gaps:[],gapResolutions:[],recommendations:[],steps:[]};
   mergeById(current.evidence,candidate.evidence,{kind:'evidence',issues,delta:delta.evidence,immutable:true});
-  mergeById(current.claims,candidate.claims,{kind:'claim',issues,delta:delta.claims,requiresNewEvidence:true});
+  mergeClaims(current.claims,candidate.claims,{issues,delta:delta.claims});
 
   // A valid closure is the semantic owner of an already-certified Gap in this turn.
   // Structured model output can redundantly restate the same Gap while also emitting
