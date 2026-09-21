@@ -90,7 +90,7 @@ export function bootstrap({
   dbFile=null,
   executorName=process.env.TASKBOARD_EXECUTOR||'codex',
   continuationName=process.env.TASKBOARD_CONTINUATION||null,
-  resourceActivationName=process.env.TASKBOARD_RESOURCE_ACTIVATION||continuationName||null,
+  resourceActivationName=process.env.TASKBOARD_RESOURCE_ACTIVATION||null,
   extensionRegistry=null,
   startScheduler=true,
   taskboardUrl=process.env.TASKBOARD_URL||'http://127.0.0.1:4317',
@@ -120,21 +120,26 @@ export function bootstrap({
   }
   const continuation=continuationExtension?.continuation||null;
 
-  // Resource Activation is a separate optional Extension Point. It supplies
-  // non-authoritative route hints to Root; it does not read Owners, grant scope,
-  // or certify facts. It may share an Extension with Continuation but is not the
-  // same capability.
+  // Resource Activation is a separate optional Extension Point. Explicit
+  // selection is fail-closed. Without explicit selection, a bound Continuation
+  // (or the active Executor Extension) may contribute it opportunistically; a
+  // continuation-only extension remains fully valid.
   const resourceActivationKey=String(resourceActivationName||'').trim()||null;
-  const resourceActivationExtension=resourceActivationKey
-    ? (resourceActivationKey===extension.id
+  let resourceActivationExtension=null;
+  if(resourceActivationKey){
+    resourceActivationExtension=resourceActivationKey===extension.id
       ? extension
       : (resourceActivationKey===continuationKey&&continuationExtension
         ? continuationExtension
-        : registry.create(resourceActivationKey,{rootDir,taskboardUrl})))
-    : null;
-  if(resourceActivationExtension&&!resourceActivationExtension.resourceActivation){
-    try{database.close();}catch{/* fail-closed cleanup */}
-    throw new Error(`EXTENSION_HAS_NO_RESOURCE_ACTIVATION:${resourceActivationKey}`);
+        : registry.create(resourceActivationKey,{rootDir,taskboardUrl}));
+    if(!resourceActivationExtension.resourceActivation){
+      try{database.close();}catch{/* fail-closed cleanup */}
+      throw new Error(`EXTENSION_HAS_NO_RESOURCE_ACTIVATION:${resourceActivationKey}`);
+    }
+  }else if(continuationExtension?.resourceActivation){
+    resourceActivationExtension=continuationExtension;
+  }else if(extension.resourceActivation){
+    resourceActivationExtension=extension;
   }
   const resourceActivation=resourceActivationExtension?.resourceActivation||null;
 
