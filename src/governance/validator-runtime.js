@@ -47,6 +47,8 @@ function ledgerViolations(decision,evidenceById,currentState,workSubjectRefsByEv
   for(const claim of list(decision.claims)){
     const id=text(claim?.id)||'claim';
     if(!text(claim?.statement))violations.push(feedback(`claim:${id}`,'Claim 缺少 statement。'));
+    const factProperty=text(claim?.factProperty),factValue=text(claim?.factValue);
+    if(Boolean(factProperty)!==Boolean(factValue))violations.push(feedback(`claim:${id}`,'结构化 factual Reality 必须同时提供 factProperty 与 factValue；只提供一半会让事实槽位静默失效。','REJECT_INCOMPLETE_FACT_COORDINATE'));
     const checked=refsExist(claim?.evidenceIds,evidenceById);
     if(!checked.refs.length)violations.push(feedback(`claim:${id}`,'Claim 没有真实来源凭证；未知内容必须由 Root 表达为 Gap。'));
     if(checked.missing.length)violations.push(feedback(`claim:${id}`,`Claim 引用了不存在或已被来源核对拒绝的 Evidence：${checked.missing.join(', ')}。`));
