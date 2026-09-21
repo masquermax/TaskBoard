@@ -83,6 +83,49 @@ test('resource activation failure is fail-open and does not block Root execution
   }finally{runtime.database.close();rmSync(root,{recursive:true,force:true});}
 });
 
+test('a continuation-only extension remains valid and does not become a resource activation requirement',()=>{
+  const capture=[];
+  const root=tempRoot();
+  const registry=new ExtensionRegistry();
+  registry.register('fake-executor',()=>executorExtension(capture));
+  registry.register('continuation-only',()=>({
+    apiVersion:EXTENSION_API_VERSION,
+    displayName:'Continuation Only',
+    orchestrationMode:OrchestrationMode.TASKBOARD,
+    continuation:{async health(){return {ready:true};},async read(){return null;},async write(){return null;}},
+    surfaceHosts:[],
+  }));
+  const runtime=bootstrap({rootDir:root,executorName:'fake-executor',continuationName:'continuation-only',extensionRegistry:registry,startScheduler:false});
+  try{
+    assert.ok(runtime.continuation);
+    assert.equal(runtime.resourceActivation,null);
+  }finally{runtime.database.close();rmSync(root,{recursive:true,force:true});}
+});
+
+test('a combined continuation extension auto-contributes resource activation without a second configuration name',async()=>{
+  const capture=[];
+  const calls=[];
+  const root=tempRoot();
+  const registry=new ExtensionRegistry();
+  registry.register('fake-executor',()=>executorExtension(capture));
+  registry.register('combined',()=>({
+    apiVersion:EXTENSION_API_VERSION,
+    displayName:'Combined Cognition',
+    orchestrationMode:OrchestrationMode.TASKBOARD,
+    continuation:{async health(){return {ready:true};},async read(){return null;},async write(){return null;}},
+    resourceActivation:{async activate(request){calls.push(request);return {activated:[{kind:'knowledge',owner:'masquermax/Learning-Knowledge/SixSigma',entry:'README.md',reason:'domain knowledge'}]};}},
+    surfaceHosts:[],
+  }));
+  const runtime=bootstrap({rootDir:root,executorName:'fake-executor',continuationName:'combined',extensionRegistry:registry,startScheduler:false});
+  try{
+    assert.ok(runtime.continuation);
+    assert.ok(runtime.resourceActivation);
+    await runtime.executor.runRoot({task:{id:'t3',title:'Six Sigma',instruction:'继续学习六西格玛'},policyContext:{prompt:'BASE'}});
+    assert.equal(calls.length,1);
+    assert.match(capture[0].policyContext.prompt,/Learning-Knowledge\/SixSigma/);
+  }finally{runtime.database.close();rmSync(root,{recursive:true,force:true});}
+});
+
 test('extension registry rejects malformed resource activation providers',()=>{
   const registry=new ExtensionRegistry();
   registry.register('bad',()=>({apiVersion:EXTENSION_API_VERSION,orchestrationMode:OrchestrationMode.TASKBOARD,resourceActivation:{},surfaceHosts:[]}));
