@@ -21,6 +21,7 @@ import { CompletionEvaluator } from '../governance/completion-evaluator.js';
 import { RuntimeSettingsStore, executionLimitsFromCapability, resolveEffectiveRuntimeSettings } from '../core/runtime-settings.js';
 
 const packageRoot=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
+const RESOURCE_KINDS=new Set(['reality','experience','knowledge','method','capability','external']);
 
 function createPersistence({rootDir,dbFile=null}){
   const filename=dbFile||resolve(rootDir,'data/taskboard.json');
@@ -28,11 +29,68 @@ function createPersistence({rootDir,dbFile=null}){
   return{database,repository:new JsonTaskRepository(database),storage:'json',filename};
 }
 
+function text(value,max=600){return String(value??'').trim().slice(0,max);}
+
+function normalizeResourceActivation(raw){
+  const source=raw&&typeof raw==='object'?raw:{};
+  const activated=(Array.isArray(source.activated)?source.activated:[]).slice(0,12).map(item=>({
+    kind:RESOURCE_KINDS.has(String(item?.kind||'').toLowerCase())?String(item.kind).toLowerCase():'method',
+    owner:text(item?.owner,300),
+    entry:text(item?.entry,600),
+    reason:text(item?.reason,600),
+  })).filter(item=>item.owner);
+  return {
+    project:text(source.project,120)||null,
+    domain:text(source.domain,120)||null,
+    consideredKinds:(Array.isArray(source.consideredKinds)?source.consideredKinds:[]).map(value=>String(value).toLowerCase()).filter(value=>RESOURCE_KINDS.has(value)).slice(0,6),
+    activated,
+  };
+}
+
+function activationRequest(request={}){
+  const task=request.task||{};
+  const signals=[
+    task.title,
+    ...(Array.isArray(task.projectScopes)?task.projectScopes.flatMap(scope=>[scope?.name,scope?.path]):[]),
+    ...(Array.isArray(task.references)?task.references.map(ref=>ref?.title):[]),
+  ].map(value=>text(value,300)).filter(Boolean).slice(0,20);
+  return {
+    goal:text(task.instruction||task.title,1200),
+    intent:request.authorityHandoff?'control':(Array.isArray(request.activeWork)&&request.activeWork.length?'synthesis':'reason'),
+    signals,
+    maxResults:8,
+  };
+}
+
+function bindRootResourceActivation(executor,resourceActivation){
+  if(!resourceActivation||typeof resourceActivation.activate!=='function'||typeof executor?.runRoot!=='function')return executor;
+  const baseRunRoot=executor.runRoot.bind(executor);
+  executor.runRoot=async request=>{
+    let activation=null;
+    try{
+      activation=normalizeResourceActivation(await resourceActivation.activate(activationRequest(request)));
+    }catch(error){
+      // Resource activation is optional cognition/routing. It must never become
+      // a Task execution dependency or a new Authority boundary.
+      activation=null;
+    }
+    if(!activation?.activated?.length)return baseRunRoot(request);
+    const basePrompt=String(request?.policyContext?.prompt||'');
+    const resourceBlock=`\n\nNON-AUTHORITATIVE RESOURCE ACTIVATION\nThe following entries are route hints/pointers only. They are NOT Evidence, Claims, Runtime truth, or capability grants. Use them only to decide whether a bounded Work Unit should read a real Owner. Do not treat an Owner path as proof that its contents support any claim.\n${JSON.stringify(activation,null,2)}\n`;
+    return baseRunRoot({
+      ...request,
+      policyContext:{...(request.policyContext||{}),prompt:`${basePrompt}${resourceBlock}`},
+    });
+  };
+  return executor;
+}
+
 export function bootstrap({
   rootDir,
   dbFile=null,
   executorName=process.env.TASKBOARD_EXECUTOR||'codex',
   continuationName=process.env.TASKBOARD_CONTINUATION||null,
+  resourceActivationName=process.env.TASKBOARD_RESOURCE_ACTIVATION||continuationName||null,
   extensionRegistry=null,
   startScheduler=true,
   taskboardUrl=process.env.TASKBOARD_URL||'http://127.0.0.1:4317',
@@ -62,11 +120,29 @@ export function bootstrap({
   }
   const continuation=continuationExtension?.continuation||null;
 
+  // Resource Activation is a separate optional Extension Point. It supplies
+  // non-authoritative route hints to Root; it does not read Owners, grant scope,
+  // or certify facts. It may share an Extension with Continuation but is not the
+  // same capability.
+  const resourceActivationKey=String(resourceActivationName||'').trim()||null;
+  const resourceActivationExtension=resourceActivationKey
+    ? (resourceActivationKey===extension.id
+      ? extension
+      : (resourceActivationKey===continuationKey&&continuationExtension
+        ? continuationExtension
+        : registry.create(resourceActivationKey,{rootDir,taskboardUrl})))
+    : null;
+  if(resourceActivationExtension&&!resourceActivationExtension.resourceActivation){
+    try{database.close();}catch{/* fail-closed cleanup */}
+    throw new Error(`EXTENSION_HAS_NO_RESOURCE_ACTIVATION:${resourceActivationKey}`);
+  }
+  const resourceActivation=resourceActivationExtension?.resourceActivation||null;
+
   const attachmentStore=new AttachmentStore({rootDir:resolve(rootDir,'data/attachments')});
   const taskService=new TaskService(repository,{attachmentStore,defaultExecutorKey:extension.id});
 
   if(!extension.executor)throw new Error(`EXTENSION_HAS_NO_EXECUTOR:${executorName}`);
-  const executor=extension.executor;
+  const executor=bindRootResourceActivation(extension.executor,resourceActivation);
   const capabilityProvider=extension.capabilityProvider;
   const surfaceManager=new SurfaceManager({hosts:extension.surfaceHosts});
 
@@ -93,5 +169,5 @@ export function bootstrap({
   const recovered=scheduler.recoverStaleRunningTasks();if(recovered)console.log(`[recovery] reconciled ${recovered} stale RUNNING task(s)`);
   const cleanup=new DailyCleanupController({repository,attachmentStore});
   if(startScheduler)scheduler.start();
-  return{database,repository,taskService,executor,capabilityProvider,extension,extensionRegistry:registry,continuation,continuationExtension,surfaceManager,governanceCompiler,validatorRuntime,rootRuntime,scheduler,cleanup,settingsStore,runtimeSettingsState,applyRuntimeSettings,storage:persistence.storage,storageFile:persistence.filename};
+  return{database,repository,taskService,executor,capabilityProvider,extension,extensionRegistry:registry,continuation,continuationExtension,resourceActivation,resourceActivationExtension,surfaceManager,governanceCompiler,validatorRuntime,rootRuntime,scheduler,cleanup,settingsStore,runtimeSettingsState,applyRuntimeSettings,storage:persistence.storage,storageFile:persistence.filename};
 }
