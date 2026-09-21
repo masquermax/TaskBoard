@@ -2,6 +2,8 @@ function text(value){return String(value==null?'':value).trim();}
 function list(value){return Array.isArray(value)?value:[];}
 function refs(value){return [...new Set(list(value).map(text).filter(Boolean))];}
 function stableRefs(value){return refs(value).sort();}
+function factProperty(value){return text(value).replace(/\s+/g,' ').toLowerCase();}
+function factValue(value){return text(value).replace(/\s+/g,' ');}
 
 export const CERTIFIED_COGNITION_REUSE_CAPABILITY='certified-cognition-reuse';
 
@@ -13,9 +15,19 @@ function subjectCompatible(claimSubjectRefs=[],workSubjectRefs=[]){
   return claimRefs.some(ref=>wanted.has(ref));
 }
 
-function projectionKey(item){
+function factualProjectionKey(item){
+  const property=factProperty(item?.factProperty),value=factValue(item?.factValue);
+  if(!property||!value)return null;
   return JSON.stringify([
-    text(item?.statement),
+    'fact',property,value,
+    stableRefs(item?.subjectRefs),
+    text(item?.scope)||null,
+  ]);
+}
+
+function projectionKey(item){
+  return factualProjectionKey(item)||JSON.stringify([
+    'claim',text(item?.statement),
     stableRefs(item?.subjectRefs),
     text(item?.scope)||null,
     text(item?.coverage)||null,
@@ -37,9 +49,10 @@ function mergeProjectedClaim(target,item){
 // bound facts stay out rather than becoming ambient context. Populated Work refs
 // admit matching subject facts plus unbound/general cognition.
 //
-// Projection also collapses exact semantic duplicates (same statement + subject
-// + scope + coverage) so repeated Claim ids do not make later execution pay the
-// same cognition cost multiple times.
+// Generic Claims are collapsed only when their existing semantic shape is exact.
+// Direct factual Reality may additionally declare a human-readable factProperty +
+// factValue coordinate. When present, that explicit coordinate is the semantic
+// payload for projection dedupe; Runtime does not guess paraphrase equivalence.
 export function projectCertifiedKnownClaims(task={},workUnit={}){
   const analysis=task?.analysisState??task?.analysis_state??null;
   const workSubjectRefs=refs(workUnit?.subjectRefs);
@@ -50,13 +63,14 @@ export function projectCertifiedKnownClaims(task={},workUnit={}){
     if(item?.level!=='confirmed'||!text(item?.id)||!text(item?.statement))continue;
     if(!subjectCompatible(item?.subjectRefs,workSubjectRefs))continue;
 
-    const subjectRefs=refs(item.subjectRefs);
+    const subjectRefs=refs(item.subjectRefs),property=text(item?.factProperty),value=text(item?.factValue);
     const candidate={
       id:text(item.id),
       statement:text(item.statement),
       evidenceIds:refs(item.evidenceIds),
       scope:text(item.scope)||null,
       coverage:text(item.coverage)||null,
+      ...(property&&value?{factProperty:property,factValue:value}:{}),
       ...(subjectRefs.length?{subjectRefs}:{}),
       obligationRefs:refs(item.obligationRefs),
     };
@@ -76,7 +90,8 @@ export function rootRealityContinuityInstructions(){
     'A supplied command result, log, screenshot-derived observation, or other Evidence may already contain facts beyond the one currently asked about. Reuse decision-relevant facts already present instead of reacquiring them, but do not inspect or persist irrelevant detail merely because it is visible.',
     'When a human-owned action is genuinely required, reduce human relay cost by bundling only observations that are safe/read-only, near-zero incremental effort in the same interaction, and likely to matter to the current path or a near next step. Do not turn this into a broad health check.',
     'Use subjectRefs only when concrete Reality identity can change interpretation or action. Never borrow server B Reality for server A. Use subjectRefs=[] when identity cannot change the current decision; do not create work merely to identify it.',
-    'When fresh DIRECT Evidence invalidates a current Claim about the same subject and fact slot, revise that existing Claim id with the new Evidence so current Certified State contains one active value. Do not add a second contradictory active Claim merely to preserve history; Certified State turn history already preserves the prior value.',
+    'For a direct parameter/state fact that is safely representable as one current Reality slot, set factProperty to a concise human-readable property name and factValue to the concrete current value. Reuse the same factProperty for the same subject/scope slot. Use empty strings for non-factual, relationally ambiguous, inferred, or completion Claims; never invent an opaque fact id merely for dedupe.',
+    'When fresh DIRECT Evidence invalidates a current factual Claim about the same subject/scope/factProperty, revise that slot with the new factValue and Evidence so current Certified State contains one active value. Do not preserve the old value as a second active Claim merely because the new wording or Claim id differs; turn history preserves prior values.',
   ].join(' ');
 }
 
@@ -84,6 +99,7 @@ export function certifiedCognitionReuseInstructions(){
   return [
     'knownClaims contains current CONFIRMED Task cognition already admitted by Root/Validator and compatible with explicit workUnit.subjectRefs when populated.',
     'When workUnit.subjectRefs is empty, only unbound/general cognition is injected; do not treat subject-bound facts from arbitrary systems as ambient context.',
+    'A factual known Claim may include factProperty/factValue as its directly reusable Reality payload. Treat those human-readable semantics as content and the Claim id as reference/provenance only.',
     'Reuse knownClaims as the execution starting point; do not spend this Work merely rediscovering the same fact.',
     'Re-observation is valid only when this Work explicitly requires revalidation or fresh Reality gives a concrete reason the known Claim may no longer hold.',
     'If fresh direct Reality conflicts with a known Claim, return source-near Evidence plus a precise blocker/observation so Root can reopen or revise it; do not silently overwrite parent cognition.',
