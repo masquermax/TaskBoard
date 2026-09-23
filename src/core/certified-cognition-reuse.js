@@ -10,7 +10,10 @@ function subjectCompatible(claimSubjectRefs=[],workSubjectRefs=[]){
   if(!claimRefs.length)return true;
   if(!workRefs.length)return false;
   const wanted=new Set(workRefs);
-  return claimRefs.some(ref=>wanted.has(ref));
+  // Every concrete subject that the Claim depends on must be present in the Work
+  // identity. Overlap alone is unsafe for relational cognition: an A+B Claim must
+  // not become ambient A cognition merely because A is one of its subjects.
+  return claimRefs.every(ref=>wanted.has(ref));
 }
 
 function projectionKey(item){
@@ -35,7 +38,8 @@ function mergeProjectedClaim(target,item){
 // subjectRefs=[] on Work means the bounded execution has no concrete subject
 // dependency. In that case only unbound/general cognition is injected; subject-
 // bound facts stay out rather than becoming ambient context. Populated Work refs
-// admit matching subject facts plus unbound/general cognition.
+// admit only Claims whose complete subject dependency is represented by the Work,
+// plus unbound/general cognition.
 //
 // Projection also collapses exact semantic duplicates (same statement + subject
 // + scope + coverage) so repeated Claim ids do not make later execution pay the
@@ -75,7 +79,7 @@ export function rootRealityContinuityInstructions(){
     'Preserve the precision of human-supplied information. An approximate statement may be sufficient for a low-stakes step; never silently upgrade it into a more exact fact. Revalidate only when the extra precision becomes decision-relevant.',
     'A supplied command result, log, screenshot-derived observation, or other Evidence may already contain facts beyond the one currently asked about. Reuse decision-relevant facts already present instead of reacquiring them, but do not inspect or persist irrelevant detail merely because it is visible.',
     'When a human-owned action is genuinely required, reduce human relay cost by bundling only observations that are safe/read-only, near-zero incremental effort in the same interaction, and likely to matter to the current path or a near next step. Do not turn this into a broad health check.',
-    'Use subjectRefs only when concrete Reality identity can change interpretation or action. Never borrow server B Reality for server A. Use subjectRefs=[] when identity cannot change the current decision; do not create work merely to identify it.',
+    'Use subjectRefs only when concrete Reality identity can change interpretation or action. Never borrow server B Reality for server A. A Claim bound to multiple concrete subjects is reusable only in Work whose subjectRefs contain every subject that Claim depends on. Use subjectRefs=[] when identity cannot change the current decision; do not create work merely to identify it.',
     'When fresh DIRECT Evidence invalidates a current Claim about the same subject and fact slot, revise that existing Claim id with the new Evidence so current Certified State contains one active value. Do not add a second contradictory active Claim merely to preserve history; Certified State turn history already preserves the prior value.',
   ].join(' ');
 }
@@ -84,6 +88,7 @@ export function certifiedCognitionReuseInstructions(){
   return [
     'knownClaims contains current CONFIRMED Task cognition already admitted by Root/Validator and compatible with explicit workUnit.subjectRefs when populated.',
     'When workUnit.subjectRefs is empty, only unbound/general cognition is injected; do not treat subject-bound facts from arbitrary systems as ambient context.',
+    'A multi-subject known Claim is projected only when workUnit.subjectRefs contains all of that Claim\'s subjects; one matching subject is not enough to import relational cognition.',
     'Reuse knownClaims as the execution starting point; do not spend this Work merely rediscovering the same fact.',
     'Re-observation is valid only when this Work explicitly requires revalidation or fresh Reality gives a concrete reason the known Claim may no longer hold.',
     'If fresh direct Reality conflicts with a known Claim, return source-near Evidence plus a precise blocker/observation so Root can reopen or revise it; do not silently overwrite parent cognition.',
