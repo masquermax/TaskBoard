@@ -13,7 +13,16 @@ function byId(values=[]){return new Map(list(values).map(item=>[text(item?.id),i
 function mergeUniqueById(...groups){const out=[],seen=new Set();for(const item of groups.flatMap(group=>list(group))){const id=text(item?.id);if(!id||seen.has(id))continue;seen.add(id);out.push(item);}return out;}
 function refsExist(ids,map){const refs=uniqueStrings(ids);return{refs,missing:refs.filter(id=>!map.has(id))};}
 function feedback(target,reason,action='REJECT_LEDGER_ENTRY'){return{ruleId:'C-003',target,reason,action};}
-function rejectionBoundary(task,currentState,availableEvidence=[]){return JSON.stringify({taskId:text(task?.id)||'task',stateVersion:normalizeCertifiedState(currentState).version,evidenceIds:uniqueStrings(list(availableEvidence).map(item=>item?.id)).sort()});}
+function rejectionBoundary(task,currentState,availableEvidence=[]){
+  const contract=task?.taskContract??task?.task_contract??null;
+  return JSON.stringify({
+    taskId:text(task?.id)||'task',
+    taskContractId:text(contract?.id)||null,
+    taskContractRevision:Number.isFinite(Number(contract?.revision))?Number(contract.revision):null,
+    stateVersion:normalizeCertifiedState(currentState).version,
+    evidenceIds:uniqueStrings(list(availableEvidence).map(item=>item?.id)).sort(),
+  });
+}
 function pushUniqueViolation(violations,item){if(!violations.some(value=>value.ruleId===item.ruleId&&value.target===item.target&&value.reason===item.reason&&value.action===item.action))violations.push(item);}
 
 function ledgerViolations(decision,evidenceById,currentState){
@@ -112,7 +121,7 @@ export class ValidatorRuntime{
       const boundary=rejectionBoundary(task,currentState,availableEvidence),previous=this.lastRejectionByTask.get(taskId);
       if(previous?.boundary===boundary){
         this.lastRejectionByTask.delete(taskId);
-        const error=new Error(`VALIDATOR_REJECTION_NON_CONVERGENCE: repair turn was rejected again without new Certified State or Evidence (${violations.map(item=>item.action||item.ruleId).join(', ')})`);
+        const error=new Error(`VALIDATOR_REJECTION_NON_CONVERGENCE: repair turn was rejected again without new Task Contract, Certified State, or Evidence (${violations.map(item=>item.action||item.ruleId).join(', ')})`);
         error.nonRetryable=true;error.validatorFeedback=violations;throw error;
       }
       this.lastRejectionByTask.set(taskId,{boundary});
