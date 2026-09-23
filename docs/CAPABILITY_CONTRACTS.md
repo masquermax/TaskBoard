@@ -2,7 +2,7 @@
 
 Status: ACTIVE — NON-AUTHORITATIVE ROLE GUIDE
 
-这里只描述当前角色边界。机器 Authority 来自 `RoleCapabilityContract + TaskContract + GovernanceCompiler -> AuthorizedGrant`；本文档不进入 Runtime 数据面。
+这里只描述当前角色边界与已实现能力。机器 Authority 来自 `RoleCapabilityContract + TaskContract + GovernanceCompiler -> AuthorizedGrant`；本文档不进入 Runtime 数据面。
 
 ## SCHEDULER
 
@@ -63,7 +63,7 @@ Owns:
 - 当前执行边界的结构化表达。
 
 Capabilities:
-- 明确 `goal / expectedOutput / stopCondition / inputRefs / dependsOn / projectAccess / networkAccess`；未声明能力视为不存在。
+- 明确 `goal / expectedOutput / stopCondition / obligationRefs / inputRefs / dependsOn / projectAccess / networkAccess`；未声明能力视为不存在。
 
 Produces:
 - One bounded executable order。
@@ -84,6 +84,7 @@ Owns:
 
 Capabilities:
 - 只使用 Work Unit 选中的输入和 AuthorizedGrant。
+- 可复用当前 Task 已经通过 Root + Validator 认证的 `knownClaims` 作为执行起点；不能把它们当作新增权限，也不能静默改写。
 - 只返回 `result + source-near Evidence + optional blocker`。
 - 不生成 Task Claim、Gap、Recommendation、confidence、uncertainty、Discovery、下一任务、完成判断或 Human Gateway。
 
@@ -158,6 +159,54 @@ Produces:
 
 Handoff:
 - 回答的含义与是否足够 → Root。
+
+## CERTIFIED_COGNITION_REUSE
+
+Identity:
+- A Runtime reuse capability, not a new memory store and not a semantic owner.
+
+Purpose:
+- 避免“已经付过一次验证成本的可靠结论，在下一执行步骤又从 UNKNOWN 开始”。
+
+Trigger:
+- 一个 Task 已存在 Certified State，且下一 Work Unit 即将执行。
+
+Inputs:
+- 当前 Task 的 Certified State。
+- 当前 Work Unit 的 goal / stopCondition / governed boundary。
+
+Runtime:
+1. 只把 `CONFIRMED` Claims 投影成紧凑 `knownClaims`；不重放原始 WorkReceipt、日志或推演过程。
+2. Subagent 把 `knownClaims` 当执行起点；不得仅为了重新发现同一事实而重复探测。
+3. 只有当前 Work 明确要求重新验证，或新 Reality 给出具体冲突/失效信号时，才重新观察该事实。
+4. 新 DIRECT Reality 与 `knownClaims` 冲突时，下层返回 source-near Evidence + blocker/observation；Root 决定 reopen / revise。同一 subject、同一事实槽位被新 DIRECT Evidence 推翻时，Root 修订原 Claim id 并引用新 Evidence，使 current Certified State 只保留一个 active 值；旧值由 turn history 保留，而不是另加一个矛盾 active Claim。
+5. `knownClaims` 永远不能扩大 inputRefs、project/network access、Work goal 或 Task authority。
+
+Failure modes:
+- 已有足够 CONFIRMED 结论且无新理由，仍重复探测同一事实。
+- 把 `SUPPORTED` 推断或历史 final_result 当成当前已确认事实下传。
+- 新 Reality 冲突时在 Subagent 层静默覆盖旧结论。
+- 新 DIRECT Reality 已推翻旧事实，却另建新 Claim，让新旧互相矛盾的值同时留在 current Certified State。
+- 为了“记住”而重放完整历史，导致上下文重新膨胀。
+- 借已知结论扩大执行权限或越过 Parent boundary。
+
+Evidence / Evals:
+- A1：先认证事实 X，再执行依赖 X 的 Work；下层必须收到 X，且不需要重新获取 X 才能继续。
+- A2：同一事实只有 `SUPPORTED`；下层不得把它当 `knownClaims`。
+- A3：新 DIRECT Reality 与 X 冲突；下层必须把冲突证据向上返回，不能本地改写 Certified State；Root 重开后必须让新值替换旧 active 值，不能只追加一个互相矛盾的新 Claim。
+- A4：已知 X 不得改变 AuthorizedGrant。
+- A5：真实服务器/项目任务中，第二次同类步骤的人肉信息中继和重复探测应下降。
+
+Boundary:
+- 这是同一 Task 内的 Certified cognition reuse；不等于跨 Task 的长期能力学习。
+- 是否把一次经验升级成跨 Task Skill/Capability，仍需独立 Eval 与 Runtime adoption。
+
+Reopen Trigger:
+- 真实任务仍反复查询已有 CONFIRMED 事实；
+- `knownClaims` 造成陈旧事实被盲信；
+- 冲突 Reality 没有可靠上返；
+- 新旧互斥事实同时留在 current Certified State；
+- 为减少重复探测而引入了新的权限或正确性问题。
 
 ## SKILL
 
