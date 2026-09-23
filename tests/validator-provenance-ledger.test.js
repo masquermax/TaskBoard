@@ -41,12 +41,12 @@ test('Validator rejects missing invoices and owns no semantic repair path',()=>{
 });
 
 test('Gap resolution requires an admitted DIRECT invoice even when an Executor bypasses the JSON schema',()=>{
-  const runtime=new ValidatorRuntime({sourceTraceVerifier:{enforce:({evidence})=>({evidence,actions:[],verifications:[]})}}),currentState={version:1,current:{evidence:[],claims:[],gaps:[{id:'G-1',question:'还缺什么？',reason:'缺事实',kind:'missing_fact',blocking:true,evidenceIds:[]}],recommendations:[],steps:[]}};
-  const missing=runtime.reviewRoot({task:{id:'T'},currentState,decision:decision({gapResolutions:[{gapId:'G-1',reason:'直接关闭',evidenceIds:[]}]})});
+  const makeRuntime=()=>new ValidatorRuntime({sourceTraceVerifier:{enforce:({evidence})=>({evidence,actions:[],verifications:[]})}}),currentState={version:1,current:{evidence:[],claims:[],gaps:[{id:'G-1',question:'还缺什么？',reason:'缺事实',kind:'missing_fact',blocking:true,evidenceIds:[]}],recommendations:[],steps:[]}};
+  const missing=makeRuntime().reviewRoot({task:{id:'T'},currentState,decision:decision({gapResolutions:[{gapId:'G-1',reason:'直接关闭',evidenceIds:[]}]})});
   assert.equal(missing.outcome,'reject');assert.ok(missing.feedback.some(item=>item.target==='gap:G-1'&&item.action==='REJECT_TRUST_ESCALATION'));
-  const indirect={id:'E-I',strength:'indirect',kind:'fact',sourceType:'reference',coverage:'source',statement:'参考说已解决',basis:'ref',locator:'ref',observation:'参考说已解决'},weak=runtime.reviewRoot({task:{id:'T'},currentState,decision:decision({evidence:[indirect],gapResolutions:[{gapId:'G-1',reason:'参考关闭',evidenceIds:['E-I']}]})});
+  const indirect={id:'E-I',strength:'indirect',kind:'fact',sourceType:'reference',coverage:'source',statement:'参考说已解决',basis:'ref',locator:'ref',observation:'参考说已解决'},weak=makeRuntime().reviewRoot({task:{id:'T'},currentState,decision:decision({evidence:[indirect],gapResolutions:[{gapId:'G-1',reason:'参考关闭',evidenceIds:['E-I']}]})});
   assert.equal(weak.outcome,'reject');
-  const direct={...indirect,id:'E-D',strength:'direct',sourceType:'human'},strong=runtime.reviewRoot({task:{id:'T'},currentState,humanGatewayHistory:[],decision:decision({evidence:[direct],gapResolutions:[{gapId:'G-1',reason:'直接证据关闭',evidenceIds:['E-D']}]})});
+  const direct={...indirect,id:'E-D',strength:'direct',sourceType:'human'},strong=makeRuntime().reviewRoot({task:{id:'T'},currentState,humanGatewayHistory:[],decision:decision({evidence:[direct],gapResolutions:[{gapId:'G-1',reason:'直接证据关闭',evidenceIds:['E-D']}]})});
   assert.equal(strong.outcome,'pass');
 });
 
