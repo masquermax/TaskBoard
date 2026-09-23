@@ -150,3 +150,20 @@ test('practice 11: duplicate subject refs do not duplicate projected cognition',
   const known=projectCertifiedKnownClaims(t,work({subjectRefs:['server:A','server:A']}));
   assert.deepEqual(known[0].subjectRefs,['server:A']);
 });
+
+test('practice 12: a relational A+B Claim is not projected into A-only Work by subject overlap',()=>{
+  const t=task();
+  t.analysisState.current.claims=[
+    claim('C-A','A runs the application',{subjectRefs:['server:A']}),
+    claim('C-A-B','A can reach B over 443',{subjectRefs:['server:A','server:B']}),
+    claim('C-G','network observation is read-only'),
+  ];
+
+  const aOnly=projectCertifiedKnownClaims(t,work({subjectRefs:['server:A']}));
+  assert.deepEqual(aOnly.map(item=>item.id),['C-A','C-G']);
+  assert.equal(aOnly.some(item=>item.id==='C-A-B'),false,'A-only Work must not receive cognition whose truth depends on A and B');
+
+  const pair=projectCertifiedKnownClaims(t,work({subjectRefs:['server:A','server:B']}));
+  assert.deepEqual(pair.map(item=>item.id),['C-A','C-A-B','C-G']);
+  assert.match(certifiedCognitionReuseInstructions(),/contains all of that Claim's subjects/i);
+});
