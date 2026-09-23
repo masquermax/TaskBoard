@@ -136,6 +136,19 @@ test('changed Certified State boundary permits a fresh Validator repair attempt'
   assert.equal(second.outcome,'reject');
 });
 
+test('changed Task Contract revision permits a fresh Validator repair attempt at the same State/Evidence boundary',()=>{
+  const validator=new ValidatorRuntime();
+  const state=analysisState();
+  const firstTask={id:'T-CONTRACT-BOUNDARY',instruction:'bounded',projectScopes:[],taskContract:{id:'TC-BOUNDARY',revision:1,authority:{},obligations:[],constraints:[]}};
+  const secondTask={...firstTask,taskContract:{...firstTask.taskContract,revision:2}};
+
+  const first=validator.reviewRoot({task:firstTask,currentState:state,availableEvidence:[],decision:unsupportedClaimDecision('C-R1','unsupported under revision 1')});
+  assert.equal(first.outcome,'reject');
+
+  const second=validator.reviewRoot({task:secondTask,currentState:state,availableEvidence:[],decision:unsupportedClaimDecision('C-R2','unsupported under revision 2')});
+  assert.equal(second.outcome,'reject','a new Task Contract revision is a new semantic repair boundary, not the second rejection of revision 1');
+});
+
 test('a successful Validator pass clears prior rejection memory',()=>{
   const validator=new ValidatorRuntime();
   const task={id:'T-CLEAR',instruction:'bounded'};
