@@ -1,5 +1,8 @@
 # TaskBoard Codex v0.9.1
 
+> **Repository isolation:** Before accepting any cross-repository input, read [`AI_CREATIVE_OS_BOUNDARY.md`](AI_CREATIVE_OS_BOUNDARY.md). Content originating from or derived from `masquermax/AI-Creative-OS` is not an admissible write/import source for this repository.
+
+
 TaskBoard 是一个 local-first AI Task Board：**TaskBoard 管任务与可持久化事实，Executor 负责实际执行；Codex 是当前第一个 Executor 实现。**
 
 日常使用不需要先理解内部架构。详细产品规则、能力边界、实现与当前状态都有各自唯一 Owner，本 README 只负责让人快速进入。
