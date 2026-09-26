@@ -1,13 +1,21 @@
-# AI-Creative-OS Incoming Boundary
+# AI-Creative-OS One-Way Isolation Boundary
 
-Status: HARD BOUNDARY
+Status: HARD INCOMING/READ BOUNDARY
 
-This repository MUST NOT accept writes, promotions, imports, synchronization, copied knowledge, derived knowledge, summaries, methods, rules, learnings, embeddings, caches, evidence, or other artifacts originating from or derived from `masquermax/AI-Creative-OS`.
+`masquermax/AI-Creative-OS` is an isolated high-freedom creative sandbox.
 
-`AI-Creative-OS -> this repository`: **WRITE/IMPORT FORBIDDEN**.
+This repository and every agent, automation, indexer, retriever, RAG pipeline, embedding/vector store, cache, research workflow, learning workflow, evaluator, and tool acting for this repository MUST NOT read, search, retrieve, index, cite, import, summarize, synchronize, learn from, use as examples/few-shot material, or otherwise consume content from `masquermax/AI-Creative-OS`.
 
-This repository may independently research the same external source or question, but it must reacquire the information from its own permitted independent sources and validate it under this repository's own governance. AI-Creative-OS content or derivatives are not admissible provenance.
+It also MUST NOT accept any write, promotion, copied knowledge, derivative knowledge, method, rule, learning, evidence, summary, artifact, cache, embedding, or transformed output originating from or derived from AI-Creative-OS.
 
-The purpose is contamination prevention: AI-Creative-OS is a high-freedom creative sandbox and its fictional, hypothetical, transformed, or creative-derived material must not become authority outside that sandbox.
+Therefore:
 
-If another rule appears to permit Creative-OS promotion/synchronization into this repository, this boundary blocks that path unless the repository owner explicitly changes the boundary as a deliberate governance action outside ordinary AI-Creative-OS work.
+- `this repository -> READ AI-Creative-OS`: **FORBIDDEN**
+- `AI-Creative-OS -> WRITE this repository`: **FORBIDDEN**
+- independent work in this repository may research the same external question only by reacquiring it from permitted non-Creative independent sources.
+
+AI-Creative-OS is not admissible provenance, evidence, a case library, a method library, a factual source, a training/example source, or a retrieval corpus for this repository.
+
+This boundary prevents fictional, hypothetical, transformed, or creative-derived material from escaping the Creative sandbox through either push or pull.
+
+Only the repository owner/user may deliberately change this boundary as a governance action outside ordinary AI-Creative-OS work. Agents and automations may not create exceptions.
