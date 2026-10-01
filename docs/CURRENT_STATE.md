@@ -16,7 +16,12 @@ Release: v0.9.1
 - Current Progress and durable History are separate: activity is not automatically learned knowledge.
 - Model routing uses provider-described capability when available; unknown capability falls back to the configured/default Executor model.
 
-## External Work Runtime boundary\n\n- Cross-surface Work Runtime integration is a documented design boundary at `docs/WORK_RUNTIME_INTEGRATION.md`; it is **not** an active TaskBoard Runtime mode in the current release.\n- Current TaskBoard Scheduler remains the sole lifecycle owner for standalone TaskBoard Tasks. Do not infer distributed coordination support from the external Work Runtime pilot.\n\n## Known external/runtime limits
+## External Work Runtime boundary
+
+- Cross-surface Work Runtime integration is a documented design boundary at `docs/WORK_RUNTIME_INTEGRATION.md`; it is **not** an active TaskBoard Runtime mode in the current release.
+- Current TaskBoard Scheduler remains the sole lifecycle owner for standalone TaskBoard Tasks. Do not infer distributed coordination support from the external Work Runtime pilot.
+
+## Known external/runtime limits
 
 - TaskBoard can guarantee which Task inputs and write/network capabilities it grants. It must not claim stronger filesystem-read isolation than the active Executor/runtime can actually enforce on the host OS.
 - Project Knowledge, replayable project-search records and generic side-effect proof are not implemented capabilities; see `CAPABILITY_MAP.md`.
