@@ -57,7 +57,6 @@ TaskBoard 是一个 local-first AI Task Board：**TaskBoard 管任务与可持�
 - **Codex 集成细节** → `docs/CODEX_INTEGRATION.md`
 - **验证与 Release proof** → `docs/VERIFICATION.md`
 - **维护时的架构诊断方法** → `docs/ARCHITECTURE_REVIEW.md`
-- **跨定时任务 / Web / Codex 的 Work Runtime 接入边界（当前未启用）** → `docs/WORK_RUNTIME_INTEGRATION.md`
 
 读取原则：先从当前问题找到最小 Owner，只读本轮需要的文档；不要把所有 Authority 一次性塞进上下文。
 
