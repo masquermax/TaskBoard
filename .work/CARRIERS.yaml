@@ -1,0 +1,9 @@
+carrier_classes:
+  TASKBOARD_PATROL:
+    task_ids: [TASKBOARD-PROMOTION-001]
+    rule: "Only active/reopened promotion candidates with current decision-changing evidence are executable. Parked/adopted/superseded candidates are not scheduler work."
+
+migration:
+  central_runtime: ACTIVE_ROUTE
+  legacy_scheduler_coordination: RETIRED
+  rule: "TaskBoard is a Runtime client, never the shared coordination owner."
