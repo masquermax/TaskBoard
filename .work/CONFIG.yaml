@@ -1,0 +1,33 @@
+protocol:
+  repository: masquermax/Work-Runtime
+  ref: main
+  version: wr-v1
+  constitution: CONSTITUTION.md
+  contract: CONTRACT.md
+  schema: SCHEMA.yaml
+  mutation_surface: MUTATION_SURFACE.md
+
+repository:
+  id: masquermax/TaskBoard
+  authority_root: docs/CURRENT_STATE.md
+  default_entry: docs/CURRENT_STATE.md
+  direct_feature_branch_coordination: forbidden
+
+coordination:
+  owner_repository: masquermax/Work-Runtime
+  state_ref: state/masquermax__TaskBoard/BOARD.json
+  request_prefix: requests/masquermax__TaskBoard/
+  store: github_cas
+  admission_source: central_board_only
+
+execution:
+  planner: ROOT_OR_EQUIVALENT
+  default_executor_class: TASKBOARD_PATROL
+  worker_surfaces: [SCHEDULED_CARRIER, WEB_CHAT, CODEX, CHATGPT_WORK, MANUAL]
+  default_external_effect_policy: FAIL_CLOSED
+
+rules:
+  - "This repository remains the substantive Owner of its domain/project Reality."
+  - "Dynamic task coordination, claim, lease and checkpoint truth lives only in Work-Runtime."
+  - "Scheduler prompts are wake-up/entry carriers, never progress truth."
+  - "No local parallel coordination Board may be created."
