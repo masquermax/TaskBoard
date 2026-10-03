@@ -7,3 +7,9 @@ migration:
   central_runtime: ACTIVE_ROUTE
   legacy_scheduler_coordination: RETIRED
   rule: "TaskBoard is a Runtime client, never the shared coordination owner."
+
+runtime_guard:
+  - "Scheduled carriers are read-only against target-repository substantive/durable state until an APPLIED current Runtime Task/WU claim matches this worker/run."
+  - "A no-action candidate is skipped locally; the generic Worker continues scanning other currently eligible candidates and exits only after the current candidate set is exhausted/claimed elsewhere or a real execution boundary is reached."
+  - "Before a normal Worker return, any clean held claim must be checkpointed when needed and released. IN_FLIGHT/UNKNOWN Owner/external reality must be reconciled/fail-closed, never silently abandoned."
+  - "Canonical/durable Owner mutation must use the current Runtime PREPARE -> IN_FLIGHT -> Owner mutation -> ACK/reconcile path."
