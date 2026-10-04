@@ -8,10 +8,6 @@ migration:
   legacy_scheduler_coordination: RETIRED
   rule: "TaskBoard is a Runtime client, never the shared coordination owner."
 
-runtime_guard:
-  - "Execution authority comes only from the current per-Task runtime file: matching claim_id, worker/run, task_revision and an unexpired WORKING/COMMITTING lease."
-  - "Claim/takeover/renew/release use the runtime file blob SHA as CAS. A stale SHA/409 loses the race and must reread; never hand-edit legacy BOARD.json or create Runtime requests."
-  - "Expired WORKING may be taken over by CAS. COMMITTING may never be taken over directly; reconcile the recorded Owner intent first."
-  - "Before any durable Owner mutation, reread Task spec + runtime and transition the matching claim to COMMITTING. Git Owner writes use a prebuilt target commit and non-force branch ref update; never force-push."
-  - "If useful research outlives authority, preserve it under the configured candidate_prefix with task_revision, owner_base, proposal and evidence; do not write Owner directly."
-  - "All GitHub mutations use write-readback verification: retry the same logical write only when verified NOT_APPLIED, at most 3 total attempts; AMBIGUOUS/UNKNOWN is fail-closed and must be reconciled."
+coordination_protocol:
+  owner: "masquermax/Work-Runtime@main:CLIENT_GUIDE.md"
+  rule: "This file declares only carrier/executor eligibility and domain-specific triggers. It does not define claim, lease, commit, recovery, retry, or Owner-write protocol; current Work-Runtime wins on any coordination conflict."
