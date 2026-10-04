@@ -9,10 +9,9 @@ migration:
   rule: "TaskBoard is a Runtime client, never the shared coordination owner."
 
 runtime_guard:
-  - "Scheduled carriers are read-only against target-repository substantive/durable state until an APPLIED current Runtime Task/WU claim matches this worker/run."
-  - "A no-action candidate is skipped locally; the generic Worker continues scanning other currently eligible candidates and exits only after the current candidate set is exhausted/claimed elsewhere or a real execution boundary is reached."
-  - "Before a normal Worker return, any clean held claim must be checkpointed when needed and released. IN_FLIGHT/UNKNOWN Owner/external reality must be reconciled/fail-closed, never silently abandoned."
-  - "Canonical/durable Owner mutation must use the current Runtime PREPARE -> IN_FLIGHT -> Owner mutation -> ACK/reconcile path."
-  - "Scheduled CLAIM/CLAIM_TASK uses request_expires_at at approximately args.now+120s; do not invent shorter 40/45/90-second windows. Initial lease remains <= about 120s and is rebased by Runtime at handling time."
-  - "Long research may outlive a claim. If useful research returns without a current matching claim, preserve it with SUBMIT_TASK_CANDIDATE; do not write substantive/durable Owner state directly."
-  - "Immediately before any target-repository create/update/delete, reread the central Board. Canonical Owner mutation requires this worker/run to hold the current claim and the matching pending commit to be IN_FLIGHT; otherwise the target repository is read-only."
+  - "Execution authority comes only from the current per-Task runtime file: matching claim_id, worker/run, task_revision and an unexpired WORKING/COMMITTING lease."
+  - "Claim/takeover/renew/release use the runtime file blob SHA as CAS. A stale SHA/409 loses the race and must reread; never hand-edit legacy BOARD.json or create Runtime requests."
+  - "Expired WORKING may be taken over by CAS. COMMITTING may never be taken over directly; reconcile the recorded Owner intent first."
+  - "Before any durable Owner mutation, reread Task spec + runtime and transition the matching claim to COMMITTING. Git Owner writes use a prebuilt target commit and non-force branch ref update; never force-push."
+  - "If useful research outlives authority, preserve it under the configured candidate_prefix with task_revision, owner_base, proposal and evidence; do not write Owner directly."
+  - "All GitHub mutations use write-readback verification: retry the same logical write only when verified NOT_APPLIED, at most 3 total attempts; AMBIGUOUS/UNKNOWN is fail-closed and must be reconciled."
