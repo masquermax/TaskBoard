@@ -1,6 +1,6 @@
 protocol:
   repository: masquermax/Work-Runtime
-  ref: main
+  ref_source: caller_control_ref
   version: wr-v2
   constitution: CONSTITUTION.md
   contract: CONTRACT.md
@@ -19,7 +19,6 @@ coordination:
   task_spec_prefix: state/masquermax__TaskBoard/tasks/
   runtime_prefix: state/masquermax__TaskBoard/runtime/
   candidate_prefix: state/masquermax__TaskBoard/candidates/
-  legacy_board_ref: state/masquermax__TaskBoard/BOARD.json
   store: github_cas
   admission_source: runtime_config
 
