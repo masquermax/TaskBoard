@@ -1,35 +1,8 @@
-protocol:
-  repository: masquermax/Work-Runtime
-  ref_source: caller_control_ref
-  version: wr-v2
-  constitution: CONSTITUTION.md
-  contract: CONTRACT.md
-  schema: SCHEMA.yaml
-  mutation_surface: MUTATION_SURFACE.md
-
 repository:
   id: masquermax/TaskBoard
   authority_root: docs/CURRENT_STATE.md
   default_entry: docs/CURRENT_STATE.md
-  direct_feature_branch_coordination: forbidden
 
-coordination:
-  owner_repository: masquermax/Work-Runtime
-  config_ref: state/masquermax__TaskBoard/CONFIG.json
-  task_spec_prefix: state/masquermax__TaskBoard/tasks/
-  runtime_prefix: state/masquermax__TaskBoard/runtime/
-  candidate_prefix: state/masquermax__TaskBoard/candidates/
-  store: github_cas
-  admission_source: runtime_config
-
-execution:
-  planner: ROOT_OR_EQUIVALENT
-  default_executor_class: TASKBOARD_PATROL
-  worker_surfaces: [SCHEDULED_CARRIER, WEB_CHAT, CODEX, CHATGPT_WORK, MANUAL]
-  default_external_effect_policy: FAIL_CLOSED
-
-rules:
-  - "This repository remains the substantive Owner of its domain/project Reality."
-  - "Dynamic task coordination, claim, lease and checkpoint truth lives only in Work-Runtime per-Task runtime files."
-  - "Scheduler prompts are wake-up/entry carriers, never progress truth."
-  - "No local parallel coordination Board may be created."
+work_runtime:
+  owner: masquermax/Work-Runtime
+  rule: "Selection, eligibility, executor class, claim, lease, checkpoint, commit, retry and recovery truth live only in Work-Runtime. This file routes a selected Work-Runtime Task to TaskBoard project Reality only."
