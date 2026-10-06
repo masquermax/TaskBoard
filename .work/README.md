@@ -1,13 +1,9 @@
-# Work Runtime routing
+# Work-Runtime integration
 
-This directory contains **static routing only**.
+This directory contains **routing into the TaskBoard project only**. It is not the shared scheduler/control Task Board.
 
-Dynamic task progress, claims, leases, checkpoints and commit coordination live in:
+- TaskBoard project Reality remains in its project Owners such as `docs/CURRENT_STATE.md`.
+- Shared Task selection, executor class, claim/lease/checkpoint/recovery and dynamic coordination live only in `masquermax/Work-Runtime`.
+- A Work-Runtime wake does not make every TaskBoard project candidate executable; current project Reality decides whether a real Delta exists.
 
-`masquermax/Work-Runtime@main:state/masquermax__TaskBoard/runtime/`
-
-Task specs and protocol are read from the caller's immutable `control_ref`. Legacy Board/requests are history.
-
-The repository remains authoritative for its own project/domain Reality. Work-Runtime does not replace Owner files, Issues, Runtime evidence, source code or business state.
-
-Scheduled bootstrap, selection and execution are defined only by Work-Runtime `CONTRACT.md` / `CLIENT_GUIDE.md` at the caller's immutable `control_ref`. Read domain Owner Reality after central selection/claim; local routing does not redefine that protocol. A wake-up alone does not create domain work.
+Do not recreate `.work/CARRIERS.yaml`, scheduler prompt protocols, BOARD/claim/cursor/lease/run-ledger files, or another shared coordination layer here.
