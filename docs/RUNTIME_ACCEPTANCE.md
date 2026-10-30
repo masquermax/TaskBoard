@@ -3,6 +3,47 @@
 Status: PENDING_REAL_RUNTIME
 Release lane: `v0.9.2`
 
+## Cloud preflight, 2026-10-30 UTC
+
+Result: **NOT_EXECUTED for representative A-D model scenarios**. The cloud
+runtime reached a concrete environment boundary before a model turn; PR #42
+must remain open and this record does not promote the release.
+
+- Host tested: `ce0b28d5ad5e35c8681db22f39e59c39dec3a05f`
+  (`fix/v0.9.2-root-repair-boundary`).
+- Executor tested: Ecosystem Codex API-v2 extension at
+  `33ef5ae748ad008fb75bdc2033b9ba237fb1f211`.
+- Environment: cloud Linux, Node `v24.19.0`, Codex
+  `0.159.0-alpha.3`; existing account login was present. No credentials were
+  copied, changed or recorded.
+- `npm run verify` on the named Host passed **339 tests**, including the
+  changed-rejection, changed-Task-Contract and successful-repair convergence
+  regressions. This is deterministic proof only.
+- Actual extension probe: instantiate `createCodexExtension({rootDir})` with
+  a fresh `/tmp` root, call `executor.health()`, then close the executor.
+  The default account transport attempted to launch `codex app-server`, which
+  exited with code 1: SQLite state initialization under `/home/agent/.codex`
+  failed on the read-only filesystem. Health reported `connected=false`,
+  `ready=false`, `modelCount=0`.
+- A scoped temporary launch wrapper setting only
+  `-c sqlite_home="/tmp/taskboard-codex-state"` removed that first database
+  obstacle, but the process still exited 1 with `Read-only file system`.
+  A path-only syscall trace located the remaining failure at
+  `openat(..., "uid_map", O_RDWR|O_CLOEXEC) = -1 EROFS` while opening
+  `/proc/self/uid_map` during process isolation setup. No permission/sandbox
+  bypass, account change or security-setting change was attempted.
+- The existing Ecosystem #23 harness was inspected: it requires an explicit
+  custom Provider base URL, model and API key; those were not supplied for
+  this run. Account login alone does not satisfy that harness's custom-mode
+  preconditions. No mock replacement was labeled real acceptance.
+
+Smallest remaining action: use a cloud execution environment in which the
+existing authenticated Codex app-server can initialize writable local state
+and its normal process isolation, or provide the approved custom Provider
+configuration to the existing harness. First verify actual extension health,
+then run the representative scenarios below against the exact intended Host
+and Executor composition. Keep failures and unexecuted scenarios explicit.
+
 This is the release gate for representative real Runtime behavior. Static/unit/CI success is necessary but is not a substitute for this evidence.
 
 ## Preflight already established
